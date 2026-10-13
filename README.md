@@ -27,7 +27,7 @@ kernel only provides the transport (PCIe/USB). Details in [docs/PLAN.md](docs/PL
 | Path | Contents |
 |---|---|
 | `sources.lock` | pinned upstream versions (kernel, U-Boot, rkbin, mpp, NPU) |
-| `scripts/` | `fetch-sources.sh`, `setup-binfmt.sh`, image build scripts |
+| `scripts/` | source fetch, image build, SD/eMMC flashing, QEMU smoke test |
 | `docker/` | build environment (Debian 13, aarch64 cross toolchain) |
 | `patches/linux/`, `patches/u-boot/` | our patches against upstream |
 | `dts/` | Tinker Edge R device trees: base, `-mpp`, `-npu`, `-full` |
@@ -54,10 +54,19 @@ not redistributed).
 ./run.sh scripts/qemu-smoke.sh                   # optional: userspace smoke test in QEMU
 ```
 
-Write the image to an SD card (check the device name first!):
+Write the image to an SD card (refuses system and non-removable disks, asks
+for confirmation, verifies after writing):
 
 ```sh
-sudo dd if=out/tinker-edge-r-debian13.img of=/dev/sdX bs=4M conv=fsync status=progress
+scripts/flash-sd.sh /dev/sdX            # --dry-run to preview
+```
+
+Write the eMMC over USB from Linux (maskrom mode; **untested**, needs an eMMC
+backup file, see [docs/RECOVERY.md](docs/RECOVERY.md)):
+
+```sh
+./run.sh scripts/build-flash-tools.sh   # once: rkdeveloptool + RK3399Pro loader
+scripts/flash-emmc.sh --backup emmc-backup.img.gz
 ```
 
 Default login on the first boot: `tinker` / `tinker` (the password is expired
