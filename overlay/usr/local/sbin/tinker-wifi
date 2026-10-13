@@ -1,0 +1,21 @@
+#!/bin/bash
+# Connect to a Wi-Fi network and make it persistent.
+#   sudo tinker-wifi SSID [PASSPHRASE]     (COUNTRY=DE sudo ... to set the regulatory domain)
+set -euo pipefail
+ssid=${1:?usage: tinker-wifi SSID [PASSPHRASE]}
+pass=${2:-}
+if [ -z "$pass" ]; then read -r -s -p "Passphrase for $ssid: " pass; echo; fi
+iface=$(ls /sys/class/net | grep -E '^wl' | head -1 || true)
+[ -n "$iface" ] || { echo "no wireless interface: check 'dmesg | grep -i -E \"rtw|firmware\"'" >&2; exit 1; }
+
+conf=/etc/wpa_supplicant/wpa_supplicant-$iface.conf
+umask 077
+{
+    echo "ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev"
+    echo "update_config=1"
+    echo "country=${COUNTRY:-US}"
+    wpa_passphrase "$ssid" "$pass" | grep -v '^\s*#'
+} > "$conf"
+systemctl enable --now "wpa_supplicant@$iface.service"
+systemctl restart systemd-networkd
+echo "Connecting $iface to '$ssid'... check: ip -br a show $iface"

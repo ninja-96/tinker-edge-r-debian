@@ -21,10 +21,19 @@ for f in dts/*.dts; do
         echo "dtb-\$(CONFIG_ARCH_ROCKCHIP) += $b.dtb" >> "$DT/Makefile"
 done
 
+# Tune scheduling for the RK3399 big.LITTLE pair (2x A72 + 4x A53). -mtune only
+# changes instruction scheduling, not the instruction set. The kernel is built
+# with -O2 (mainline offers no -O3).
 export ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
+export KCFLAGS="${KCFLAGS:--mtune=cortex-a72.cortex-a53}"
 MAKE="make -C $K O=$B -j$(nproc)"
+
+# Release suffix comes from sources.lock (shown by `uname -r`)
+printf 'CONFIG_LOCALVERSION="%s"\n' "$KERNEL_LOCALVERSION" > "$B/tinker-release.cfg"
+
 $MAKE defconfig
-"$K/scripts/kconfig/merge_config.sh" -m -O "$B" "$B/.config" config/linux-tinker.fragment >/dev/null
+"$K/scripts/kconfig/merge_config.sh" -m -O "$B" "$B/.config" \
+    config/linux-tinker.fragment "$B/tinker-release.cfg" >/dev/null
 $MAKE olddefconfig
 $MAKE Image dtbs modules
 

@@ -8,7 +8,7 @@ cd "$(dirname "$0")/.."
 . ./sources.lock
 O=out
 ROOTFS_MIB=${ROOTFS_MIB:-1536}
-KVER=${LINUX_VERSION}-tinker
+KVER=${LINUX_VERSION}${KERNEL_LOCALVERSION}
 
 DTB_VARIANT=${DTB_VARIANT:-base}   # base | mpp | npu | full
 case "$DTB_VARIANT" in

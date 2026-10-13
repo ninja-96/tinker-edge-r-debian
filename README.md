@@ -69,8 +69,13 @@ backup file, see [docs/RECOVERY.md](docs/RECOVERY.md)):
 scripts/flash-emmc.sh --backup emmc-backup.img.gz
 ```
 
-Default login on the first boot: `tinker` / `tinker` (the password is expired
-and must be changed at first login). Serial console: UART2, 115200 8N1.
+Default login: `debian` / `debian` (sudo allowed). **Change the password** after the
+first login: SSH is enabled and DHCP is on, so the board is reachable on your
+network immediately. Serial console: UART2, 115200 8N1.
+
+Network out of the box: Ethernet via DHCP (IPv4 link-local fallback), mDNS
+(`ssh debian@tinker-edge-r.local`), SSH host keys generated on first boot, NTP.
+Wi-Fi (Realtek RTL8822B/C, unverified): `sudo tinker-wifi <SSID> [passphrase]`.
 
 ## Device tree variants
 

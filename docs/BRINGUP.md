@@ -25,7 +25,7 @@ Write `out/tinker-edge-r-debian13.img` to an SD card, insert, power on.
 | nothing at all | wrong UART or baud; try UART0 (stock kernel FIQ debugger) |
 | U-Boot prints, then "Kernel load addr" and a hang | the stock U-Boot did not take the mainline `Image`; try the mainline U-Boot fallback (`build-uboot.sh`, `build-image-mainline-uboot.sh`) |
 | kernel messages, then "VFS: Cannot open root device" | MMC numbering or a missing built-in driver: check the `mmcblk` names in the log; the stock U-Boot appends `root=/dev/mmcblk0p8` |
-| login prompt | success: log in as `tinker` / `tinker`, set a new password |
+| login prompt | success: log in as `debian` / `debian`, set a new password with `passwd` |
 
 Then check: `ip a`, `lsblk`, `lsusb`, `lspci`, `dmesg --level=err,warn`,
 HDMI picture, `cat /sys/class/thermal/thermal_zone*/temp`.

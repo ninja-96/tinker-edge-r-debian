@@ -1,0 +1,7 @@
+[Match]
+Name=wl*
+
+[Network]
+DHCP=yes
+MulticastDNS=yes
+IPv6AcceptRA=yes

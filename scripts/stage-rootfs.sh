@@ -8,11 +8,14 @@ cd "$(dirname "$0")/.."
 . ./sources.lock
 W=${1:?destination dir}
 O=out
-KVER=${LINUX_VERSION}-tinker
+KVER=${LINUX_VERSION}${KERNEL_LOCALVERSION}
 NPU_SRC=downloads/RK3399Pro_npu
 
 rm -rf "$W"; mkdir -p "$W"
 tar -xpf $O/rootfs.tar -C "$W" --numeric-owner
+
+# no SSH host keys in the image: ssh-hostkeys.service creates them on first boot
+rm -f "$W"/etc/ssh/ssh_host_*
 
 # kernel modules
 mkdir -p "$W/lib/modules"
@@ -28,7 +31,7 @@ install -D -m 0755 scripts/mkbootimg.py "$W/usr/local/sbin/tinker-mkbootimg"
 # overlay (services, helper scripts, udev rules) and unit enablement
 cp -a overlay/. "$W/"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
-for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs; do
+for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs ssh-hostkeys; do
     ln -sf "/etc/systemd/system/$u.service" "$W/etc/systemd/system/multi-user.target.wants/$u.service"
 done
 

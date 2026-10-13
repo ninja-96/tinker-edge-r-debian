@@ -7,7 +7,8 @@ OUT=out
 mkdir -p "$OUT"
 
 HOSTNAME_=${HOSTNAME_:-tinker-edge-r}
-USER_=${USER_:-tinker}
+USER_=${USER_:-debian}
+PASS_=${PASS_:-debian}
 
 PACKAGES=(
     systemd-sysv systemd-resolved udev dbus kmod
@@ -16,6 +17,7 @@ PACKAGES=(
     firmware-brcm80211 firmware-linux-free
     usbutils pciutils less nano curl
     fdisk python3-minimal libusb-1.0-0
+    systemd-timesyncd firmware-realtek wireless-regdb rfkill
 )
 
 mmdebstrap --arch=arm64 --variant=minbase \
@@ -31,8 +33,8 @@ mmdebstrap --arch=arm64 --variant=minbase \
         ln -sf /run/systemd/resolve/stub-resolv.conf "$1/etc/resolv.conf"
         chroot "$1" systemctl enable systemd-networkd systemd-resolved ssh
         chroot "$1" useradd -m -s /bin/bash -G sudo,video,audio,dialout,plugdev '"$USER_"'
-        echo "'"$USER_"':tinker" | chroot "$1" chpasswd
-        chroot "$1" passwd -e '"$USER_"'
+        echo "'"$USER_"':'"$PASS_"'" | chroot "$1" chpasswd
+        rm -f "$1"/etc/ssh/ssh_host_*
         chroot "$1" apt-get clean
         rm -rf "$1/var/lib/apt/lists/"*' \
     trixie "$OUT/rootfs.tar" https://deb.debian.org/debian

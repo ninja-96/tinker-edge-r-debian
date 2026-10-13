@@ -1,5 +1,6 @@
 # Pinned upstream sources. Sourced by scripts/fetch-sources.sh.
 LINUX_VERSION=6.18.56
+KERNEL_LOCALVERSION=-tinker-edge-r   # kernel release becomes <LINUX_VERSION><this>
 LINUX_SHA256=4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89
 
 UBOOT_REPO=https://github.com/u-boot/u-boot.git

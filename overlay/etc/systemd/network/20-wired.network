@@ -1,0 +1,10 @@
+[Match]
+Name=e*
+
+[Network]
+DHCP=yes
+# IPv4 link-local fallback and mDNS: `ssh debian@tinker-edge-r.local` works on a
+# direct cable to a laptop without any DHCP server
+LinkLocalAddressing=yes
+MulticastDNS=yes
+IPv6AcceptRA=yes

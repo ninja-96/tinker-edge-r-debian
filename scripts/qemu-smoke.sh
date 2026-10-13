@@ -7,7 +7,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 . ./sources.lock
 O=out
-KVER=${LINUX_VERSION}-tinker
+KVER=${LINUX_VERSION}${KERNEL_LOCALVERSION}
 W=build/rootfs-qemu
 IMG=build/qemu-rootfs.ext4
 LOG=build/qemu-smoke.log
@@ -25,6 +25,16 @@ p "ssh=$(systemctl is-active ssh)"
 p "networkd=$(systemctl is-active systemd-networkd)"
 p "resolved=$(systemctl is-active systemd-resolved)"
 p "hostname=$(hostname)"
+p "user=$(id -un debian 2>&1)"
+p "hostkeys=$(ls /etc/ssh/ssh_host_*_key 2>/dev/null | wc -l)"
+p "ssh_listen=$(ss -ltn 2>/dev/null | grep -c ':22 ')"
+p "ssh_banner=$(ssh-keyscan -T 5 127.0.0.1 2>/dev/null | wc -l) host key(s)"
+p "ip4=$(ip -4 -br a | awk '$1 ~ /^e/ {print $1,$3}' | tr '\n' ' ')"
+p "dns=$(getent hosts deb.debian.org | head -1 | awk '{print $1}')"
+p "timesyncd=$(systemctl is-active systemd-timesyncd)"
+p "regdb=$(ls /lib/firmware/regulatory.db 2>&1 | head -1)"
+p "fw_rtw88=$(ls /lib/firmware/rtw88 2>/dev/null | head -3 | tr '\n' ' ')"
+p "fw_rtl_bt=$(ls /lib/firmware/rtl_bt 2>/dev/null | grep -c 8822)"
 p "python3=$(python3 --version 2>&1)"
 p "sfdisk=$(command -v sfdisk || echo missing)"
 p "modinfo_rk_vcodec=$(modinfo -F version rk_vcodec 2>&1 | head -1)"

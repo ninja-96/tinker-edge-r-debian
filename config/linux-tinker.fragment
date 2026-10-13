@@ -1,7 +1,6 @@
 # Applied on top of arm64 defconfig. Everything needed to reach the rootfs
 # without an initramfs is built in (=y).
 CONFIG_ARCH_ROCKCHIP=y
-CONFIG_LOCALVERSION="-tinker"
 CONFIG_DEVTMPFS=y
 CONFIG_DEVTMPFS_MOUNT=y
 CONFIG_EXT4_FS=y
@@ -88,3 +87,14 @@ CONFIG_ROCKCHIP_MPP_VEPU2=y
 CONFIG_GPIO_SYSFS=y
 CONFIG_DEBUG_FS=y
 CONFIG_TINKER_NPU_POWER=m
+# No debug info: smaller objects, faster builds (modules are stripped anyway)
+CONFIG_DEBUG_INFO_NONE=y
+# Wi-Fi: Realtek RTL8822B/C (the stock DT names rtl8822be; PCIe and SDIO variants
+# are built because the bus is not confirmed). Bluetooth uses USB (btusb + btrtl).
+CONFIG_WLAN=y
+CONFIG_WLAN_VENDOR_REALTEK=y
+CONFIG_RTW88=m
+CONFIG_RTW88_8822BE=m
+CONFIG_RTW88_8822BS=m
+CONFIG_RTW88_8822CE=m
+CONFIG_RTW88_8822CS=m
