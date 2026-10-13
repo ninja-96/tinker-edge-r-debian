@@ -1,0 +1,11 @@
+[Unit]
+Description=Expand the root filesystem on first boot
+ConditionPathExists=!/var/lib/tinker/rootfs-expanded
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tinker-expand-rootfs
+
+[Install]
+WantedBy=multi-user.target

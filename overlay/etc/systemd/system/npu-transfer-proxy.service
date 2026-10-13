@@ -1,0 +1,13 @@
+[Unit]
+Description=RKNN transfer proxy (host side of the RK3399Pro NPU link)
+Requires=npu-firmware.service
+After=npu-firmware.service
+ConditionPathExists=/usr/bin/npu_transfer_proxy
+
+[Service]
+ExecStart=/usr/bin/npu_transfer_proxy
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,8 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/* ASUS Tinker Edge R: MPP */
+#include "rk3399pro-tinker-edge-r.dts"
+#include "rk3399pro-tinker-edge-r-mpp.dtsi"
+
+/ {
+	model = "ASUS Tinker Edge R (MPP)";
+};

@@ -1,0 +1,22 @@
+# Third-party sources and the stock ASUS image used for research only
+reference/
+
+# Build products and caches
+out/
+build/
+cache/
+downloads/
+
+# Images and archives: publish as GitHub Release assets, not in git
+*.img
+*.img.gz
+*.img.xz
+*.zip
+*.tar
+*.tar.gz
+*.tar.xz
+*.ext4
+
+# Local files
+*.log
+.claude/

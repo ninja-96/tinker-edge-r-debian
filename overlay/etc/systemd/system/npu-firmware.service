@@ -1,0 +1,13 @@
+[Unit]
+Description=Load RK3399Pro NPU firmware
+ConditionPathExists=/proc/device-tree/npu-power
+After=systemd-udevd.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sh -c 'for i in $(seq 50); do ls /sys/bus/platform/drivers/tinker-npu-power/*/reset >/dev/null 2>&1 && exit 0; sleep 0.2; done; exit 1'
+ExecStart=/usr/local/sbin/npu-load
+
+[Install]
+WantedBy=multi-user.target

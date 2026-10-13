@@ -1,0 +1,50 @@
+#!/bin/bash
+# Load the firmware into the RK3399Pro NPU over USB (loader mode) and start it.
+# Reimplements the USB branch of the stock ASUS `npu_upgrade`; the GPIO/clock
+# power sequencing is done by the tinker-npu-power kernel driver (-npu DTB).
+set -u
+FW=${NPU_FW_DIR:-/usr/share/npu_fw}
+TOOL=${UPGRADE_TOOL:-/usr/bin/upgrade_tool}
+LOG=/run/npu-load.log
+UBOOT_ADDR=0x20000
+TRUST_ADDR=0x20800
+BOOT_ADDR=0x21000
+
+log() { echo "$(date +%T) $*" | tee -a "$LOG"; }
+
+ctl=$(ls /sys/bus/platform/drivers/tinker-npu-power/*/reset 2>/dev/null | head -1)
+[ -n "$ctl" ] || { log "tinker-npu-power not bound (boot a *-npu or *-full DTB)"; exit 1; }
+[ -x "$TOOL" ] || { log "$TOOL missing (extract it from the ASUS image, see docs/NPU.md)"; exit 1; }
+for f in MiniLoaderAll.bin uboot.img trust.img boot.img; do
+    [ -f "$FW/$f" ] || { log "missing $FW/$f"; exit 1; }
+done
+
+reset_npu() { echo 1 > "$ctl"; sleep 1; }
+
+wait_device() {
+    local i
+    for i in $(seq 1 10); do
+        "$TOOL" ld >/dev/null 2>&1 && { sleep 0.1; return 0; }
+        [ "$i" = 5 ] && { log "reset NPU to retry"; reset_npu; sleep 3; }
+        sleep 0.1
+    done
+    return 1
+}
+
+download() {
+    log "download loader";  "$TOOL" db "$FW/MiniLoaderAll.bin" >/dev/null || return 1
+    sleep 1
+    log "wait loader";      "$TOOL" td >/dev/null || return 1
+    log "write uboot";      "$TOOL" wl $UBOOT_ADDR "$FW/uboot.img" >/dev/null || return 1
+    log "write trust";      "$TOOL" wl $TRUST_ADDR "$FW/trust.img" >/dev/null || return 1
+    log "write boot";       "$TOOL" wl $BOOT_ADDR  "$FW/boot.img"  >/dev/null || return 1
+}
+
+reset_npu
+if ! wait_device; then reset_npu; wait_device || { log "NPU not found on USB"; exit 1; }; fi
+if ! download; then reset_npu; wait_device && download || { log "download failed"; exit 1; }; fi
+
+log "run system"
+"$TOOL" rs $UBOOT_ADDR $TRUST_ADDR $BOOT_ADDR "$FW/uboot.img" "$FW/trust.img" "$FW/boot.img" >/dev/null \
+    || { log "run system failed"; exit 1; }
+log "NPU started"

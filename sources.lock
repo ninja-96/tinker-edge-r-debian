@@ -1,0 +1,24 @@
+# Pinned upstream sources. Sourced by scripts/fetch-sources.sh.
+LINUX_VERSION=6.18.56
+LINUX_SHA256=4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89
+
+UBOOT_REPO=https://github.com/u-boot/u-boot.git
+UBOOT_TAG=v2026.10
+
+RKBIN_REPO=https://github.com/rockchip-linux/rkbin.git
+RKBIN_REV=3e288fe814e059dd06833495f845cab04ac20a5c
+
+# Vendor BSP kernel: reference for mpp_service and the RK3399Pro NPU PCIe hooks
+RK_KERNEL_REPO=https://github.com/rockchip-linux/kernel.git
+RK_KERNEL_BRANCH=develop-6.12
+RK_KERNEL_REV=470f9dccbdc42e7b8a824d0a5c5640a10e9457d2
+
+MPP_REPO=https://github.com/rockchip-linux/mpp.git
+MPP_REV=14729dd578e570e5f00fd1dd2113f5429012d64b
+
+# NPU firmware, npu_transfer_proxy, librknn_api (Apache-2.0)
+RK3399PRO_NPU_REPO=https://github.com/airockchip/RK3399Pro_npu.git
+RK3399PRO_NPU_REV=8858114555f1700e41e185b14ec3d266342f8059
+
+RKDEVELOPTOOL_REPO=https://github.com/rockchip-linux/rkdeveloptool.git
+RKDEVELOPTOOL_REV=304f073752fd25c854e1bcf05d8e7f925b1f4e14

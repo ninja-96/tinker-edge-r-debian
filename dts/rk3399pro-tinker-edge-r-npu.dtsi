@@ -1,0 +1,26 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * RK3399Pro NPU power sequencing for the ASUS Tinker Edge R.
+ * Include after the board DTS. GPIO numbers are the vendor sysfs numbers
+ * of npu_powerctrl V1.1 converted to bank/pin:
+ *   4 = GPIO0_A4, 10 = GPIO0_B2, 11 = GPIO0_B3, 32 = GPIO1_A0,
+ *   36 = GPIO1_A4, 54 = GPIO1_C6, 55 = GPIO1_C7, 56 = GPIO1_D0
+ * (35 = GPIO1_A3 is an input reporting the NPU sleep state; unused here.)
+ */
+/ {
+	npu_power: npu-power {
+		compatible = "asus,tinker-edge-r-npu-power";
+		clocks = <&cru SCLK_WIFI_PMU>, <&rk809 1>;
+		clock-names = "ref", "clk32k";
+		pinctrl-names = "default";
+		pinctrl-0 = <&npu_ref_clk>;
+		rail-gpios = <&gpio0 RK_PA4 GPIO_ACTIVE_HIGH>,
+			     <&gpio0 RK_PB2 GPIO_ACTIVE_HIGH>,
+			     <&gpio0 RK_PB3 GPIO_ACTIVE_HIGH>;
+		release-gpios = <&gpio1 RK_PC6 GPIO_ACTIVE_HIGH>,
+				<&gpio1 RK_PC7 GPIO_ACTIVE_HIGH>,
+				<&gpio1 RK_PD0 GPIO_ACTIVE_HIGH>,
+				<&gpio1 RK_PA0 GPIO_ACTIVE_HIGH>;
+		wake-gpios = <&gpio1 RK_PA4 GPIO_ACTIVE_HIGH>;
+	};
+};

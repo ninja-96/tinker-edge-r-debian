@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+# Rockchip MPP service ported from the Rockchip BSP 6.12 kernel
+# (only the blocks present on RK3399).
+
+menuconfig ROCKCHIP_MPP_SERVICE
+	tristate "Rockchip MPP service framework (video codec)"
+	depends on ARCH_ROCKCHIP && ROCKCHIP_IOMMU
+	help
+	  Rockchip MPP service framework, used by the Rockchip `mpp`
+	  userspace library through /dev/mpp_service. Conflicts with the
+	  mainline V4L2 hantro/rkvdec drivers on the same hardware blocks:
+	  use the *-mpp device tree, which disables those.
+
+if ROCKCHIP_MPP_SERVICE
+
+config ROCKCHIP_MPP_PROC_FS
+	bool "mpp service procfs"
+	depends on PROC_FS
+	default y
+
+config ROCKCHIP_MPP_RKVDEC
+	bool "RKV decoder (H.264/HEVC/VP9) device driver"
+	default y
+
+config ROCKCHIP_MPP_VDPU2
+	bool "VPU decoder v2 device driver"
+	default y
+
+config ROCKCHIP_MPP_VEPU2
+	bool "VPU encoder v2 (H.264/VP8/JPEG) device driver"
+	default y
+
+endif

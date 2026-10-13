@@ -1,0 +1,111 @@
+From: tinker-edge-r build <noreply@example.invalid>
+Subject: [PATCH] iommu/rockchip: export enable/disable/reset helpers for mpp
+
+The Rockchip MPP video codec service resets the codec blocks and needs to
+stop and restart the attached IOMMU around the reset. The Rockchip BSP kernel
+exports these helpers; mainline does not. Add equivalent exports.
+
+---
+--- a/drivers/iommu/rockchip-iommu.c
++++ b/drivers/iommu/rockchip-iommu.c
+@@ -967,6 +967,100 @@
+ 	return ret;
+ }
+ 
++/*
++ * Helpers used by the Rockchip MPP video codec service (mpp_service) to
++ * stop/restart the IOMMU around hardware resets. Same semantics as the
++ * Rockchip BSP kernel.
++ */
++int rockchip_iommu_disable(struct device *dev)
++{
++	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
++
++	if (!iommu)
++		return -ENODEV;
++
++	rk_iommu_disable(iommu);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(rockchip_iommu_disable);
++
++int rockchip_iommu_enable(struct device *dev)
++{
++	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
++
++	if (!iommu)
++		return -ENODEV;
++
++	if (!iommu->domain)
++		return -ENODEV;
++
++	return rk_iommu_enable(iommu);
++}
++EXPORT_SYMBOL_GPL(rockchip_iommu_enable);
++
++bool rockchip_iommu_is_enabled(struct device *dev)
++{
++	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
++
++	if (!iommu)
++		return false;
++
++	return rk_iommu_is_paging_enabled(iommu);
++}
++EXPORT_SYMBOL_GPL(rockchip_iommu_is_enabled);
++
++int rockchip_iommu_force_reset(struct device *dev)
++{
++	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
++	int ret;
++
++	if (!iommu)
++		return -ENODEV;
++
++	ret = rk_iommu_enable_stall(iommu);
++	if (ret)
++		return ret;
++
++	ret = rk_iommu_force_reset(iommu);
++
++	rk_iommu_disable_stall(iommu);
++
++	return ret;
++}
++EXPORT_SYMBOL_GPL(rockchip_iommu_force_reset);
++
++void rockchip_iommu_mask_irq(struct device *dev)
++{
++	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
++	int i;
++
++	if (!iommu)
++		return;
++
++	for (i = 0; i < iommu->num_mmu; i++)
++		rk_iommu_write(iommu->bases[i], RK_MMU_INT_MASK, 0);
++}
++EXPORT_SYMBOL_GPL(rockchip_iommu_mask_irq);
++
++void rockchip_iommu_unmask_irq(struct device *dev)
++{
++	struct rk_iommu *iommu = rk_iommu_from_dev(dev);
++	int i;
++
++	if (!iommu)
++		return;
++
++	for (i = 0; i < iommu->num_mmu; i++) {
++		/* Need to zap the TLB in case of mapping during a page fault */
++		rk_iommu_base_command(iommu->bases[i], RK_MMU_CMD_ZAP_CACHE);
++		rk_iommu_write(iommu->bases[i], RK_MMU_INT_MASK, RK_MMU_IRQ_MASK);
++		/* Leave the iommu in page fault state until mapping finished */
++		rk_iommu_base_command(iommu->bases[i], RK_MMU_CMD_PAGE_FAULT_DONE);
++	}
++}
++EXPORT_SYMBOL_GPL(rockchip_iommu_unmask_irq);
++
+ static int rk_iommu_identity_attach(struct iommu_domain *identity_domain,
+ 				    struct device *dev)
+ {

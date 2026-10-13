@@ -1,0 +1,30 @@
+#!/bin/bash
+# Re-pack the boot partition with another device tree variant.
+#   tinker-boot-select [base|mpp|npu|full]      (no argument: show variants)
+#   base  mainline V4L2 video drivers, no NPU      (safe default)
+#   mpp   Rockchip mpp_service video codec service
+#   npu   NPU power sequencing driver
+#   full  mpp + npu
+set -euo pipefail
+DT=/boot/dtbs
+PART=/dev/disk/by-partlabel/boot
+if [ $# -ne 1 ]; then
+    echo "variants:"; ls "$DT" | sed 's/^rk3399pro-tinker-edge-r-\?//; s/\.dtb$//; s/^$/base/; s/^/  /'
+    exit 0
+fi
+v=$1
+case "$v" in base) f=$DT/rk3399pro-tinker-edge-r.dtb ;; *) f=$DT/rk3399pro-tinker-edge-r-$v.dtb ;; esac
+[ -f "$f" ] || { echo "no such variant: $v" >&2; exit 1; }
+[ -b "$PART" ] || { echo "boot partition $PART not found" >&2; exit 1; }
+
+mkdir -p /var/lib/tinker
+tmp=$(mktemp)
+python3 /usr/local/sbin/tinker-mkbootimg --kernel /boot/Image --dtb "$f" -o "$tmp"
+size=$(stat -c %s "$tmp"); max=$(blockdev --getsize64 "$PART")
+[ "$size" -le "$max" ] || { echo "image ($size) larger than partition ($max)" >&2; exit 1; }
+
+# keep the previous contents so a bad variant can be rolled back
+dd if="$PART" of=/var/lib/tinker/boot.prev bs=1M count=$(( (size + 1048575) / 1048576 )) status=none
+dd if="$tmp" of="$PART" bs=1M conv=fsync status=none
+rm -f "$tmp"
+echo "boot partition now uses '$v'. Previous image: /var/lib/tinker/boot.prev. Reboot to apply."

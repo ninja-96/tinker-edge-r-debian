@@ -1,0 +1,11 @@
+#!/bin/sh
+# Compatibility shim for the stock ASUS `npu_powerctrl` (-i init, -o power up
+# or reset, -d power down). Drives the tinker-npu-power kernel driver.
+ctl=$(ls -d /sys/bus/platform/drivers/tinker-npu-power/*/ 2>/dev/null | head -1)
+[ -n "$ctl" ] || { echo "npu_powerctrl: tinker-npu-power not bound" >&2; exit 1; }
+case "$1" in
+    -i|-s|-r) ;;                         # init / sleep / wake: nothing to do
+    -o) echo 1 > "$ctl/reset" ;;
+    -d) echo 0 > "$ctl/power" ;;
+    *)  echo "Usage: npu_powerctrl [-i] [-o] [-d]" >&2; exit 1 ;;
+esac

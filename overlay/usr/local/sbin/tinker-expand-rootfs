@@ -1,0 +1,16 @@
+#!/bin/bash
+# Grow the root partition (p8) and filesystem to the whole SD card / eMMC, once.
+set -euo pipefail
+dev=$(findmnt -n -o SOURCE /)
+base=$(basename "$dev")
+if [ ! -r "/sys/class/block/$base/partition" ]; then
+    echo "root is not a partition ($dev), nothing to expand"
+    mkdir -p /var/lib/tinker && touch /var/lib/tinker/rootfs-expanded
+    exit 0
+fi
+num=$(cat "/sys/class/block/$base/partition")
+disk=/dev/$(lsblk -no PKNAME "$dev")
+echo ", +" | sfdisk --no-reread -q -N "$num" "$disk"
+partx -u "$disk" || true
+resize2fs "$dev"
+mkdir -p /var/lib/tinker && touch /var/lib/tinker/rootfs-expanded
