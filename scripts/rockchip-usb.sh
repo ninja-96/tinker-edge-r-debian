@@ -7,20 +7,23 @@
 
 loader_running() {
     local out
-    out=$(timeout 15 $SUDO "$RKDT" rfi 2>&1) || true
+    out=$(timeout --foreground 15 $SUDO "$RKDT" rfi 2>&1) || true
     echo "$out" | grep -q "Flash Size"
 }
 
 # Make sure the loader runs on the board (download it only when needed).
 load_loader() {
     local try rc i
+    # `timeout` starts its command in the background, where sudo cannot ask for a
+    # password: ask for it now, once, so that the calls below find it cached.
+    [ -z "${SUDO:-}" ] || $SUDO -v || die "sudo failed"
     if loader_running; then
         echo "loader already running on the board, skipping db"
         return 0
     fi
     for try in 1 2 3; do
         rc=0
-        timeout 60 $SUDO "$RKDT" db "$LOADER" || rc=$?
+        timeout --foreground 60 $SUDO "$RKDT" db "$LOADER" || rc=$?
         echo "db attempt $try: exit code $rc"
         if [ "$rc" = 0 ]; then
             for i in $(seq 1 15); do
