@@ -13,5 +13,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtool ccache sudo less vim-tiny \
     && rm -rf /var/lib/apt/lists/*
 
+# Cortex-M0 toolchain: TF-A builds the RK3399 PMU firmware with it
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gcc-arm-none-eabi libnewlib-arm-none-eabi \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu-
 WORKDIR /work

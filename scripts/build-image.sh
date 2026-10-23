@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Assemble the SD card image out/tinker-edge-r-debian13.img
+# LEGACY: image with the stock ASUS bootloader and an Android boot.img (never booted
+# on the board; use build-image-mainline-uboot.sh). Output: out/tinker-edge-r-debian13-asus-uboot.img
 # Needs: out/Image, out/rk3399pro-tinker-edge-r.dtb, out/modules, out/rootfs.tar,
 #        out/stock-boot/{idbloader.bin,uboot.img,trust.img}
 # Run inside the builder container:  ./run.sh scripts/build-image.sh
@@ -15,8 +16,7 @@ case "$DTB_VARIANT" in
     base) BOOT_DTB=$O/rk3399pro-tinker-edge-r.dtb ;;
     *)    BOOT_DTB=$O/rk3399pro-tinker-edge-r-$DTB_VARIANT.dtb ;;
 esac
-IMG=$O/tinker-edge-r-debian13${DTB_VARIANT:+-$DTB_VARIANT}.img
-[ "$DTB_VARIANT" = base ] && IMG=$O/tinker-edge-r-debian13.img
+IMG=$O/tinker-edge-r-debian13-asus-uboot.img
 
 for f in $O/Image $BOOT_DTB $O/rootfs.tar \
          $O/stock-boot/idbloader.bin $O/stock-boot/uboot.img $O/stock-boot/trust.img; do

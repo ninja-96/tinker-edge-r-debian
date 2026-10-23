@@ -20,3 +20,10 @@ downloads/
 # Local files
 *.log
 .claude/
+
+# Closed or non-redistributable material is kept locally only
+emmc-backup*
+screenlog.*
+*.sha256
+!blobs/**/SHA256SUMS
+third_party/npu/

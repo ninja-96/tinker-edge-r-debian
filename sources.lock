@@ -1,4 +1,7 @@
-# Pinned upstream sources. Sourced by scripts/fetch-sources.sh.
+# Pinned upstream sources. Sourced by the scripts.
+# Downloaded by the build: Linux, U-Boot, Rockchip mpp (source, Apache-2.0) and TF-A on demand. Entries marked
+# 'provenance' are NOT downloaded: the files are in the repository, these record
+# where they came from.
 LINUX_VERSION=6.18.56
 KERNEL_LOCALVERSION=-tinker-edge-r   # kernel release becomes <LINUX_VERSION><this>
 LINUX_SHA256=4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89
@@ -6,6 +9,11 @@ LINUX_SHA256=4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89
 UBOOT_REPO=https://github.com/u-boot/u-boot.git
 UBOOT_TAG=v2026.10
 
+# Open BL31 (ARM Trusted Firmware-A) for the free boot chain
+TFA_REPO=https://github.com/ARM-software/arm-trusted-firmware.git
+TFA_TAG=v2.15.0
+
+# provenance of blobs/rockchip/
 RKBIN_REPO=https://github.com/rockchip-linux/rkbin.git
 RKBIN_REV=3e288fe814e059dd06833495f845cab04ac20a5c
 
@@ -21,5 +29,6 @@ MPP_REV=14729dd578e570e5f00fd1dd2113f5429012d64b
 RK3399PRO_NPU_REPO=https://github.com/airockchip/RK3399Pro_npu.git
 RK3399PRO_NPU_REV=8858114555f1700e41e185b14ec3d266342f8059
 
+# provenance of third_party/rkdeveloptool
 RKDEVELOPTOOL_REPO=https://github.com/rockchip-linux/rkdeveloptool.git
 RKDEVELOPTOOL_REV=304f073752fd25c854e1bcf05d8e7f925b1f4e14

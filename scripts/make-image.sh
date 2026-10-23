@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Build the image that boots on the Tinker Edge R, from a clean checkout:
+#   scripts/make-image.sh        -> out/tinker-edge-r-debian13.img
+# Needs Docker (user in the docker group). Takes about 40 minutes.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+./scripts/fetch-sources.sh
+./scripts/setup-binfmt.sh
+./run.sh scripts/build-rootfs.sh                  # Debian 13   -> out/rootfs.tar
+./run.sh scripts/build-kernel.sh                  # Linux 6.18  -> out/Image, out/*.dtb, out/modules
+./run.sh scripts/build-mpp.sh                      # Rockchip mpp -> out/mpp
+./run.sh scripts/build-uboot.sh                   # U-Boot      -> out/u-boot-rockchip-ddrblob.bin
+./run.sh scripts/build-flash-tools.sh             # rkdeveloptool + loaders -> out/tools
+./run.sh scripts/build-image-mainline-uboot.sh    # image       -> out/tinker-edge-r-debian13.img
+ls -lh out/tinker-edge-r-debian13.img

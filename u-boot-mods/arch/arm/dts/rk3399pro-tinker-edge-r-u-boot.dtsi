@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * U-Boot additions for the ASUS Tinker Edge R (RK3399Pro).
+ *
+ * Memory: two LPDDR4 chips of 2 GB (one per channel), per the Edge R schematic
+ * block diagram; the Rock Pi 4 (2 x 2 GB LPDDR4) timings are used.
+ * Console: UART0 on the 40-pin header (pins 8/10), 115200 8N1. UART2, the
+ * vendor console, is wired to the microSD socket pads.
+ */
+
+#include "rk3399pro-u-boot.dtsi"
+#include "rk3399-sdram-lpddr4-100.dtsi"
+
+/ {
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+};
+
+&uart0 {
+	bootph-all;
+	clock-frequency = <24000000>;
+	status = "okay";
+};
+
+&uart0_xfer {
+	bootph-pre-sram;
+	bootph-pre-ram;
+};

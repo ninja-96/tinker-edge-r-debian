@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
-# Build the USB flashing tools for the host (x86_64):
-#   out/tools/rkdeveloptool          open-source maskrom/loader flasher
-#   out/tools/rk3399pro_loader.bin   usbplug+ddr+miniloader merged with boot_merger
-# Run inside the builder container:  ./run.sh scripts/build-flash-tools.sh
+# Build the PC-side flashing tools into out/tools/:
+#   rkdeveloptool       from third_party/rkdeveloptool (GPL, copied unmodified)
+#   rk3399_loader.bin   the USB loader, copied from blobs/rockchip/
+#   99-rk-rockusb.rules optional udev rule for non-root USB access
+# Nothing is downloaded. Run inside the builder container:
+#   ./run.sh scripts/build-flash-tools.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT=$PWD/out/tools
 mkdir -p "$OUT" build
 
-# --- loader: Rockchip boot_merger (x86_64 binary in rkbin) + RK3399Pro ini
-( cd downloads/rkbin
-  ./tools/boot_merger RKBOOT/RK3399PROMINIALL.ini
-  mv -f rk3399pro_loader_v*.bin "$OUT/rk3399pro_loader.bin" )
+( cd blobs/rockchip && sha256sum -c SHA256SUMS >/dev/null ) || { echo "blob checksum mismatch" >&2; exit 1; }
+install -m 0644 blobs/rockchip/rk3399_loader.bin "$OUT/rk3399_loader.bin"
 
-# --- rkdeveloptool: out-of-tree copy so downloads/ stays clean
 rm -rf build/rkdeveloptool
-cp -a downloads/rkdeveloptool build/rkdeveloptool
+cp -a third_party/rkdeveloptool build/rkdeveloptool
 cd build/rkdeveloptool
-autoreconf -i >/dev/null
+autoreconf -i >/dev/null 2>&1
 ./configure CXXFLAGS="-O2 -Wno-error -fpermissive" >/dev/null
 make -j"$(nproc)" >/dev/null
 install -m 0755 rkdeveloptool "$OUT/rkdeveloptool"

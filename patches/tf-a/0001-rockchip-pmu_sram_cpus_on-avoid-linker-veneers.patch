@@ -1,0 +1,23 @@
+diff --git a/plat/rockchip/common/aarch64/pmu_sram_cpus_on.S b/plat/rockchip/common/aarch64/pmu_sram_cpus_on.S
+index d91ee0e..a9241e6 100644
+--- a/plat/rockchip/common/aarch64/pmu_sram_cpus_on.S
++++ b/plat/rockchip/common/aarch64/pmu_sram_cpus_on.S
+@@ -46,7 +46,16 @@ ddr_resume:
+ 	mov     sp, x2
+ 	bl	dmc_resume
+ #endif
+-	bl	sram_restore
++	/*
++	 * Call the BL31 code through a register instead of "bl": this code runs
++	 * from PMU SRAM at 0xff3b0000 and BL31 sits far below, so a direct branch
++	 * needs linker veneers, and with binutils 2.44 their stub section inflates
++	 * the output by a page and overflows the 8 KiB PMUSRAM_RSIZE.
++	 */
++	ldr	x2, =sram_restore
++	blr	x2
+ sys_resume:
+-	bl	bl31_warm_entrypoint
++	ldr	x2, =bl31_warm_entrypoint
++	br	x2
++	.ltorg
+ endfunc pmu_cpuson_entrypoint

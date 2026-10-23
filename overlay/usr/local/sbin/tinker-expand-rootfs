@@ -14,3 +14,14 @@ echo ", +" | sfdisk --no-reread -q -N "$num" "$disk"
 partx -u "$disk" || true
 resize2fs "$dev"
 mkdir -p /var/lib/tinker && touch /var/lib/tinker/rootfs-expanded
+
+# Swap: none on the eMMC (write wear), a 2 GiB swap file when booted from an SD card.
+if [ "$(cat "/sys/class/block/$(basename "$disk")/device/type" 2>/dev/null)" = SD ] && [ ! -e /swapfile ]; then
+    if fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap -q /swapfile; then
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+        swapon /swapfile || true
+    else
+        rm -f /swapfile
+        echo "could not create the swap file" >&2
+    fi
+fi

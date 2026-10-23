@@ -10,6 +10,14 @@ Rockchip resource image (RSCE) as the "second" stage that holds rk-kernel.dtb.
 import argparse
 import struct
 
+# The ASUS/Rockchip U-Boot runs a raw Image in place at (load address + page size),
+# which is 0x80000 past a 2 MiB boundary (the text_offset convention of the old
+# 4.4 kernel). A mainline kernel has text_offset 0 and must start exactly on a
+# 2 MiB boundary, otherwise it hangs silently before enabling the MMU. So the
+# kernel is placed TRAMPOLINE_PAD bytes after the entry point; the first word is a
+# branch to it. 0x180000 + 0x80000 = 2 MiB.
+TRAMPOLINE_PAD = 0x180000
+
 PAGE = 2048
 KERNEL_ADDR = 0x10008000
 SECOND_ADDR = 0x10F00000
@@ -43,10 +51,16 @@ def main():
     ap.add_argument("--kernel", required=True)
     ap.add_argument("--dtb", required=True)
     ap.add_argument("--cmdline", default="")
+    ap.add_argument("--no-trampoline", dest="trampoline", action="store_false",
+                    help="put the kernel right after the header (U-Boot booti/extlinux)")
     ap.add_argument("-o", "--output", required=True)
     a = ap.parse_args()
 
     kernel = open(a.kernel, "rb").read()
+    if a.trampoline:
+        # b #TRAMPOLINE_PAD, x0 (the DTB pointer) is left untouched
+        branch = 0x14000000 | (TRAMPOLINE_PAD // 4)
+        kernel = struct.pack("<I", branch).ljust(TRAMPOLINE_PAD, b"\0") + kernel
     second = resource_image([("rk-kernel.dtb", open(a.dtb, "rb").read())])
 
     header = struct.pack(

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Stage the complete root filesystem tree into <dir>: Debian tarball, our kernel
 # and modules, device tree variants, overlay, NPU host files.
+# FREE=1: use out/rootfs-free.tar and add no closed binaries (no NPU userspace).
 # Shared by build-image.sh, build-image-mainline-uboot.sh and qemu-smoke.sh.
 #   stage-rootfs.sh <dir>
 set -euo pipefail
@@ -9,10 +10,12 @@ cd "$(dirname "$0")/.."
 W=${1:?destination dir}
 O=out
 KVER=${LINUX_VERSION}${KERNEL_LOCALVERSION}
-NPU_SRC=downloads/RK3399Pro_npu
+FREE=${FREE:-0}
+TAR=$O/rootfs.tar
+[ "$FREE" = 1 ] && TAR=$O/rootfs-free.tar
 
 rm -rf "$W"; mkdir -p "$W"
-tar -xpf $O/rootfs.tar -C "$W" --numeric-owner
+tar -xpf "$TAR" -C "$W" --numeric-owner
 
 # no SSH host keys in the image: ssh-hostkeys.service creates them on first boot
 rm -f "$W"/etc/ssh/ssh_host_*
@@ -28,6 +31,12 @@ cp $O/Image "$W/boot/Image"
 cp $O/rk3399pro-tinker-edge-r*.dtb "$W/boot/dtbs/"
 install -D -m 0755 scripts/mkbootimg.py "$W/usr/local/sbin/tinker-mkbootimg"
 
+# Rockchip mpp library and test tools (built by build-mpp.sh; used with the -mpp device tree)
+if [ -d "$O/mpp/usr" ]; then
+    mkdir -p "$W/usr"
+    cp -a "$O/mpp/usr/." "$W/usr/"
+fi
+
 # overlay (services, helper scripts, udev rules) and unit enablement
 cp -a overlay/. "$W/"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
@@ -35,21 +44,18 @@ for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs ssh-hostkeys; do
     ln -sf "/etc/systemd/system/$u.service" "$W/etc/systemd/system/multi-user.target.wants/$u.service"
 done
 
-# NPU host side: open Apache-2.0 set from airockchip/RK3399Pro_npu ...
-if [ -d "$NPU_SRC/drivers" ]; then
-    install -D -m 0755 $NPU_SRC/drivers/npu_transfer_proxy/linux-aarch64/npu_transfer_proxy "$W/usr/bin/npu_transfer_proxy"
-    mkdir -p "$W/usr/share/npu_fw" "$W/usr/share/npu_fw_pcie"
-    cp $NPU_SRC/drivers/npu_firmware/npu_fw/*      "$W/usr/share/npu_fw/"
-    cp $NPU_SRC/drivers/npu_firmware/npu_pcie_fw/* "$W/usr/share/npu_fw_pcie/"
-    install -D -m 0644 $NPU_SRC/rknn-api/librknn_api/Linux/lib64/librknn_api.so "$W/usr/lib/aarch64-linux-gnu/librknn_api.so"
-    install -D -m 0644 $NPU_SRC/rknn-api/librknn_api/include/rknn_api.h "$W/usr/include/rknn_api.h"
-fi
-# ... overridden by the user's own ASUS copies (matched proxy+firmware pair and
-# upgrade_tool, which is not redistributable) when extract-stock-boot.sh ran
-if [ -d $O/stock-npu ]; then
-    [ -f $O/stock-npu/upgrade_tool ] && install -D -m 0755 $O/stock-npu/upgrade_tool "$W/usr/bin/upgrade_tool"
-    [ -f $O/stock-npu/npu_transfer_proxy ] && install -D -m 0755 $O/stock-npu/npu_transfer_proxy "$W/usr/bin/npu_transfer_proxy"
-    [ -d $O/stock-npu/npu_fw ] && cp $O/stock-npu/npu_fw/* "$W/usr/share/npu_fw/"
-    [ -d $O/stock-npu/npu_fw_pcie ] && cp $O/stock-npu/npu_fw_pcie/* "$W/usr/share/npu_fw_pcie/"
+# NPU host side (experimental, closed binaries, NOT shipped or downloaded): if you put
+# the files into third_party/npu/ they are installed. Expected layout, see docs/NPU.md:
+#   npu_transfer_proxy  upgrade_tool  librknn_api.so  rknn_api.h  npu_fw/  npu_fw_pcie/
+N=third_party/npu
+if [ "$FREE" != 1 ] && [ -d "$N" ]; then
+    for f in npu_transfer_proxy upgrade_tool; do
+        [ -f "$N/$f" ] && install -D -m 0755 "$N/$f" "$W/usr/bin/$f"
+    done
+    [ -f "$N/librknn_api.so" ] && install -D -m 0644 "$N/librknn_api.so" "$W/usr/lib/aarch64-linux-gnu/librknn_api.so"
+    [ -f "$N/rknn_api.h" ]     && install -D -m 0644 "$N/rknn_api.h" "$W/usr/include/rknn_api.h"
+    for d in npu_fw npu_fw_pcie; do
+        [ -d "$N/$d" ] && { mkdir -p "$W/usr/share/$d"; cp "$N/$d"/* "$W/usr/share/$d/"; }
+    done
 fi
 exit 0
