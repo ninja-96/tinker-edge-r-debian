@@ -72,13 +72,12 @@ No browser is installed by the image.
 
 | Item | Notes |
 |---|---|
-| `nftables` firewall, on by default | input policy drop; allow loopback, established connections, SSH (22), ping and mDNS (UDP 5353); rate-limit new SSH connections. Must be tested through the serial console so that a mistake cannot lock the user out |
+| `nftables` firewall, on by default | input policy drop; allow loopback, established connections, SSH (22), ping and mDNS (UDP 5353). SSH itself is left as it is (no rate limit, no change of the login methods). Must be tested through the serial console so that a mistake cannot lock the user out. Measure gigabit throughput (`iperf3`) with and without it |
 | Forced password change | `chage -d 0 debian`: the default password `debian` has to be changed at the first login (SSH and console) |
 
-Cheap measures that were discussed and are **not** scheduled (pick any): kernel switches that Debian's kernel has
+Cheap measures that were discussed and are **not** scheduled (pick any; SSH stays as it is by decision): kernel switches that Debian's kernel has
 and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `YAMA`, `LOCKDOWN`, `LANDLOCK`;
-`INIT_ON_ALLOC_DEFAULT_ON` costs 1-3% speed), AppArmor, key-only SSH after a key is installed,
-`unattended-upgrades`, `sysctl` hardening (`kptr_restrict`, `dmesg_restrict`, syncookies), LLMNR off.
+`INIT_ON_ALLOC_DEFAULT_ON` costs 1-3% speed), AppArmor, `unattended-upgrades`, `sysctl` hardening (`kptr_restrict`, `dmesg_restrict`, syncookies), LLMNR off.
 Not done on purpose: secure boot through eFuses (irreversible), a secure OS (OP-TEE / BL32 is not loaded;
 TrustZone only hosts BL31 for PSCI).
 
