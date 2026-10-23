@@ -47,6 +47,7 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 
 | Item | Notes |
 |---|---|
+| `htop` and Tab completion in the shell | `htop` and `bash-completion` in the image; `/etc/inputrc` switches on case-insensitive completion, listing all matches on the first Tab and PageUp / PageDown history search (`scripts/stage-rootfs.sh`) |
 | DRAM at 933 MHz | the Rockchip `rkbin` repository also has `rk3399pro_ddr_933MHz_v1.30.bin` (and 666 MHz); we use 800 MHz. About 16% more memory bandwidth if the memory is stable at 1866 MT/s. Test by flashing only the loader (`scripts/flash-at.sh 64 ...`), then run the memory stress test. Baseline at 800 MHz: `mbw` memcpy 3310 MiB/s on a big core, `sysbench` write 5530 MiB/s |
 
 Looked at and left out of 0.2: the ALSA UCM profiles of `JeffyCN/mirrors` (branch `alsa-config`) are written

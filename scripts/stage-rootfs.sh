@@ -42,6 +42,20 @@ if [ -d "$O/gst-rockchip/usr" ]; then
     cp -a "$O/gst-rockchip/usr/." "$W/usr/"
 fi
 
+# Comfortable Tab completion in the shell: bash-completion (installed in the rootfs) covers
+# commands such as apt, systemctl, ssh, git; here the readline switches that Debian ships
+# commented out in /etc/inputrc are turned on: show all matches at once on the first Tab,
+# ignore case, and search the history by prefix with PageUp / PageDown.
+if [ -f "$W/etc/inputrc" ]; then
+    sed -i -E \
+        -e 's/^# *set (completion-ignore-case) On/set \1 On/' \
+        -e 's/^# *set (show-all-if-ambiguous) On/set \1 On/' \
+        -e 's/^# *("\\e\[5~": history-search-backward)/\1/' \
+        -e 's/^# *("\\e\[6~": history-search-forward)/\1/' \
+        "$W/etc/inputrc"
+    printf '%s\n' 'set colored-stats On' 'set mark-symlinked-directories On' >> "$W/etc/inputrc"
+fi
+
 # overlay (services, helper scripts, udev rules) and unit enablement
 cp -a overlay/. "$W/"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
