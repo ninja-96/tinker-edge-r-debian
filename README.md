@@ -24,10 +24,10 @@ Checked on a real board with Linux 6.18.56 by `scripts/test-board.sh` and by han
 | CPU, RAM | 6 cores (A53 up to 1.4 GHz, A72 up to 1.8 GHz) with cpufreq, 4 GB RAM | stress test with result verification, 47 C at full load |
 | eMMC | 16 GB, HS200: read 164 MB/s, write 26-52 MB/s, root filesystem grows to the whole eMMC on first boot | 512 MiB write and read back with checksum |
 | GPU | Mali-T860 with Panfrost: OpenGL ES 3.1 and OpenGL 3.1; **OpenCL 3.0** through Rusticl (on by default) | `eglinfo` shows Panfrost; OpenCL kernels give correct results; no image on a monitor yet |
-| Hardware video | H.264 encode (720p at 52 fps), H.264 decode (116 fps), VP8 encode, JPEG encode and decode through Rockchip `mpp` (`/dev/mpp_service`) | encode and decode of a 60-frame clip, frame count and size checked |
+| Hardware video | H.264 encode (720p at 54 fps), H.264 decode (116 fps), VP8 encode, JPEG encode and decode through Rockchip `mpp` (`/dev/mpp_service`) | encode and decode of a 60-frame clip, frame count and size checked |
 | GStreamer | Debian GStreamer 1.26 with the Rockchip plugin: `mpph264enc`, `mppvp8enc`, `mppjpegenc`, `mppvideodec`, `mppjpegdec` | 300-frame 720p encode, decode at about 200 fps |
 | Wi-Fi | Realtek RTL8822CE (PCIe), firmware from Debian | adapter up, scan sees access points; connection and throughput **not tested** |
-| Bluetooth | adapter `hci0` (USB), firmware from Debian | adapter up; no device was nearby to scan or pair |
+| Bluetooth | adapter `hci0` (USB), firmware from Debian | adapter up, a scan finds a nearby device; pairing **not tested** |
 | Audio | Codec RK809 (3.5 mm jack: playback and capture) | a test tone plays and a recording is made without errors; **not listened to** |
 | RTC | RK809 clock `rtc0`, battery header `RTC_BATTERY` | write and read back; retention without power **not tested** |
 | 40-pin header | GPIO (libgpiod), I2C6 and I2C7, SPI1 and SPI5 (`/dev/spidev*`), PWM0, PWM1, PWM3 | every plain GPIO pin driven and read, buses and device nodes present; **no electrical loopback or real devices** |
@@ -76,7 +76,16 @@ binary is downloaded: the few Rockchip binaries needed are in [`blobs/`](blobs/R
 The Rockchip downloads are open-source code only: the `mpp` video library (Apache-2.0) and
 the GStreamer plugin (LGPL-2.1), pinned in `sources.lock`.
 
-A prebuilt image is attached to the release on the GitHub page of this repository.
+A prebuilt image is attached to the [release](https://github.com/ninja-96/tinker-edge-r-debian/releases)
+as `tinker-edge-r-debian13.img.xz` with a `sha256` file. To use it instead of building:
+
+```sh
+sha256sum -c tinker-edge-r-debian13.img.xz.sha256
+mkdir -p out && xz -dk tinker-edge-r-debian13.img.xz && mv tinker-edge-r-debian13.img out/
+./run.sh scripts/build-flash-tools.sh        # only the small USB flashing tools (a few minutes)
+```
+
+then continue with step 2.
 
 ## 2. Flash the eMMC over USB
 
