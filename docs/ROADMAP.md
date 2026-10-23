@@ -43,12 +43,32 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 
 ## Planned
 
+### Release 0.2
+
 | Item | Notes |
 |---|---|
-| Open BL31 (TF-A) as the default | it builds (`USE_TFA=1`) but was never booted; test by flashing only the loader with `scripts/flash-at.sh 64 ...` |
+| DRAM at 933 MHz | the Rockchip `rkbin` repository also has `rk3399pro_ddr_933MHz_v1.30.bin` (and 666 MHz); we use 800 MHz. About 16% more memory bandwidth if the memory is stable at 1866 MT/s. Test by flashing only the loader (`scripts/flash-at.sh 64 ...`), then run the memory stress test |
+| ALSA UCM profiles for the RK809 codec and HDMI | from `JeffyCN/mirrors`, branch `alsa-config`; adapt the card names to mainline so PipeWire / KDE pick the right mixer paths |
+| `libv4l-rkmpp` (`JeffyCN/libv4l-rkmpp`) | V4L2 wrapper around `mpp`, mainly for Chromium; makes the codecs reachable as V4L2 devices |
+
+### Release 0.3: NPU
+
+| Item | Notes |
+|---|---|
+| NPU firmware ("the OS of the NPU die") | from `airockchip/RK3399Pro_npu` (Apache-2.0), unchanged, pinned commit and sha256, with a `NOTICE` that points to the sources of the GPL parts (Linux 4.4.185, BusyBox, galcore). Untested so far: the board was tested with the ASUS copy of the images |
+| `npu_transfer_proxy`, `librknn_api.so` | from the same repository, unchanged; the proxy runs through `npu-proxy-run` |
+| Open replacement for `upgrade_tool` | `rkdeveloptool` has `db` and `wl` but not `td` and `rs`; observe the USB protocol and implement them (or a small `libusb` loader) |
+| Python 3.13 module for the host side | `ctypes` binding over `librknn_api.so` (init, query, inputs, run, outputs) with `numpy`, MIT; checked against the C demos and the `.rknn` models of the Apache repository |
+| Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
+| Tests | `scripts/test-board.sh` gets an NPU phase |
+
+### Later
+
+| Item | Notes |
+|---|---|
+| Open BL31 (TF-A) as the default | it builds (`USE_TFA=1`) but was never booted; test by flashing only the loader |
 | Open DRAM initialisation | the U-Boot LPDDR4 timings of the Rock Pi 4 hang on this board; derive timings from the blob parameters |
-| Replace the closed `upgrade_tool` for the NPU | `rkdeveloptool` lacks `td` and `rs`; ship the Apache-2.0 NPU files from `airockchip/RK3399Pro_npu` in `blobs/npu/` |
 | Inference engines on the GPU | CPU numbers for MobileNetV2: TFLite 33 FPS, ONNX Runtime 22, Arm NN 20, MNN 18, TVM untuned 1.4. Arm NN GpuAcc does not run on Rusticl (needs OpenCL 2.0). MNN, TVM and TFLite on the GPU need source builds. Expect little: a simple float4 kernel reaches 8 GFLOPS against a peak of about 100 |
-| Open NPU kernel driver | research only, [NPU-RESEARCH.md](NPU-RESEARCH.md): a newer kernel on the NPU die with `etnaviv` and Mesa Teflon |
+| Open NPU stack | research only, [NPU-RESEARCH.md](NPU-RESEARCH.md): a newer kernel on the NPU die with `etnaviv` and Mesa Teflon |
 | Next LTS kernel | bump `sources.lock`, rebase `patches/` and `kernel-mods/`, [KERNEL.md](KERNEL.md) |
 | ffmpeg with `mpp` (ffmpeg-rockchip), 1080p numbers | |
