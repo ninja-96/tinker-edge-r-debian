@@ -67,18 +67,18 @@ No browser is installed by the image.
 | Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
 | Tests | `scripts/test-board.sh` gets an NPU phase |
 
+### Release 0.3, optional artifact (with the NPU release)
+
+| Item | Notes |
+|---|---|
+| Own Chromium build with `libv4l-rkmpp` | patched `v4l-utils` (mmap in the plugin interface) and Chromium with the V4L2 plugin patches from `JeffyCN/meta-rockchip`; a cross build on a PC (order of 100 GB of disk and hours of CPU), shipped as a separate download, not in the base image |
+
 ### Release 0.4: memory controller
 
 | Item | Notes |
 |---|---|
 | DMC: DRAM frequency scaling (`CONFIG_ARM_RK3399_DMC_DEVFREQ`, `rockchip,rk3399-dmc`) | saves power and heat at idle. Switched off today (`config/linux-tinker.fragment`) because a failing frequency change hangs the board. Needs: a device tree node with an OPP table and the DFI monitor, DRAM timings for every step (the Rockchip blob reports "dts ddr timing unavailable, use default"), and BL31 that handles the frequency change calls (the Rockchip BL31 does; the open TF-A has the code too). Test with the serial console attached and a way back (maskrom), under a memory stress test |
 | NoC QoS priorities | the vendor kernel raises the priority of the display controller so that a 4K picture does not tear under heavy memory traffic; mainline does not. Check with HDMI at 4K under load once a monitor is available |
-
-### Release 0.3, optional artifact
-
-| Item | Notes |
-|---|---|
-| Own Chromium build with `libv4l-rkmpp` | patched `v4l-utils` (mmap in the plugin interface) and Chromium with the V4L2 plugin patches from `JeffyCN/meta-rockchip`; a cross build on a PC (order of 100 GB of disk and hours of CPU), shipped as a separate download, not in the base image |
 
 ### Later
 
