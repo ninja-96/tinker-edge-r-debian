@@ -47,9 +47,14 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 
 | Item | Notes |
 |---|---|
-| DRAM at 933 MHz | the Rockchip `rkbin` repository also has `rk3399pro_ddr_933MHz_v1.30.bin` (and 666 MHz); we use 800 MHz. About 16% more memory bandwidth if the memory is stable at 1866 MT/s. Test by flashing only the loader (`scripts/flash-at.sh 64 ...`), then run the memory stress test |
-| ALSA UCM profiles for the RK809 codec and HDMI | from `JeffyCN/mirrors`, branch `alsa-config`; adapt the card names to mainline so PipeWire / KDE pick the right mixer paths |
-| `libv4l-rkmpp` (`JeffyCN/libv4l-rkmpp`) | V4L2 wrapper around `mpp`, mainly for Chromium; makes the codecs reachable as V4L2 devices |
+| DRAM at 933 MHz | the Rockchip `rkbin` repository also has `rk3399pro_ddr_933MHz_v1.30.bin` (and 666 MHz); we use 800 MHz. About 16% more memory bandwidth if the memory is stable at 1866 MT/s. Test by flashing only the loader (`scripts/flash-at.sh 64 ...`), then run the memory stress test. Baseline at 800 MHz: `mbw` memcpy 3310 MiB/s on a big core, `sysbench` write 5530 MiB/s |
+
+Looked at and left out of 0.2: the ALSA UCM profiles of `JeffyCN/mirrors` (branch `alsa-config`) are written
+for the vendor codec driver (`Playback Path`, `Capture MIC Path`); the mainline RK809 has `Master Playback Volume`,
+`Mic Capture Gain` and `Playback Mux` (HP / SPK, default HP), so the jack works without a profile. `libv4l-rkmpp`
+does not build against Debian's `libv4l2` (its plugin interface lacks `mmap`; the project needs a patched
+`v4l-utils`) and it is made for a Chromium built with the author's patches, so Debian's Chromium would not use it.
+No browser is installed by the image.
 
 ### Release 0.3: NPU
 
@@ -61,6 +66,12 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 | Python 3.13 module for the host side | `ctypes` binding over `librknn_api.so` (init, query, inputs, run, outputs) with `numpy`, MIT; checked against the C demos and the `.rknn` models of the Apache repository |
 | Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
 | Tests | `scripts/test-board.sh` gets an NPU phase |
+
+### Release 0.3, optional artifact
+
+| Item | Notes |
+|---|---|
+| Own Chromium build with `libv4l-rkmpp` | patched `v4l-utils` (mmap in the plugin interface) and Chromium with the V4L2 plugin patches from `JeffyCN/meta-rockchip`; a cross build on a PC (order of 100 GB of disk and hours of CPU), shipped as a separate download, not in the base image |
 
 ### Later
 
