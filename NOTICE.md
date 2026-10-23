@@ -1,18 +1,19 @@
 # Third-party components
 
 This repository contains only build scripts, patches, device trees and
-documentation. Upstream sources are downloaded by `scripts/fetch-sources.sh`
-and keep their own licenses.
+documentation. Upstream sources are downloaded by the build scripts (`fetch-sources.sh`,
+`build-mpp.sh`, `build-gst-rockchip.sh`) and keep their own licenses.
 
 | Component | License | How used |
 |---|---|---|
 | Linux kernel, our kernel patches and DTS | GPL-2.0 | downloaded, patched |
 | U-Boot, our patches | GPL-2.0+ | downloaded, patched |
 | Rockchip BSP kernel (`rockchip-linux/kernel`) | GPL-2.0 | patch source (`mpp_service`, PCIe NPU hooks) |
-| Rockchip `mpp` | Apache-2.0 | userspace codec library |
-| Rockchip `rkbin` (DDR init, BL31 blobs) | Rockchip license: use/copy/distribute allowed, no reverse engineering, keep notices | downloaded, never modified |
+| Rockchip `mpp` | Apache-2.0 | userspace codec library, source downloaded and built by `scripts/build-mpp.sh` |
+| Rockchip GStreamer plugins (`JeffyCN/mirrors`, branch `gstreamer-rockchip`) | LGPL-2.1 | source downloaded and built by `scripts/build-gst-rockchip.sh` |
+| Mesa (Panfrost, Rusticl), GStreamer, ffmpeg libraries, Python | per-package, from Debian | installed from the Debian archive |
 | `blobs/rockchip/` (DRAM init blob, BL31) | Rockchip licence (use/copy/redistribute, no modification or reverse engineering) | committed unmodified with its licence and origin, see blobs/README.md |
-| `airockchip/RK3399Pro_npu` (NPU firmware, `npu_transfer_proxy`, `librknn_api`) | Apache-2.0 | downloaded |
+| `airockchip/RK3399Pro_npu` (NPU firmware, `npu_transfer_proxy`, `librknn_api`) | Apache-2.0 | **not** downloaded or stored; the optional NPU files are supplied locally, see docs/NPU.md |
 | `kernel-mods/.../mpp/` (port of Rockchip BSP 6.12 `mpp_service`) | GPL-2.0+ OR MIT (as upstream); the port stays dual-licensed | copied into the kernel tree at build time |
 | `kernel-mods/.../tinker-npu-power.c`, `patches/linux/*.patch` | GPL-2.0 | copied/applied to the kernel tree at build time |
 | Debian packages | per-package (mostly DFSG-free) | rootfs |
@@ -27,4 +28,4 @@ and keep their own licenses.
 | `u-boot-mods/`, `patches/tf-a/` | GPL-2.0+ (U-Boot) / BSD-3-Clause (TF-A patch) |
 | `kernel-mods/`, `patches/linux/`, `config/` | GPL-2.0 (`LICENSES/GPL-2.0.txt`); these are parts of or patches to the Linux kernel; the mpp sources keep their upstream dual GPL-2.0+/MIT license |
 
-Third-party blobs and sources are never stored here; see the table above for how they are obtained.
+Third-party sources are not stored here, except `third_party/rkdeveloptool` (GPL-2.0) and the unmodified Rockchip binaries in `blobs/` with their licence; see the table above for how everything else is obtained.
