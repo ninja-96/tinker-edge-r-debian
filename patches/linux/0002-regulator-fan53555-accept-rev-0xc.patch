@@ -1,0 +1,35 @@
+From: tinker-edge-r-debian
+Subject: [PATCH] regulator: fan53555: accept Fairchild option 00 revision 0xc
+
+The Tinker Edge R (RK3399Pro) has FAN53555 regulators (vdd_cpu_b, vdd_gpu,
+I2C address 0x60) that report chip ID 0, revision 0xc. The driver refuses
+them ("Chip ID 0 with rev 12 not supported"), so vdd_gpu and vdd_cpu_b never
+probe and panfrost and cpufreq stay deferred.
+
+The vendor 4.4 kernel handles this revision as 600 mV + N * 12.5 mV; use the
+same range here.
+
+Signed-off-by: tinker-edge-r-debian
+---
+--- a/drivers/regulator/fan53555.c
++++ b/drivers/regulator/fan53555.c
+@@ -113,6 +113,7 @@
+ enum {
+ 	FAN53555_CHIP_REV_00 = 0x3,
+ 	FAN53555_CHIP_REV_13 = 0xf,
++	FAN53555_CHIP_REV_23 = 0xc,
+ };
+ 
+ enum {
+@@ -305,6 +306,11 @@
+ 			di->vsel_step = 10000;
+ 			di->enable_time = 400;
+ 			break;
++		case FAN53555_CHIP_REV_23:
++			di->vsel_min = 600000;
++			di->vsel_step = 12500;
++			di->enable_time = 400;
++			break;
+ 		default:
+ 			dev_err(di->dev,
+ 				"Chip ID %d with rev %d not supported!\n",

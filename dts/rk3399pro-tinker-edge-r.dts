@@ -35,11 +35,13 @@
 
 	chosen {
 		/*
-		 * U-Boot console of this board is UART2 at 115200 (ASUS config).
-		 * The vendor U-Boot merges this into its bootargs and adds root=.
+		 * Console on UART0 = pins 8 (TX), 10 (RX) and GND (e.g. pin 9) of the
+		 * 40-pin header, 115200 8N1, 3.3 V. UART2 (the vendor U-Boot console)
+		 * is wired to the microSD socket pads and is not usable on the header.
+		 * The vendor U-Boot merges bootargs into its own and adds root=.
 		 */
-		stdout-path = "serial2:115200n8";
-		bootargs = "earlycon=uart8250,mmio32,0xff1a0000 console=tty1 console=ttyS2,115200n8 rw rootfstype=ext4 rootwait coherent_pool=1m";
+		stdout-path = "serial0:115200n8";
+		bootargs = "earlycon=uart8250,mmio32,0xff180000 console=tty1 console=ttyS0,115200n8 rw rootfstype=ext4 rootwait coherent_pool=1m";
 	};
 
 	adc-keys {
@@ -194,9 +196,16 @@
 	cpu-supply = <&vdd_cpu_b>;
 };
 
+/*
+ * DisplayPort over USB-C. Disabled on purpose: mainline cdn-dp needs an extcon
+ * device that reports EXTCON_DISP_DP (the vendor fusb30x driver provides it,
+ * the mainline FUSB302 driver does not). An enabled cdn-dp that fails to probe
+ * keeps rockchip-drm from binding, so there would be no display output at all,
+ * HDMI included. See docs/OPEN.md.
+ */
 &cdn_dp {
 	phys = <&tcphy0_dp>;
-	status = "okay";
+	status = "disabled";
 };
 
 &emmc_phy {
@@ -654,10 +663,15 @@
 	status = "okay";
 };
 
+/*
+ * eMMC at HS200 (200 MHz, 1.8 V). HS400 Enhanced Strobe, which the vendor DT
+ * uses, gives data CRC errors on this board with mainline: about 1 MB/s,
+ * constant interrupts and "CQE recovery" messages. HS200 measures 158 MB/s read,
+ * 52 MB/s write, no errors.
+ */
 &sdhci {
 	bus-width = <8>;
-	mmc-hs400-1_8v;
-	mmc-hs400-enhanced-strobe;
+	mmc-hs200-1_8v;
 	mmc-pwrseq = <&sdhci_pwrseq>;
 	non-removable;
 	status = "okay";
@@ -733,8 +747,8 @@
 	};
 };
 
-/* Debug console (U-Boot uses UART2 at 115200 on this board) */
-&uart2 {
+/* Debug console on the 40-pin header (pins 8/10) */
+&uart0 {
 	status = "okay";
 };
 
@@ -789,5 +803,63 @@
 };
 
 &vopl_mmu {
+	status = "okay";
+};
+
+/*
+ * 40-pin header (3.3 V). Functions as in the ASUS pin table (docs/GPIO.md):
+ *   pins 3, 5     I2C6  (/dev/i2c-6)       pins 27, 28   I2C7 (/dev/i2c-7)
+ *   pins 13-18    SPI5  (/dev/spidev5.0)   pins 19-24    SPI1 (/dev/spidev1.0)
+ *   pin 32 PWM0, pin 33 PWM1, pin 26 PWM3A (/sys/class/pwm)
+ *   pins 8, 10    UART0 (console, ttyS0)
+ * Everything else is a plain GPIO (libgpiod). UART0 RTS/CTS (pins 11, 36) stay GPIO
+ * on purpose: with hardware flow control and an unconnected CTS pin the console
+ * would stop transmitting. UART4 shares pins 19 and 21 with SPI1; SPI1 is enabled.
+ * The "rohm,dh2228fv" compatible is how mainline lets the generic spidev driver
+ * bind to a device tree node.
+ */
+&i2c6 {
+	clock-frequency = <400000>;
+	i2c-scl-falling-time-ns = <30>;
+	i2c-scl-rising-time-ns = <180>;
+	status = "okay";
+};
+
+&i2c7 {
+	clock-frequency = <400000>;
+	i2c-scl-falling-time-ns = <30>;
+	i2c-scl-rising-time-ns = <180>;
+	status = "okay";
+};
+
+&spi1 {
+	status = "okay";
+
+	spidev@0 {
+		compatible = "rohm,dh2228fv";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+	};
+};
+
+&spi5 {
+	status = "okay";
+
+	spidev@0 {
+		compatible = "rohm,dh2228fv";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+	};
+};
+
+&pwm0 {
+	status = "okay";
+};
+
+&pwm1 {
+	status = "okay";
+};
+
+&pwm3a {
 	status = "okay";
 };
