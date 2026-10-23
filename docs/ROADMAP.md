@@ -68,6 +68,14 @@ No browser is installed by the image.
 | Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
 | Tests | `scripts/test-board.sh` gets an NPU phase |
 
+### Release 0.3: SELinux (the release after 0.2; version number to be confirmed)
+
+| Item | Notes |
+|---|---|
+| SELinux instead of AppArmor as the major security module | our kernel needs `CONFIG_SECURITY_SELINUX`, `CONFIG_AUDIT`, `CONFIG_EXT4_FS_SECURITY` and `lsm=landlock,lockdown,yama,integrity,selinux` (AppArmor and SELinux cannot both be the major module); Debian packages `selinux-basics`, `selinux-policy-default`, `policycoreutils`, `auditd`. The root filesystem has to be labelled (`setfiles` while the image is built, or an automatic relabel on the first boot) |
+| Mode | start in **permissive** with auditing, collect the denials of the system services and the custom device nodes (`/dev/mpp_service`, `/dev/dma_heap/*`, the NPU services, GStreamer / OpenCL users), write local policy modules, then switch to enforcing and test again with `scripts/test-board.sh`. Enforcing from the first boot would break services |
+| Limits | Debian's reference policy is maintained by a small community and lags behind; the KDE desktop and PipeWire are not covered, so desktop users run as the `unconfined` user. Document how to switch the mode |
+
 ### Release 0.3, optional artifact (with the NPU release)
 
 | Item | Notes |
