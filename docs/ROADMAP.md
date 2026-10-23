@@ -68,6 +68,20 @@ No browser is installed by the image.
 | Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
 | Tests | `scripts/test-board.sh` gets an NPU phase |
 
+### Release 0.3: basic security
+
+| Item | Notes |
+|---|---|
+| `nftables` firewall, on by default | input policy drop; allow loopback, established connections, SSH (22), ping and mDNS (UDP 5353); rate-limit new SSH connections. Must be tested through the serial console so that a mistake cannot lock the user out |
+| Forced password change | `chage -d 0 debian`: the default password `debian` has to be changed at the first login (SSH and console) |
+
+Cheap measures that were discussed and are **not** scheduled (pick any): kernel switches that Debian's kernel has
+and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `YAMA`, `LOCKDOWN`, `LANDLOCK`;
+`INIT_ON_ALLOC_DEFAULT_ON` costs 1-3% speed), AppArmor, key-only SSH after a key is installed,
+`unattended-upgrades`, `sysctl` hardening (`kptr_restrict`, `dmesg_restrict`, syncookies), LLMNR off.
+Not done on purpose: secure boot through eFuses (irreversible), a secure OS (OP-TEE / BL32 is not loaded;
+TrustZone only hosts BL31 for PSCI).
+
 ### Release 0.3, optional artifact (with the NPU release)
 
 | Item | Notes |
