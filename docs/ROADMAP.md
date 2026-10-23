@@ -67,7 +67,7 @@ No browser is installed by the image.
 | Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
 | Tests | `scripts/test-board.sh` gets an NPU phase |
 
-### Release 0.3: memory controller
+### Release 0.4: memory controller
 
 | Item | Notes |
 |---|---|
