@@ -1,5 +1,10 @@
 # RK3399Pro NPU on the Tinker Edge R
 
+> **Status: experimental, not part of the default image.** The NPU stack is closed
+> (see [OPEN.md](OPEN.md)); its binaries are not stored in this repository and are not
+> downloaded by the build. Nothing here has run on the board. Place the files described
+> below in `third_party/npu/` (git-ignored) to include them in an image.
+
 The NPU is a separate die with its own CPU, DDR and a frozen Linux 4.4.185.
 The host only powers it, loads its firmware and talks to it through the
 `npu_transfer_proxy` daemon and `librknn_api`.
@@ -37,11 +42,13 @@ the device tree (`rk3399pro-tinker-edge-r-npu.dtsi`) and exposes
 
 ## Userspace
 
-| File | Source |
+Closed files, to be obtained by you and placed in `third_party/npu/` (git-ignored):
+
+| File | Where to get it |
 |---|---|
-| `/usr/bin/npu_transfer_proxy`, `/usr/share/npu_fw/*`, `librknn_api.so` | `airockchip/RK3399Pro_npu` (Apache-2.0), or your ASUS image |
-| `/usr/bin/upgrade_tool` | **not redistributable**: extracted from your ASUS image |
-| `npu-load`, `npu_powerctrl` shim, systemd units | `overlay/` |
+| `npu_transfer_proxy` (`linux-aarch64`), `npu_fw/*` (USB firmware), `npu_fw_pcie/*`, `librknn_api.so` (`Linux/lib64`), `rknn_api.h` | https://github.com/airockchip/RK3399Pro_npu (Apache-2.0, binary only) |
+| `upgrade_tool` | Rockchip Linux upgrade tool; the ASUS TinkerOS image ships a copy in `/usr/bin` (not redistributable) |
+| `npu-load`, `npu_powerctrl` shim, systemd units | this repository, `overlay/` |
 
 Without `upgrade_tool` the firmware cannot be loaded (`rkdeveloptool` lacks the
 `td` and `rs` commands used by the sequence).
