@@ -6,7 +6,7 @@ the stock device tree, and what was observed on the board.
 | Item | Value |
 |---|---|
 | SoC | Rockchip RK3399Pro: RK3399 (2 x Cortex-A72 + 4 x Cortex-A53) plus a separate NPU die |
-| Memory (host) | 2 x 2 GB LPDDR4 (one chip per channel), 4 GB total |
+| Memory (host) | 2 x 2 GB LPDDR4 (one chip per channel), 4 GB total; the image runs it at 933 MHz (LPDDR4-1866), ASUS used 800 MHz ([BOOT.md](BOOT.md)) |
 | Memory (NPU die) | 2 GB LPDDR3, its own |
 | Storage | 16 GB eMMC, microSD slot |
 | Ethernet | Gigabit, Realtek RTL8211F over RGMII |

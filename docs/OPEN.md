@@ -14,7 +14,7 @@ Closed components are replaced by open ones whenever that is possible.
 
 | Component | Where | Status | Replacement |
 |---|---|---|---|
-| DRAM init blob `rk3399pro_ddr_800MHz_v1.30.bin` | `blobs/rockchip/` | published (Rockchip licence) | none yet. U-Boot's open LPDDR4 TPL hangs on this board with the Rock Pi 4 timings; needs the real timings of the Edge R memory (2 x 2 GB LPDDR4) |
+| DRAM init blob `rk3399pro_ddr_933MHz_v1.30.bin` (the 800 MHz variant is kept as a fallback) | `blobs/rockchip/` | published (Rockchip licence) | none yet. U-Boot's open LPDDR4 TPL hangs on this board with the Rock Pi 4 timings; needs the real timings of the Edge R memory (2 x 2 GB LPDDR4) |
 | BL31 `rk3399pro_bl31_v1.35.elf` | `blobs/rockchip/` | published (Rockchip licence) | open TF-A builds with `scripts/build-tfa.sh` (patch in `patches/tf-a/`); **not yet tested on the board**: `USE_TFA=1 ./run.sh scripts/build-uboot.sh` |
 | Wi-Fi/BT firmware (`firmware-realtek`, `firmware-brcm80211`) | Debian `non-free-firmware`, installed at build time | not stored here | `FREE=1` builds a rootfs from Debian `main` only (no Wi-Fi) |
 | NPU: `npu_transfer_proxy`, `librknn_api`, NPU firmware | `airockchip/RK3399Pro_npu` (Apache-2.0, binary only); the ASUS copies of `upgrade_tool` and the firmware are used in local tests only | not stored here, not downloaded by the build; placed by hand in the git-ignored `third_party/npu/` | none (closed NPU stack, see docs/NPU.md) |

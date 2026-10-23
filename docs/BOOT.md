@@ -5,7 +5,7 @@ built this way.
 
 ```
 BootROM (in the SoC, fixed)
-  -> DRAM init blob   (Rockchip, blobs/rockchip/rk3399pro_ddr_800MHz_v1.30.bin)
+  -> DRAM init blob   (Rockchip, blobs/rockchip/rk3399pro_ddr_933MHz_v1.30.bin, 800 MHz variant as fallback)
   -> U-Boot SPL       (open, built from U-Boot v2026.10)
   -> BL31             (Rockchip blob; open TF-A builds, untested on the board)
   -> U-Boot proper    (open)
@@ -57,7 +57,7 @@ The Rockchip DRAM blob trains the memory itself and works: `DRAM: 4 GiB`. It is
 packed in front of the open SPL:
 
 ```
-mkimage -n rk3399 -T rksd -d rk3399pro_ddr_800MHz_v1.30.bin:u-boot-spl.bin idbloader.img
+mkimage -n rk3399 -T rksd -d rk3399pro_ddr_933MHz_v1.30.bin:u-boot-spl.bin idbloader.img
 ```
 
 Replacing the blob needs the real timings of the memory chips (see
@@ -77,3 +77,14 @@ It has not been run on the board yet.
 
 Kernel and U-Boot (SPL and proper) print on UART0, header pins 8/10, 115200.
 The device tree enables `uart0`; U-Boot gets `CONFIG_DEBUG_UART_BASE=0xFF180000`.
+
+## DRAM speed
+
+The DRAM initialisation blob decides the memory clock. The image uses the **933 MHz** blob
+(LPDDR4-1866); ASUS used 800 MHz (LPDDR4-1600). Both come from the same Rockchip `rkbin` commit.
+The 933 MHz setting passed an 8 minute `stress-ng --vm` run with verification and `memtester` on
+the board, and the full `scripts/test-board.sh`; it was **not** compared against 800 MHz in
+benchmarks, and Rockchip/ASUS do not promise it for this board. If you see random crashes or
+memory errors, build with the 800 MHz blob:
+`DDR_BLOB=blobs/rockchip/rk3399pro_ddr_800MHz_v1.30.bin ./run.sh scripts/build-uboot.sh`, or write a
+ready 800 MHz loader with `scripts/flash-at.sh 64 <loader>` in maskrom mode.

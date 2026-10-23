@@ -34,7 +34,8 @@ cp "$B/u-boot-rockchip.bin" out/u-boot-rockchip.bin
 # (the blob detects the DRAM type and trains it; U-Boot's own LPDDR4 timings were
 # seen to hang on the Tinker Edge R). Layout is the same: idbloader at sector 64
 # (file offset 0), u-boot.itb at sector 16384.
-DDR_BLOB=${DDR_BLOB:-$PWD/blobs/rockchip/rk3399pro_ddr_800MHz_v1.30.bin}
+# 933 MHz (LPDDR4-1866) by default; use rk3399pro_ddr_800MHz_v1.30.bin for the ASUS speed
+DDR_BLOB=${DDR_BLOB:-$PWD/blobs/rockchip/rk3399pro_ddr_933MHz_v1.30.bin}
 if [ -f "$DDR_BLOB" ]; then
     "$B/tools/mkimage" -n rk3399 -T rksd -d "$DDR_BLOB:$B/spl/u-boot-spl.bin" "$B/idbloader-ddrblob.img" >/dev/null
     python3 - "$B/idbloader-ddrblob.img" "$B/u-boot.itb" out/u-boot-rockchip-ddrblob.bin <<'PY'

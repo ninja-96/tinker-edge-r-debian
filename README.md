@@ -21,7 +21,7 @@ Checked on a real board with Linux 6.18.56 by `scripts/test-board.sh` and by han
 | Boot | DRAM init, U-Boot SPL and U-Boot, extlinux, Linux 6.18.56 from the eMMC | boots reliably, many reboots |
 | Flashing | eMMC install over USB with read-back verification, backup and restore, kernel update on a running board | all used |
 | Network | Gigabit Ethernet (DHCP), SSH, mDNS name `tinker-edge-r.local`, NTP | link and name resolution; throughput **not measured** |
-| CPU, RAM | 6 cores (A53 up to 1.4 GHz, A72 up to 1.8 GHz) with cpufreq, 4 GB RAM | stress test with result verification, 47 C at full load |
+| CPU, RAM | 6 cores (A53 up to 1.4 GHz, A72 up to 1.8 GHz) with cpufreq, 4 GB RAM at 933 MHz (LPDDR4-1866; ASUS used 800 MHz, [fallback](docs/BOOT.md)) | stress test with result verification, 47 C at full load |
 | eMMC | 16 GB, HS200: read 164 MB/s, write 26-52 MB/s, root filesystem grows to the whole eMMC on first boot | 512 MiB write and read back with checksum |
 | GPU | Mali-T860 with Panfrost: OpenGL ES 3.1 and OpenGL 3.1; **OpenCL 3.0** through Rusticl (on by default) | `eglinfo` shows Panfrost; OpenCL kernels give correct results; no image on a monitor yet |
 | Hardware video | H.264 encode (720p at 54 fps), H.264 decode (116 fps), VP8 encode, JPEG encode and decode through Rockchip `mpp` (`/dev/mpp_service`) | encode and decode of a 60-frame clip, frame count and size checked |

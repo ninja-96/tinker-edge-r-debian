@@ -7,7 +7,8 @@ their licences allow redistribution. Replacing them with open code is tracked in
 
 | File | What it does | Origin (pinned) | Licence |
 |---|---|---|---|
-| `rockchip/rk3399pro_ddr_800MHz_v1.30.bin` | DRAM initialisation and training (runs first, in SRAM) | https://github.com/rockchip-linux/rkbin, commit `3e288fe814e059dd06833495f845cab04ac20a5c`, `bin/rk33/` | Rockchip, see `rockchip/LICENSE` |
+| `rockchip/rk3399pro_ddr_933MHz_v1.30.bin` | DRAM initialisation and training at **933 MHz** (LPDDR4-1866); this is the default | https://github.com/rockchip-linux/rkbin, commit `3e288fe814e059dd06833495f845cab04ac20a5c`, `bin/rk33/` | Rockchip, see `rockchip/LICENSE` |
+| `rockchip/rk3399pro_ddr_800MHz_v1.30.bin` | same at 800 MHz (LPDDR4-1600, the ASUS setting); fallback: `DDR_BLOB=blobs/rockchip/rk3399pro_ddr_800MHz_v1.30.bin scripts/build-uboot.sh` | https://github.com/rockchip-linux/rkbin, commit `3e288fe814e059dd06833495f845cab04ac20a5c`, `bin/rk33/` | Rockchip, see `rockchip/LICENSE` |
 | `rockchip/rk3399pro_bl31_v1.35.elf` | EL3 firmware (PSCI, power management) | same | same |
 | `rockchip/rk3399_loader.bin` | USB loader for flashing the eMMC from the PC (maskrom mode); runs on the board | built with Rockchip's `tools/boot_merger` and `RKBOOT/RK3399MINIALL.ini` from the same `rkbin` commit, out of the unmodified `rk3399_ddr_800MHz_v1.30.bin`, `rk3399_usbplug_v1.30.bin`, `rk3399_miniloader_v1.30.bin` | same |
 
