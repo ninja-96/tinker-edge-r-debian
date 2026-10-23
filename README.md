@@ -24,7 +24,7 @@ cd tinker-edge-r-debian
 scripts/make-image.sh
 ```
 
-Result: `out/tinker-edge-r-debian13.img` (1.6 GB) and the flashing tools in `out/tools/`.
+Result: `out/tinker-edge-r-debian13.img` (about 1.9 GB) and the flashing tools in `out/tools/`.
 The script downloads the Linux and U-Boot sources and Debian packages, and builds
 everything inside a Docker container. Nothing from ASUS is downloaded and no Rockchip
 binary is downloaded: the few Rockchip binaries needed are in [`blobs/`](blobs/README.md).
@@ -89,7 +89,7 @@ sudo reboot
 ```
 
 The login screen (SDDM) appears on the monitor. The GPU driver is Mesa Panfrost (OpenGL ES
-on the Mali-T860, no Vulkan). The board has 4 GB of RAM; if the desktop feels
+on the Mali-T860: OpenGL ES 3.1 and OpenCL 3.0, no hardware Vulkan). The board has 4 GB of RAM; if the desktop feels
 tight, enable compressed swap in RAM: `sudo apt install systemd-zram-generator`.
 Sound goes to the 3.5 mm jack and, with a monitor attached, to HDMI.
 To go back to the text console: `sudo systemctl set-default multi-user.target`.
@@ -119,7 +119,7 @@ Verified on a real board:
 | Ethernet (DHCP), SSH, mDNS name `tinker-edge-r.local`, NTP | yes |
 | eMMC install with read-back verification | yes |
 
-Built into the image but **not tested yet**: HDMI, USB ports, GPU (panfrost), hardware
+Hardware video encoding/decoding with GStreamer (`mpph264enc`, `mppvideodec`) works out of the box (the image boots the `mpp` device tree). Built into the image but **not tested yet**: HDMI, USB ports, GPU (panfrost), hardware
 video decode/encode, Wi-Fi/Bluetooth (Realtek firmware from Debian), audio, NPU
 (experimental, closed stack, not in the default image). See
 [docs/ROADMAP.md](docs/ROADMAP.md) and [docs/BRINGUP.md](docs/BRINGUP.md).

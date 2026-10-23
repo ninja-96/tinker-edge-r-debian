@@ -32,3 +32,9 @@ RK3399PRO_NPU_REV=8858114555f1700e41e185b14ec3d266342f8059
 # provenance of third_party/rkdeveloptool
 RKDEVELOPTOOL_REPO=https://github.com/rockchip-linux/rkdeveloptool.git
 RKDEVELOPTOOL_REV=304f073752fd25c854e1bcf05d8e7f925b1f4e14
+
+# Rockchip GStreamer plugins (rockchipmpp: mpph264enc, mppvideodec, mppjpegenc, ...), LGPL-2.1,
+# built by scripts/build-gst-rockchip.sh. Branch gstreamer-rockchip of the Rockchip mirror.
+GST_ROCKCHIP_REPO=https://github.com/JeffyCN/mirrors.git
+GST_ROCKCHIP_BRANCH=gstreamer-rockchip
+GST_ROCKCHIP_REV=ebc758a13d425d34858a98dbcdb4a4bd702daa0f

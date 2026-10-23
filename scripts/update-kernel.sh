@@ -54,7 +54,7 @@ echo "installed $REL; reboot to use it"
 EOS
 
 echo "Uploading..."
-tar -C out -cf - Image rk3399pro-tinker-edge-r*.dtb "modules/lib/modules/$REL" \
+( cd out && tar -cf - Image rk3399pro-tinker-edge-r*.dtb "modules/lib/modules/$REL" ) \
     | "${SSH[@]}" "rm -rf /tmp/kupd && mkdir -p /tmp/kupd && tar -xf - -C /tmp/kupd"
 scp -q -o ControlPath="$CTL" "$RS" "$U@$HOST:/tmp/kupd/install.sh"
 "${SSH[@]}" "echo '$PASS' | sudo -S -p '' env REL=$REL sh /tmp/kupd/install.sh && rm -rf /tmp/kupd"

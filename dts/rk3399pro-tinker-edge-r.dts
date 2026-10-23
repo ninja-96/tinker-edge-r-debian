@@ -677,17 +677,13 @@
 	status = "okay";
 };
 
+/*
+ * SDIO0 is disabled: nothing is connected to it (Wi-Fi is PCIe, Bluetooth is USB),
+ * and its pins GPIO2_C4-C7 are the SPI5 pins of the 40-pin header (13-18); with
+ * both enabled the pin controller refused the SDIO pins at every boot.
+ */
 &sdio0 {
-	bus-width = <4>;
-	cap-sd-highspeed;
-	cap-sdio-irq;
-	keep-power-in-suspend;
-	mmc-pwrseq = <&sdio_pwrseq>;
-	non-removable;
-	pinctrl-names = "default";
-	pinctrl-0 = <&sdio0_bus4>, <&sdio0_cmd>, <&sdio0_clk>;
-	sd-uhs-sdr104;
-	status = "okay";
+	status = "disabled";
 };
 
 &sdmmc {

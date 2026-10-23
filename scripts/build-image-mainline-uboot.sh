@@ -12,7 +12,9 @@ cd "$(dirname "$0")/.."
 . ./sources.lock
 O=out
 KVER=${LINUX_VERSION}${KERNEL_LOCALVERSION}
-DTB_VARIANT=${DTB_VARIANT:-base}
+# mpp: Rockchip mpp_service drives the video codecs (H.264/VP8/JPEG encode, H.265/VP9 decode)
+# and GStreamer uses it; base uses the mainline V4L2 decoders only (no encoder).
+DTB_VARIANT=${DTB_VARIANT:-mpp}
 case "$DTB_VARIANT" in
     base) DTB=rk3399pro-tinker-edge-r.dtb ;;
     *)    DTB=rk3399pro-tinker-edge-r-$DTB_VARIANT.dtb ;;
@@ -20,7 +22,7 @@ esac
 FREE=${FREE:-0}
 IMG=$O/tinker-edge-r-debian13.img
 [ "$FREE" = 1 ] && IMG=$O/tinker-edge-r-debian13-free.img
-ROOTFS_MIB=${ROOTFS_MIB:-1536}
+ROOTFS_MIB=${ROOTFS_MIB:-1792}
 BOOT_MIB=64
 PARTUUID_ROOT=6c1f7b3e-0b6c-4a7e-9d5c-2b1c3f4a5e02
 

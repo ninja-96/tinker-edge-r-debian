@@ -1,3 +1,5 @@
 # Rockchip MPP video codec service
 KERNEL=="mpp_service", MODE="0660", GROUP="video"
 KERNEL=="rkvdec|vpu_service|vpu-service|hevc_service|hevc-service", MODE="0660", GROUP="video"
+# dma-buf heaps used by mpp and by GStreamer for video buffers
+SUBSYSTEM=="dma_heap", MODE="0660", GROUP="video"

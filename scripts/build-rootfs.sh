@@ -17,9 +17,10 @@ PACKAGES=(
     openssh-server sudo ca-certificates
     iproute2 iputils-ping ethtool wpasupplicant iw
     usbutils pciutils less nano curl
-    fdisk e2fsprogs python3 libusb-1.0-0
+    fdisk util-linux-extra e2fsprogs python3 libusb-1.0-0
     systemd-timesyncd wireless-regdb rfkill
-    locales alsa-utils bluez libgl1-mesa-dri libegl-mesa0 libgbm1 mesa-utils-bin libdrm-tests
+    gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
+    locales alsa-utils bluez libgl1-mesa-dri libegl-mesa0 libgbm1 mesa-utils libdrm-tests mesa-opencl-icd clinfo
 )
 if [ "$FREE" = 1 ]; then
     COMPONENTS="main"
@@ -43,7 +44,7 @@ mmdebstrap --arch=arm64 --variant=minbase \
         printf "[Match]\nName=e*\n\n[Network]\nDHCP=yes\n" > "$1/etc/systemd/network/20-wired.network"
         ln -sf /run/systemd/resolve/stub-resolv.conf "$1/etc/resolv.conf"
         chroot "$1" systemctl enable systemd-networkd systemd-resolved ssh
-        chroot "$1" useradd -m -s /bin/bash -G sudo,video,audio,dialout,plugdev '"$USER_"'
+        chroot "$1" useradd -m -s /bin/bash -G sudo,video,render,audio,dialout,plugdev '"$USER_"'
         echo "'"$USER_"':'"$PASS_"'" | chroot "$1" chpasswd
         echo "en_US.UTF-8 UTF-8" > "$1/etc/locale.gen"
         chroot "$1" locale-gen

@@ -5,6 +5,9 @@
  * by mpp_service (/dev/mpp_service, userspace library `mpp`) instead of the
  * mainline V4L2 hantro/rkvdec drivers, which are disabled here.
  * Include after the board DTS.
+ *
+ * The assigned-clocks lines raise the codec clocks (the BSP driver did this in C and the
+ * port stubs it; without them aclk_vcodec stays at 50 MHz and encoding runs at 4 fps).
  */
 
 / {
@@ -22,6 +25,8 @@
 		interrupt-names = "irq_enc";
 		clocks = <&cru ACLK_VCODEC>, <&cru HCLK_VCODEC>;
 		clock-names = "aclk_vcodec", "hclk_vcodec";
+		assigned-clocks = <&cru ACLK_VCODEC>;
+		assigned-clock-rates = <400000000>;
 		resets = <&cru SRST_H_VCODEC>, <&cru SRST_A_VCODEC>;
 		reset-names = "shared_video_h", "shared_video_a";
 		iommus = <&vpu_mmu>;
@@ -39,6 +44,8 @@
 		interrupt-names = "irq_dec";
 		clocks = <&cru ACLK_VCODEC>, <&cru HCLK_VCODEC>;
 		clock-names = "aclk_vcodec", "hclk_vcodec";
+		assigned-clocks = <&cru ACLK_VCODEC>;
+		assigned-clock-rates = <400000000>;
 		resets = <&cru SRST_H_VCODEC>, <&cru SRST_A_VCODEC>;
 		reset-names = "shared_video_h", "shared_video_a";
 		iommus = <&vpu_mmu>;
@@ -58,6 +65,9 @@
 			 <&cru SCLK_VDU_CA>, <&cru SCLK_VDU_CORE>;
 		clock-names = "aclk_vcodec", "hclk_vcodec",
 			      "clk_cabac", "clk_core";
+		assigned-clocks = <&cru ACLK_VDU>, <&cru SCLK_VDU_CA>,
+				  <&cru SCLK_VDU_CORE>;
+		assigned-clock-rates = <400000000>, <400000000>, <400000000>;
 		resets = <&cru SRST_H_VDU>, <&cru SRST_A_VDU>,
 			 <&cru SRST_H_VDU_NOC>, <&cru SRST_A_VDU_NOC>,
 			 <&cru SRST_VDU_CA>, <&cru SRST_VDU_CORE>;

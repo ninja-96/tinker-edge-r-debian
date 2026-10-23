@@ -1,0 +1,2 @@
+# Rusticl (OpenCL in Mesa) must be told which driver to use; Mali-T860 = panfrost
+RUSTICL_ENABLE=panfrost

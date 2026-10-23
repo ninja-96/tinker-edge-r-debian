@@ -62,7 +62,7 @@ echo "memory : $(free -m | awk '/Mem:/{print $2" MiB total, "$7" MiB available"}
 DMESG_BASE=$(dmesg | wc -l)
 
 hdr "Tools"
-for t in "stress-ng stress-ng" "iperf3 iperf3" "eglinfo mesa-utils-bin" "glmark2-es2-drm glmark2-es2-drm" "iw iw" "bluetoothctl bluez" "ethtool ethtool" "modetest libdrm-tests" "aplay alsa-utils" "lsusb usbutils" "gpioinfo gpiod" "i2cdetect i2c-tools" "v4l2-ctl v4l-utils" "ffmpeg ffmpeg"; do
+for t in "stress-ng stress-ng" "iperf3 iperf3" "eglinfo mesa-utils" "glmark2-es2-drm glmark2-es2-drm" "iw iw" "bluetoothctl bluez" "ethtool ethtool" "modetest libdrm-tests" "aplay alsa-utils" "lsusb usbutils" "gpioinfo gpiod" "i2cdetect i2c-tools" "clinfo clinfo" "v4l2-ctl v4l-utils" "media-ctl v4l-utils" "ffmpeg ffmpeg"; do
     set -- $t
     need "$1" "$2" && echo "ok      $1" || echo "MISSING $1 (package $2)"
 done
@@ -196,8 +196,8 @@ done
 [ "$npwm" -ge 3 ] && res "PWM (pins 26, 32, 33)" PASS "$npwm PWM channels start and stop" || res "PWM (pins 26, 32, 33)" FAIL "only $npwm of 3 channels work"
 
 hdr "MIPI cameras and displays"
-ms=$(ls /dev/media* 2>/dev/null | wc -l)
-[ "$ms" -gt 0 ] && res "MIPI camera" PASS "$ms media device(s): $(v4l2-ctl --list-devices 2>/dev/null | grep -iE 'isp|ov5647|imx219' | head -2 | tr '\n' ' ')" \
+cam=$(for m in /dev/media*; do [ -e "$m" ] && media-ctl -d "$m" -p 2>/dev/null | grep -m1 'driver ' | grep -qi 'rkisp1' && echo "$m"; done)
+[ -n "$cam" ] && res "MIPI camera" PASS "rkisp1 media device: $(echo $cam | tr '\n' ' ')" \
     || res "MIPI camera" SKIP "no camera described in the device tree (docs/MIPI.md)"
 dsi=$(ls -d /sys/class/drm/card*-DSI-* 2>/dev/null | head -1)
 [ -n "$dsi" ] && res "MIPI DSI display" PASS "$(basename "$dsi"): $(cat "$dsi/status")" || res "MIPI DSI display" SKIP "no DSI panel described in the device tree (docs/MIPI.md)"
@@ -252,8 +252,10 @@ else res "eMMC" PASS "checksum ok, write ~${wr} MiB/s, read ~${rd} MiB/s, no bus
 rm -f "$f" "$f.src" "$f.copy"
 
 hdr "GPU (panfrost)"
-if [ -e /dev/dri/renderD128 ] && command -v eglinfo >/dev/null; then
-    r=$(eglinfo -B 2>/dev/null | grep -i 'renderer' | grep -i -m1 'panfrost\|mali')
+if [ ! -e /dev/dri/renderD128 ]; then res "GPU renderer" FAIL "no /dev/dri/renderD128"
+elif ! command -v eglinfo >/dev/null; then res "GPU renderer" SKIP "eglinfo missing (package mesa-utils)"
+else
+    r=$(eglinfo -p gbm -B 2>/dev/null | grep -i 'renderer' | grep -i -m1 'panfrost\|mali')
     [ -n "$r" ] && res "GPU renderer" PASS "$(echo "$r" | sed 's/^ *//')" || res "GPU renderer" FAIL "no Panfrost/Mali renderer in eglinfo (software rendering?)"
     if command -v glmark2-es2-drm >/dev/null; then
         glmark2-es2-drm --off-screen -b build:duration=10 -b texture:duration=10 -b shading:duration=10 > "$W/glmark.log" 2>&1; rc=$?
@@ -261,7 +263,13 @@ if [ -e /dev/dri/renderD128 ] && command -v eglinfo >/dev/null; then
         if [ $rc = 0 ] && [ -n "$score" ]; then res "GPU load (glmark2)" PASS "score $score, gpu $(gpu_freq) MHz"
         else res "GPU load (glmark2)" SKIP "glmark2 needs a connected display (HDMI): $(tail -1 "$W/glmark.log")"; fi
     fi
-else res "GPU renderer" SKIP "no render node"; fi
+fi
+
+hdr "OpenCL (Rusticl on Panfrost)"
+if command -v clinfo >/dev/null; then
+    cn=$(RUSTICL_ENABLE=panfrost clinfo 2>/dev/null | awk '/Platform Name/{p=$0} /Device Name/{print p" | "$0}' | grep -i rusticl | grep -ci 'panfrost\|mali')
+    [ "${cn:-0}" -ge 1 ] && res "OpenCL" PASS "Mali-T860 visible through Rusticl (OpenCL 3.0)" || res "OpenCL" FAIL "no Panfrost device in Rusticl (RUSTICL_ENABLE=panfrost, package mesa-opencl-icd)"
+else res "OpenCL" SKIP "clinfo missing"; fi
 
 hdr "Network (gigabit, 2 x ${D}s)"
 link=$(ethtool end0 2>/dev/null | awk '/Speed:/{print $2}')

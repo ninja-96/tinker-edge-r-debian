@@ -471,7 +471,7 @@ int mpp_iommu_attach(struct mpp_iommu_info *info)
 	return iommu_attach_group(info->domain, info->group);
 }
 
-static int mpp_iommu_handle(struct iommu_domain *iommu,
+static int __maybe_unused mpp_iommu_handle(struct iommu_domain *iommu,
 			    struct device *iommu_dev,
 			    unsigned long iova,
 			    int status, void *arg)
@@ -651,9 +651,13 @@ int mpp_iommu_dev_activate(struct mpp_iommu_info *info, struct mpp_dev *dev)
 		ret = -EINVAL;
 	} else {
 		info->dev_active = dev;
-		/* switch domain pagefault handler and arg depending on device */
-		iommu_set_fault_handler(info->domain, dev->fault_handler ?
-					dev->fault_handler : mpp_iommu_handle, dev);
+		/*
+		 * The BSP switched the domain's page fault handler here. Since kernel 6.x
+		 * a handler may only be set on an unmanaged domain; this one is the default
+		 * DMA domain and the call warned (with a stack trace on the console, about
+		 * 230 ms per task at 115200 baud). Faults are still reported by the
+		 * rockchip-iommu driver.
+		 */
 
 		dev_dbg(info->dev, "activate -> %p %s\n", dev, dev_name(dev->dev));
 	}

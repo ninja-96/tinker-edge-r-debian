@@ -37,6 +37,11 @@ if [ -d "$O/mpp/usr" ]; then
     cp -a "$O/mpp/usr/." "$W/usr/"
 fi
 
+# Rockchip GStreamer plugins (built by build-gst-rockchip.sh)
+if [ -d "$O/gst-rockchip/usr" ]; then
+    cp -a "$O/gst-rockchip/usr/." "$W/usr/"
+fi
+
 # overlay (services, helper scripts, udev rules) and unit enablement
 cp -a overlay/. "$W/"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
