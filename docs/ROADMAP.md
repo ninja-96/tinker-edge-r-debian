@@ -15,6 +15,6 @@
 | Audio (3.5 mm jack via RK809, HDMI) | RK809 card is registered; HDMI card needs a working display; nothing played yet | listen to the test tone |
 | Boot from an SD card (2 GiB swap file on first boot) | untested | write with `scripts/flash-sd.sh` and boot |
 | KDE Plasma desktop | instructions in the README, untested | install `task-kde-desktop` after HDMI works |
-| NPU (variant `-npu`, closed stack) | power driver builds, untested | USB link test, see [NPU.md](NPU.md) |
+| NPU (variant `-npu`, closed stack) | works: power-up, firmware load, ADB, MobileNet inference | replace `upgrade_tool`, ship the Apache-licensed Rockchip files in `blobs/npu/`, see [NPU.md](NPU.md) |
 | Open NPU kernel driver (port of NXP's Vivante driver) | research only | compare the ioctl ABI, see [NPU-RESEARCH.md](NPU-RESEARCH.md) |
 | Next LTS kernel after 6.18 | - | bump `sources.lock`, rebase `patches/` and `kernel-mods/` |

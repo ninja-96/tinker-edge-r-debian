@@ -1,9 +1,11 @@
 # RK3399Pro NPU on the Tinker Edge R
 
-> **Status: experimental, not part of the default image.** The NPU stack is closed
-> (see [OPEN.md](OPEN.md)); its binaries are not stored in this repository and are not
-> downloaded by the build. Nothing here has run on the board. Place the files described
-> below in `third_party/npu/` (git-ignored) to include them in an image.
+> **Status: works on the board (verified 2026-10-23), optional, not part of the default
+> image.** The NPU stack is closed (see [OPEN.md](OPEN.md)); its binaries are not stored in
+> this repository and are not downloaded by the build. Verified: power-up, firmware load,
+> ADB shell on the NPU die, RKNN transport, and a MobileNet inference through `librknn_api`
+> (kernel 6.18 on the host). Place the files described below in `third_party/npu/`
+> (git-ignored) to include them in an image.
 
 The NPU is a separate die with its own CPU, DDR and a frozen Linux 4.4.185.
 The host only powers it, loads its firmware and talks to it through the
@@ -38,7 +40,17 @@ suspend/resume handling is not implemented yet.
 The vendor kernel flipped the clock through a debugfs file that mainline lacks,
 so `kernel-mods/drivers/soc/rockchip/tinker-npu-power.c` does the sequence from
 the device tree (`rk3399pro-tinker-edge-r-npu.dtsi`) and exposes
-`/sys/bus/platform/drivers/tinker-npu-power/*/{power,reset}`.
+`/sys/bus/platform/drivers/tinker-npu-power/*/{enable,reset}`.
+
+Two details that cost a day to find, both fixed in the driver and the device tree:
+
+- The reference clock is `clk_wifi_pmu` of the **PMU** clock controller (`&pmucru`), and it
+  must run at **24 MHz**: the NPU die takes it as its crystal input. The default of the
+  clock tree is 26 MHz, with which the NPU's BootROM never shows up on USB. The driver sets
+  24 MHz before enabling the clock.
+- Once powered, the NPU appears on USB as `2207:180a` (Maskrom, port 4 of the on-board
+  USB hub); after the firmware is loaded it re-enumerates as `2207:0019` (SuperSpeed) with an
+  ADB and an RKNN (NTB) interface.
 
 ## Userspace
 
@@ -53,6 +65,11 @@ Closed files, to be obtained by you and placed in `third_party/npu/` (git-ignore
 Without `upgrade_tool` the firmware cannot be loaded (`rkdeveloptool` lacks the
 `td` and `rs` commands used by the sequence).
 
+The stock `npu_transfer_proxy` reads the `Hardware` and `Serial` lines of `/proc/cpuinfo`,
+which only the vendor kernel prints, and otherwise exits silently with status 0.
+`/usr/local/sbin/npu-proxy-run` therefore starts it in its own mount namespace with a
+private `/proc/cpuinfo` that has those two lines (the serial is the NPU's USB serial).
+
 Services (active only with an `-npu` or `-full` DTB, via
 `ConditionPathExists=/proc/device-tree/npu-power`):
 
@@ -61,6 +78,16 @@ Services (active only with an `-npu` or `-full` DTB, via
 
 Enable on the board: `sudo tinker-boot-select npu` (or `full`), reboot.
 
-## Not verified
+## ADB on the NPU die
 
-None of this has run on hardware yet.
+The stock NPU firmware enables ADB next to the RKNN link (`/etc/init.d/.usb_config` has
+`usb_adb_en` and `usb_ntb_en`). With the NPU running: `sudo apt install adb`,
+`sudo adb shell` gives a root shell in the NPU's own Linux 4.4 (Buildroot, 2 GB RAM).
+
+## Known problems
+
+- If a client is killed while talking to the NPU, `rknn_server` on the NPU can stay stuck and
+  the next `rknn_init` hangs. Restart the NPU side: stop `npu-transfer-proxy`, restart
+  `npu-firmware`, start `npu-transfer-proxy`.
+- Tested with the ASUS copy of the firmware and proxy (proxy 2.0.0, `rknn_server` 1.6.0) and
+  `librknn_api` 1.7.5.

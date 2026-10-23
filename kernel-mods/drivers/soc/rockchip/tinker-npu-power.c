@@ -67,6 +67,17 @@ static int npu_power_up_locked(struct tinker_npu_power *p)
 		usleep_range(2000, 3000);
 	}
 
+	/*
+	 * The NPU die (RK1808 family) takes this clock as its 24 MHz crystal input
+	 * and derives its PLLs and USB PHY clock from it. The default of the clock
+	 * tree is 26 MHz (Wi-Fi), which keeps the NPU from enumerating on USB.
+	 */
+	ret = clk_set_rate(p->ref_clk, 24000000);
+	if (ret)
+		dev_warn(p->dev, "cannot set the reference clock to 24 MHz: %d\n", ret);
+	else
+		dev_info(p->dev, "reference clock %lu Hz\n", clk_get_rate(p->ref_clk));
+
 	ret = clk_prepare_enable(p->ref_clk);
 	if (ret) {
 		npu_all_low(p);
@@ -96,7 +107,7 @@ static void npu_power_down_locked(struct tinker_npu_power *p)
 	p->on = false;
 }
 
-static ssize_t power_show(struct device *dev, struct device_attribute *attr,
+static ssize_t enable_show(struct device *dev, struct device_attribute *attr,
 			  char *buf)
 {
 	struct tinker_npu_power *p = dev_get_drvdata(dev);
@@ -104,7 +115,7 @@ static ssize_t power_show(struct device *dev, struct device_attribute *attr,
 	return sysfs_emit(buf, "%d\n", p->on);
 }
 
-static ssize_t power_store(struct device *dev, struct device_attribute *attr,
+static ssize_t enable_store(struct device *dev, struct device_attribute *attr,
 			   const char *buf, size_t count)
 {
 	struct tinker_npu_power *p = dev_get_drvdata(dev);
@@ -123,7 +134,7 @@ static ssize_t power_store(struct device *dev, struct device_attribute *attr,
 
 	return ret ? ret : count;
 }
-static DEVICE_ATTR_RW(power);
+static DEVICE_ATTR_RW(enable);
 
 /* Write 1 to power-cycle the NPU (what `npu_powerctrl -i; -o` did). */
 static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
@@ -147,7 +158,7 @@ static ssize_t reset_store(struct device *dev, struct device_attribute *attr,
 static DEVICE_ATTR_WO(reset);
 
 static struct attribute *tinker_npu_power_attrs[] = {
-	&dev_attr_power.attr,
+	&dev_attr_enable.attr,
 	&dev_attr_reset.attr,
 	NULL
 };

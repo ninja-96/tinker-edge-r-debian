@@ -6,6 +6,6 @@ ctl=$(ls -d /sys/bus/platform/drivers/tinker-npu-power/*/ 2>/dev/null | head -1)
 case "$1" in
     -i|-s|-r) ;;                         # init / sleep / wake: nothing to do
     -o) echo 1 > "$ctl/reset" ;;
-    -d) echo 0 > "$ctl/power" ;;
+    -d) echo 0 > "$ctl/enable" ;;
     *)  echo "Usage: npu_powerctrl [-i] [-o] [-d]" >&2; exit 1 ;;
 esac

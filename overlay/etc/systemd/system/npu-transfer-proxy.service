@@ -5,7 +5,7 @@ After=npu-firmware.service
 ConditionPathExists=/usr/bin/npu_transfer_proxy
 
 [Service]
-ExecStart=/usr/bin/npu_transfer_proxy
+ExecStart=/usr/local/sbin/npu-proxy-run
 Restart=on-failure
 RestartSec=2
 

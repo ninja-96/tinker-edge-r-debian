@@ -27,3 +27,6 @@ screenlog.*
 *.sha256
 !blobs/**/SHA256SUMS
 third_party/npu/
+
+# Private research notes and extracted vendor files
+rnd/

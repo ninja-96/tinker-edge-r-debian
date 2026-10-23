@@ -810,7 +810,7 @@
  * 40-pin header (3.3 V). Functions as in the ASUS pin table (docs/GPIO.md):
  *   pins 3, 5     I2C6  (/dev/i2c-6)       pins 27, 28   I2C7 (/dev/i2c-7)
  *   pins 13-18    SPI5  (/dev/spidev5.0)   pins 19-24    SPI1 (/dev/spidev1.0)
- *   pin 32 PWM0, pin 33 PWM1, pin 26 PWM3A (/sys/class/pwm)
+ *   pin 32 PWM0, pin 33 PWM1, pin 26 PWM3 (channel A) (/sys/class/pwm)
  *   pins 8, 10    UART0 (console, ttyS0)
  * Everything else is a plain GPIO (libgpiod). UART0 RTS/CTS (pins 11, 36) stay GPIO
  * on purpose: with hardware flow control and an unconnected CTS pin the console
@@ -860,6 +860,6 @@
 	status = "okay";
 };
 
-&pwm3a {
+&pwm3 {
 	status = "okay";
 };

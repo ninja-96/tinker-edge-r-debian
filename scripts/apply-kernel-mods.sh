@@ -48,7 +48,7 @@ s = s[:i] + """config TINKER_NPU_POWER
 	help
 	  Powers up the NPU die of the RK3399Pro on the Tinker Edge R
 	  (GPIO and clock sequence of the stock npu_powerctrl tool) and
-	  exposes /sys/devices/platform/<npu-power>/{power,reset}.
+	  exposes /sys/devices/platform/<npu-power>/{enable,reset}.
 
 """ + s[i:]
 open(p, "w").write(s)

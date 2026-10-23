@@ -3,7 +3,7 @@
 Findings about the RK3399Pro NPU die and whether its software stack could be
 opened. Method: strings and symbols of the firmware shipped with the stock image,
 the public Rockchip/NXP/etnaviv repositories (see [LINKS.md](LINKS.md)).
-Nothing here was run on hardware.
+The USB and ADB findings were confirmed on the board (2026-10-23).
 
 ## What the NPU die is
 
@@ -52,8 +52,9 @@ about 3 TOPS, RKNN 1.7.x operator set, no LLM.
 DMA, timers, thermal sensor, the NPU. No Ethernet MAC (RK1808 has one, but it is not
 wired in the RK3399Pro package), no Wi-Fi. The firmware's `S50usbdevice` can switch the
 USB gadget to ADB, RNDIS (Ethernet over USB), ACM serial or NTB (the RKNN transport);
-the stock configuration enables NTB only. A shell or a network link to the NPU die is
-therefore possible by enabling `ADB_EN`/`RNDIS_EN` in a repacked ramdisk.
+the stock `.usb_config` enables **ADB and NTB** together (confirmed: `adb shell` works).
+A network link over USB (RNDIS) is possible by adding `usb_rndis_en` to that file in a
+repacked ramdisk.
 
 ## Power and safety
 

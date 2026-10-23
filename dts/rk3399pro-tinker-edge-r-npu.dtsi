@@ -10,7 +10,7 @@
 / {
 	npu_power: npu-power {
 		compatible = "asus,tinker-edge-r-npu-power";
-		clocks = <&cru SCLK_WIFI_PMU>, <&rk809 1>;
+		clocks = <&pmucru SCLK_WIFI_PMU>, <&rk809 1>;
 		clock-names = "ref", "clk32k";
 		pinctrl-names = "default";
 		pinctrl-0 = <&npu_ref_clk>;
