@@ -5,7 +5,9 @@
 #   tinker-power powersave       lower clock limits: cool and quiet, slower
 #   tinker-power normal          the default: automatic scaling over the whole range
 #   tinker-power performance     the highest clocks all the time
-#   tinker-power apply           apply the saved profile (done at every boot)
+#   tinker-power apply           apply the saved profile now (CPU and GPU)
+#   tinker-power apply-cpu | apply-gpu    one half only (used at boot: the CPU at the very start,
+#                                the GPU the moment its driver appears, see the udev rule)
 #   add --no-save to try a profile without making it the one used after a reboot
 #
 # Only the cpufreq governors and limits and the GPU devfreq limits are changed, always within
@@ -71,14 +73,25 @@ set_gpu() {
     echo "$lo" > "$GPU/min_freq" || die "cannot set the GPU minimum"
 }
 
+# apply_profile <profile> [cpu|gpu|all]
 apply_profile() {
+    local part=${2:-all}
     find_clusters
     case "$1" in
-        powersave)   set_cpu "$LITTLE" schedutil 816;  set_cpu "$BIG" schedutil 1008; set_gpu 200 400 ;;
-        normal)      set_cpu "$LITTLE" schedutil 1416; set_cpu "$BIG" schedutil 1800; set_gpu 200 800 ;;
-        performance) set_cpu "$LITTLE" performance 1416; set_cpu "$BIG" performance 1800; set_gpu 800 800 ;;
+        powersave)   [ "$part" = gpu ] || { set_cpu "$LITTLE" schedutil 816;  set_cpu "$BIG" schedutil 1008; }
+                     [ "$part" = cpu ] || set_gpu 200 400 ;;
+        normal)      [ "$part" = gpu ] || { set_cpu "$LITTLE" schedutil 1416; set_cpu "$BIG" schedutil 1800; }
+                     [ "$part" = cpu ] || set_gpu 200 800 ;;
+        performance) [ "$part" = gpu ] || { set_cpu "$LITTLE" performance 1416; set_cpu "$BIG" performance 1800; }
+                     [ "$part" = cpu ] || set_gpu 800 800 ;;
         *) die "unknown profile '$1' (powersave, normal, performance)" ;;
     esac
+}
+
+saved_profile() {
+    local p=normal
+    [ -r "$CONF" ] && p=$(sed -n 's/^PROFILE=//p' "$CONF" | tail -1)
+    echo "${p:-normal}"
 }
 
 mhz() { echo $(( $(cat "$1") / 1000 )); }
@@ -100,9 +113,9 @@ detect() {
 
 status() {
     find_clusters
-    local saved=normal t
-    [ -r "$CONF" ] && saved=$(sed -n 's/^PROFILE=//p' "$CONF" | tail -1)
-    echo "profile now:   $(detect)    (used after a reboot: ${saved:-normal})"
+    local saved t
+    saved=$(saved_profile)
+    echo "profile now:   $(detect)    (used after a reboot: $saved)"
     echo "CPU A53:       $(mhz "$LITTLE/scaling_cur_freq") MHz now, governor $(cat "$LITTLE/scaling_governor"), limit $(mhz "$LITTLE/scaling_min_freq")-$(mhz "$LITTLE/scaling_max_freq") MHz"
     echo "CPU A72:       $(mhz "$BIG/scaling_cur_freq") MHz now, governor $(cat "$BIG/scaling_governor"), limit $(mhz "$BIG/scaling_min_freq")-$(mhz "$BIG/scaling_max_freq") MHz"
     if [ -d "$GPU" ]; then
@@ -125,15 +138,20 @@ case "$CMD" in
         sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
     apply)
         need_root || exec sudo "$0" "$@"
-        p=normal; [ -r "$CONF" ] && p=$(sed -n 's/^PROFILE=//p' "$CONF" | tail -1)
-        # the GPU driver can come up a little after this service; wait for it
+        # the GPU driver can come up a little after this call; wait for it (not at boot: see apply-gpu)
         for _ in $(seq 1 20); do [ -d "$GPU" ] && break; sleep 1; done
-        apply_profile "${p:-normal}" ;;
+        apply_profile "$(saved_profile)" ;;
+    apply-cpu)
+        need_root || exec sudo "$0" "$@"
+        apply_profile "$(saved_profile)" cpu ;;
+    apply-gpu)
+        need_root || exec sudo "$0" "$@"
+        apply_profile "$(saved_profile)" gpu ;;
     powersave|normal|performance)
         need_root || exec sudo "$0" "${ARGS[@]}" $([ "$SAVE" = 1 ] || echo --no-save)
         apply_profile "$CMD"
         [ "$SAVE" = 1 ] && printf '# written by tinker-power\nPROFILE=%s\n' "$CMD" > "$CONF"
         status ;;
     *)
-        die "unknown command '$CMD' (status, powersave, normal, performance, apply, help)" ;;
+        die "unknown command '$CMD' (status, powersave, normal, performance, apply, apply-cpu, apply-gpu, help)" ;;
 esac

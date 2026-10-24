@@ -1,0 +1,2 @@
+# Apply the saved power profile to the GPU the moment its devfreq device appears
+SUBSYSTEM=="devfreq", KERNEL=="ff9a0000.gpu", ACTION=="add", RUN+="/usr/local/sbin/tinker-power apply-gpu"

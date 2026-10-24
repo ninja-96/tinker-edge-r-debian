@@ -324,7 +324,9 @@ if command -v tinker-power >/dev/null; then
     done
     case "$orig" in powersave|normal|performance) tinker-power "$orig" --no-save >/dev/null 2>&1 ;; *) tinker-power normal --no-save >/dev/null 2>&1 ;; esac
     [ -z "$bad" ] && res "Power profiles" PASS "powersave, performance and normal apply and are recognised; restored '$orig'" || res "Power profiles" FAIL "profile did not stick:$bad"
-    systemctl is-enabled tinker-power >/dev/null 2>&1 && res "Power profile at boot" PASS "tinker-power.service enabled, saved: $(sed -n 's/^PROFILE=//p' /etc/tinker-power.conf)" || res "Power profile at boot" FAIL "tinker-power.service is not enabled"
+    if systemctl is-enabled tinker-power >/dev/null 2>&1 && [ -f /etc/udev/rules.d/61-tinker-power.rules ]; then
+        res "Power profile at boot" PASS "tinker-power.service enabled and the GPU udev rule present, saved profile: $(sed -n 's/^PROFILE=//p' /etc/tinker-power.conf)"
+    else res "Power profile at boot" FAIL "tinker-power.service not enabled or the udev rule is missing"; fi
 else res "Power profiles" SKIP "tinker-power not installed"; fi
 
 hdr "Health after the tests"

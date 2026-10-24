@@ -1,11 +1,14 @@
 [Unit]
-Description=Apply the saved power profile (CPU and GPU clocks)
-After=systemd-modules-load.service local-fs.target
+Description=Apply the saved power profile to the CPU clocks (the GPU part is applied by udev)
+# As early as possible: after sysfs is there, before the rest of the system starts
+DefaultDependencies=no
+After=sysinit.target
+Before=basic.target
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/tinker-power apply
+ExecStart=/usr/local/sbin/tinker-power apply-cpu
 
 [Install]
 WantedBy=multi-user.target
