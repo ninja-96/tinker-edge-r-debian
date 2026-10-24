@@ -81,11 +81,26 @@ and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `
 Not done on purpose: secure boot through eFuses (irreversible), a secure OS (OP-TEE / BL32 is not loaded;
 TrustZone only hosts BL31 for PSCI).
 
-### Release 0.3, optional artifact (with the NPU release)
+### Release 0.3: a browser with hardware video decoding (decided: Chromium is part of the image)
 
-| Item | Notes |
-|---|---|
-| Own Chromium build with `libv4l-rkmpp` | patched `v4l-utils` (mmap in the plugin interface) and Chromium with the V4L2 plugin patches from `JeffyCN/meta-rockchip`; a cross build on a PC (order of 100 GB of disk and hours of CPU), shipped as a separate download, not in the base image |
+Why: on the KDE desktop the browser uses a lot of CPU and plays video in software (reported 2026-10-25).
+
+What is known: Debian's arm64 Chromium is built with `use_v4l2_codec=true`, `use_vaapi=true` and
+`proprietary_codecs=true` (from the Debian packaging, `debian/rules`), so the V4L2 and VA-API decoder code is compiled in.
+What is not known: whether it drives the RK3399 decoders. Candidate paths, to be tried on the board in this order:
+
+| Path | What it needs | Risk |
+|---|---|---|
+| A. Chromium's V4L2 stateless decoder on the mainline `rkvdec` (H.264, VP9) and `hantro` (VP8, MPEG-2) | the `base` device tree (the `mpp` variant turns these drivers off); Chromium feature flags; `/dev/video*` and `/dev/media*` permissions | the stateless path is built for ChromeOS; on desktop Linux it may not be reachable |
+| B. VA-API through `libva-v4l2-request` (exposes the same stateless decoders as VA-API), used by Chromium (`use_vaapi`) and Firefox | the `base` device tree; a maintained fork of `libva-v4l2-request` built for arm64 | the project is old and unmaintained |
+| C. Hybrid device tree | keep the mainline `rkvdec` for the browser and give only the encoder (VEPU) to `mpp_service`, so that browser decoding and GStreamer encoding both work | mpp then loses H.265/VP9 decoding through GStreamer; needs a new DTB variant |
+| D. Own Chromium with `libv4l-rkmpp` | patched `libv4l2` and a Chromium with the author's patches (written for old Chromium versions, must be rebased) | cross build of order 100 GB and hours; last resort |
+
+Plan: (1) run `scripts/diag-desktop.sh` to see whether KWin renders on Panfrost at all (a software compositor would explain
+the CPU load by itself); (2) install `chromium` on the board and test A and B with the `base` device tree, judging by
+`chrome://gpu` and `chrome://media-internals`; (3) decide between C and D only if A and B fail; (4) put the working
+browser and its configuration (flags in `/etc/chromium.d/`) into the image, with a test in `scripts/test-board.sh` (a clip
+that must be played with hardware decoding). Image size grows by about 300 MB (`ROOTFS_MIB`).
 
 ### Release 0.4: memory controller
 
