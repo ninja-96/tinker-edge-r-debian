@@ -45,3 +45,16 @@ What we do, and nothing more:
 
 Binaries that are **not** redistributable (the ASUS TinkerOS image, its bootloader
 pieces and tools) are never committed: they stay in git-ignored local directories.
+
+## What is not "unmodified"
+
+- `rockchip/rk3399_loader.bin` is not a file from `rkbin`: we assembled it with Rockchip's own
+  `tools/boot_merger` from three unmodified `rkbin` files (see above). The payloads are not changed;
+  the container is new.
+- When the image loader is built, `mkimage` packs the DDR blob together with the open U-Boot SPL into
+  the Rockchip `idbloader` format (`-T rksd`), which stores the blob in a transformed form.
+
+The Rockchip licence quoted above grants "use, copy, distribute" and forbids decompiling and removing
+notices; it does not mention merging or repacking. We believe this is within it, but it is the one point
+of this repository that depends on how the licence is read. The sha256 of every input is listed above, so
+anybody can rebuild the loader from `rkbin`.

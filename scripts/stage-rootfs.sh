@@ -58,6 +58,18 @@ fi
 
 # overlay (services, helper scripts, udev rules) and unit enablement
 cp -a overlay/. "$W/"
+
+# Licences, the notice and the package manifest travel with the image (see NOTICE.md, section 4)
+DOC="$W/usr/share/doc/tinker-edge-r"
+mkdir -p "$DOC/licenses"
+cp NOTICE.md "$DOC/NOTICE.md"
+cp LICENSES/*.txt "$DOC/licenses/"
+cp blobs/rockchip/LICENSE "$DOC/licenses/Rockchip-rkbin-LICENSE"
+cp blobs/README.md "$DOC/blobs-README.md"
+[ -d downloads/mpp/LICENSES ] && cp -a downloads/mpp/LICENSES "$DOC/licenses/mpp"
+[ -f downloads/gst-rockchip/COPYING ] && cp downloads/gst-rockchip/COPYING "$DOC/licenses/gst-rockchip-COPYING"
+dpkg-query --admindir="$W/var/lib/dpkg" -W -f='${Package}\t${Version}\t${Architecture}\t${Source}\n' | sort > "$DOC/packages.txt"
+cp "$DOC/packages.txt" "$O/packages.txt"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
 for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs ssh-hostkeys; do
     ln -sf "/etc/systemd/system/$u.service" "$W/etc/systemd/system/multi-user.target.wants/$u.service"
