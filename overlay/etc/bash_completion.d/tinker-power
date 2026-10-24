@@ -1,0 +1,6 @@
+# Tab completion for tinker-power
+_tinker_power() {
+    local cur=${COMP_WORDS[COMP_CWORD]}
+    COMPREPLY=( $(compgen -W "status powersave normal performance apply help --no-save" -- "$cur") )
+}
+complete -F _tinker_power tinker-power

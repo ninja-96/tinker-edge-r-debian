@@ -1,0 +1,139 @@
+#!/bin/bash
+# tinker-power: power profiles for the ASUS Tinker Edge R (CPU and GPU clocks).
+#
+#   tinker-power                 show the current state
+#   tinker-power powersave       lower clock limits: cool and quiet, slower
+#   tinker-power normal          the default: automatic scaling over the whole range
+#   tinker-power performance     the highest clocks all the time
+#   tinker-power apply           apply the saved profile (done at every boot)
+#   add --no-save to try a profile without making it the one used after a reboot
+#
+# Only the cpufreq governors and limits and the GPU devfreq limits are changed, always within
+# the operating points of the device tree; nothing is written to the hardware directly.
+# Environment overrides for tests: TP_CPU (cpufreq directory), TP_GPU (devfreq directory), TP_CONF.
+set -u
+
+CPU=${TP_CPU:-/sys/devices/system/cpu/cpufreq}
+GPU=${TP_GPU:-/sys/class/devfreq/ff9a0000.gpu}
+CONF=${TP_CONF:-/etc/tinker-power.conf}
+
+die() { echo "tinker-power: $*" >&2; exit 1; }
+
+# The two CPU clusters: the policy with the lower maximum is the Cortex-A53 cluster,
+# the one with the higher maximum is the Cortex-A72 cluster.
+LITTLE=; BIG=
+find_clusters() {
+    local p m lo=0 hi=0
+    for p in "$CPU"/policy*; do
+        [ -d "$p" ] || continue
+        m=$(cat "$p/cpuinfo_max_freq" 2>/dev/null) || continue
+        if [ -z "$LITTLE" ] || [ "$m" -lt "$lo" ]; then LITTLE=$p; lo=$m; fi
+        if [ -z "$BIG" ] || [ "$m" -gt "$hi" ]; then BIG=$p; hi=$m; fi
+    done
+    [ -n "$LITTLE" ] || die "no cpufreq policy found in $CPU (is the kernel built with cpufreq?)"
+    [ "$LITTLE" != "$BIG" ] || BIG=$LITTLE
+}
+
+# Highest available frequency (kHz) not above the wanted one (MHz); the lowest if none.
+pick_cpu() {   # pick_cpu <policy-dir> <MHz>
+    local f best= want=$(( $2 * 1000 ))
+    for f in $(cat "$1/scaling_available_frequencies"); do
+        [ "$f" -le "$want" ] && best=$f
+    done
+    [ -n "$best" ] || best=$(awk '{print $1}' "$1/scaling_available_frequencies")
+    echo "$best"
+}
+pick_gpu() {   # pick_gpu <MHz> -> Hz
+    local f best= want=$(( $1 * 1000000 ))
+    for f in $(cat "$GPU/available_frequencies"); do
+        [ "$f" -le "$want" ] && best=$f
+    done
+    [ -n "$best" ] || best=$(awk '{print $1}' "$GPU/available_frequencies")
+    echo "$best"
+}
+
+# set_cpu <policy-dir> <governor> <max MHz>: the minimum is lowered first and the maximum
+# moved before the governor so that the kernel never sees min > max.
+set_cpu() {
+    local p=$1 gov=$2 max min
+    max=$(pick_cpu "$p" "$3"); min=$(cat "$p/cpuinfo_min_freq")
+    echo "$min" > "$p/scaling_min_freq" 2>/dev/null
+    echo "$max" > "$p/scaling_max_freq" || die "cannot set the maximum of $(basename "$p")"
+    echo "$gov" > "$p/scaling_governor" || die "governor $gov is not available for $(basename "$p")"
+}
+# set_gpu <min MHz> <max MHz>: devfreq keeps the GPU between min and max (ondemand inside).
+set_gpu() {
+    [ -d "$GPU" ] || { echo "tinker-power: GPU devfreq not found, GPU left alone" >&2; return 0; }
+    local lo hi
+    lo=$(pick_gpu "$1"); hi=$(pick_gpu "$2")
+    echo "$(awk '{print $1}' "$GPU/available_frequencies")" > "$GPU/min_freq" 2>/dev/null
+    echo "$hi" > "$GPU/max_freq" || die "cannot set the GPU maximum"
+    echo "$lo" > "$GPU/min_freq" || die "cannot set the GPU minimum"
+}
+
+apply_profile() {
+    find_clusters
+    case "$1" in
+        powersave)   set_cpu "$LITTLE" schedutil 816;  set_cpu "$BIG" schedutil 1008; set_gpu 200 400 ;;
+        normal)      set_cpu "$LITTLE" schedutil 1416; set_cpu "$BIG" schedutil 1800; set_gpu 200 800 ;;
+        performance) set_cpu "$LITTLE" performance 1416; set_cpu "$BIG" performance 1800; set_gpu 800 800 ;;
+        *) die "unknown profile '$1' (powersave, normal, performance)" ;;
+    esac
+}
+
+mhz() { echo $(( $(cat "$1") / 1000 )); }
+gmhz() { echo $(( $(cat "$1") / 1000000 )); }
+
+# Name the profile that matches the current settings, or "custom".
+detect() {
+    find_clusters
+    local lg bg lmax bmax glo ghi
+    lg=$(cat "$LITTLE/scaling_governor"); bg=$(cat "$BIG/scaling_governor")
+    lmax=$(mhz "$LITTLE/scaling_max_freq"); bmax=$(mhz "$BIG/scaling_max_freq")
+    glo=0; ghi=0
+    [ -d "$GPU" ] && { glo=$(gmhz "$GPU/min_freq"); ghi=$(gmhz "$GPU/max_freq"); }
+    if [ "$lg" = performance ] && [ "$bg" = performance ] && [ "$glo" = "$ghi" ] && [ "$ghi" -ge 800 ]; then echo performance
+    elif [ "$lg" = schedutil ] && [ "$bg" = schedutil ] && [ "$lmax" -le 816 ] && [ "$bmax" -le 1008 ] && [ "$ghi" -le 400 ]; then echo powersave
+    elif [ "$lg" = schedutil ] && [ "$bg" = schedutil ] && [ "$lmax" -ge 1416 ] && [ "$bmax" -ge 1800 ] && [ "$glo" -le 200 ] && [ "$ghi" -ge 800 ]; then echo normal
+    else echo custom; fi
+}
+
+status() {
+    find_clusters
+    local saved=normal t
+    [ -r "$CONF" ] && saved=$(sed -n 's/^PROFILE=//p' "$CONF" | tail -1)
+    echo "profile now:   $(detect)    (used after a reboot: ${saved:-normal})"
+    echo "CPU A53:       $(mhz "$LITTLE/scaling_cur_freq") MHz now, governor $(cat "$LITTLE/scaling_governor"), limit $(mhz "$LITTLE/scaling_min_freq")-$(mhz "$LITTLE/scaling_max_freq") MHz"
+    echo "CPU A72:       $(mhz "$BIG/scaling_cur_freq") MHz now, governor $(cat "$BIG/scaling_governor"), limit $(mhz "$BIG/scaling_min_freq")-$(mhz "$BIG/scaling_max_freq") MHz"
+    if [ -d "$GPU" ]; then
+        echo "GPU Mali-T860: $(gmhz "$GPU/cur_freq") MHz now, governor $(cat "$GPU/governor"), limit $(gmhz "$GPU/min_freq")-$(gmhz "$GPU/max_freq") MHz"
+    fi
+    t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null) && echo "temperature:   $(( t / 1000 )) C"
+}
+
+# Changing clocks needs root; the test overrides (TP_CPU) point at a fake directory and do not.
+need_root() { [ "$(id -u)" = 0 ] || [ -n "${TP_CPU:-}" ]; }
+
+SAVE=1; ARGS=()
+for a in "$@"; do case "$a" in --no-save) SAVE=0 ;; *) ARGS+=("$a") ;; esac; done
+CMD=${ARGS[0]:-status}
+
+case "$CMD" in
+    status|"")
+        status ;;
+    help|-h|--help)
+        sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' ;;
+    apply)
+        need_root || exec sudo "$0" "$@"
+        p=normal; [ -r "$CONF" ] && p=$(sed -n 's/^PROFILE=//p' "$CONF" | tail -1)
+        # the GPU driver can come up a little after this service; wait for it
+        for _ in $(seq 1 20); do [ -d "$GPU" ] && break; sleep 1; done
+        apply_profile "${p:-normal}" ;;
+    powersave|normal|performance)
+        need_root || exec sudo "$0" "${ARGS[@]}" $([ "$SAVE" = 1 ] || echo --no-save)
+        apply_profile "$CMD"
+        [ "$SAVE" = 1 ] && printf '# written by tinker-power\nPROFILE=%s\n' "$CMD" > "$CONF"
+        status ;;
+    *)
+        die "unknown command '$CMD' (status, powersave, normal, performance, apply, help)" ;;
+esac

@@ -1,0 +1,11 @@
+[Unit]
+Description=Apply the saved power profile (CPU and GPU clocks)
+After=systemd-modules-load.service local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tinker-power apply
+
+[Install]
+WantedBy=multi-user.target

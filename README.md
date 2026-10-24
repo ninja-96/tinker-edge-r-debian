@@ -171,6 +171,11 @@ Sound goes to the 3.5 mm jack and, with a monitor attached, to HDMI.
 To go back to the text console: `sudo systemctl set-default multi-user.target`.
 The desktop is **not tested on this board yet**, see [docs/ROADMAP.md](docs/ROADMAP.md).
 
+## Power profiles
+
+`tinker-power` switches the CPU and GPU clocks between `powersave`, `normal` (default) and `performance`;
+the choice survives a reboot: `sudo tinker-power performance`, see [docs/POWER.md](docs/POWER.md).
+
 ## Update the kernel
 
 The kernel is built from the kernel.org tarball pinned in `sources.lock`. To move to a
@@ -212,7 +217,7 @@ The ASUS TinkerOS image and everything taken from it are never published.
 
 ## Documentation
 
-[KERNEL](docs/KERNEL.md) · [TESTING](docs/TESTING.md) · [VIDEO](docs/VIDEO.md) ·
+[KERNEL](docs/KERNEL.md) · [TESTING](docs/TESTING.md) · [VIDEO](docs/VIDEO.md) · [POWER](docs/POWER.md) ·
 [GPIO](docs/GPIO.md) · [MIPI](docs/MIPI.md) · [BOOT](docs/BOOT.md) ·
 [FLASHING](docs/FLASHING.md) · [UART](docs/UART.md) · [HARDWARE](docs/HARDWARE.md) ·
 [BRINGUP](docs/BRINGUP.md) · [NPU](docs/NPU.md) · [NPU-RESEARCH](docs/NPU-RESEARCH.md) ·

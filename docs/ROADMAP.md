@@ -68,6 +68,12 @@ No browser is installed by the image.
 | Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
 | Tests | `scripts/test-board.sh` gets an NPU phase |
 
+### Release 0.3: power profiles
+
+| Item | Notes |
+|---|---|
+| `tinker-power`: powersave / normal / performance (CPU and GPU clocks), saved and applied at boot | written and tested on a fake sysfs; **to be tested on the board** (the `test-board.sh` phase checks it); see [POWER.md](POWER.md). Memory clock is not included until the DMC driver (0.4) |
+
 ### Release 0.3: basic security
 
 | Item | Notes |

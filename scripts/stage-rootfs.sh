@@ -71,7 +71,7 @@ cp blobs/README.md "$DOC/blobs-README.md"
 dpkg-query --admindir="$W/var/lib/dpkg" -W -f='${Package}\t${Version}\t${Architecture}\t${Source}\n' | sort > "$DOC/packages.txt"
 cp "$DOC/packages.txt" "$O/packages.txt"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
-for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs ssh-hostkeys; do
+for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs ssh-hostkeys tinker-power; do
     ln -sf "/etc/systemd/system/$u.service" "$W/etc/systemd/system/multi-user.target.wants/$u.service"
 done
 

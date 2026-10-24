@@ -314,6 +314,19 @@ for p in "${pids[@]}"; do wait "$p" 2>/dev/null; done
 
 sampler_stop
 
+hdr "Power profiles (tinker-power)"
+if command -v tinker-power >/dev/null; then
+    cur() { tinker-power status | sed -n 's/^profile now: *\([a-z]*\).*/\1/p'; }
+    orig=$(cur); bad=""
+    for pr in powersave performance normal; do
+        tinker-power "$pr" --no-save >/dev/null 2>&1; got=$(cur)
+        [ "$got" = "$pr" ] || bad="$bad $pr(got:$got)"
+    done
+    case "$orig" in powersave|normal|performance) tinker-power "$orig" --no-save >/dev/null 2>&1 ;; *) tinker-power normal --no-save >/dev/null 2>&1 ;; esac
+    [ -z "$bad" ] && res "Power profiles" PASS "powersave, performance and normal apply and are recognised; restored '$orig'" || res "Power profiles" FAIL "profile did not stick:$bad"
+    systemctl is-enabled tinker-power >/dev/null 2>&1 && res "Power profile at boot" PASS "tinker-power.service enabled, saved: $(sed -n 's/^PROFILE=//p' /etc/tinker-power.conf)" || res "Power profile at boot" FAIL "tinker-power.service is not enabled"
+else res "Power profiles" SKIP "tinker-power not installed"; fi
+
 hdr "Health after the tests"
 tm=$(awk -F'temp=' '{split($2,a," "); if (a[1]+0>m) m=a[1]+0} END{print m+0}' "$W/sample.log")
 lmin=$(awk '{for(i=1;i<=NF;i++) if ($i ~ /^little=[0-9]+$/) {split($i,a,"="); if (min==""||a[2]<min) min=a[2]; if (a[2]>max) max=a[2]}} END{print (min==""?"n/a":min"-"max)}' "$W/sample.log")
