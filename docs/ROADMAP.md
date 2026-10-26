@@ -145,6 +145,9 @@ the converter and the server become open and standard (`.tflite` from TensorFlow
 
 | Item | Notes |
 |---|---|
+| One chip | decision (2026-10-26): every Tinker Edge R has the same NPU, model 0x8000 revision 0x7100 product 0x45080001 (the only chip that Rockchip's and ASUS's `galcore` know); the build is made for it only. The server reads the identity from sysfs at the start and refuses to run on anything else, with a clear message; `test-board.sh` prints it |
+| Transport: the `ntb` USB function | the gadget of the NPU die already has a FunctionFS function `ntb` (two bulk endpoints, 1024-byte packets, SuperSpeed) next to `adb`; today `rknn_server` opens it and `npu_transfer_proxy` talks to it with libusb. Our server can take it over (write the descriptors to `/dev/usb-ffs/ntb/ep0`, then use `ep1` and `ep2`) and the host client talks bulk USB with `libusb` (`ctypes`, no ADB, no gadget change). To be measured against ADB (about 5 MB/s) |
+| Compiled graph (NBG) | TIM-VX can export a compiled graph (`Graph::CompileToBinary`) and run it (the NBG operation); the unit tests of the export pass on the NPU. The TFLite delegate (needed once, to build the graph from a `.tflite` on the NPU) does not cache by itself; the server would then run NBG only, without TFLite |
 | Thin server on the NPU die | accepts a model and prepares the graph, runs inputs, one model at a time (an error if the memory is not enough or another model is loaded), frees it on request; the models live on the host |
 | Host API (Python, system 3.13) | a class: the constructor loads and prepares the model, `exec(x)` runs synchronously, `async_exec(x, callback)` runs asynchronously and calls the callback with the result, `del` unloads the model and frees the NPU |
 | Transport over USB | to be measured: ADB (about 5 MB/s with `adb push`) against a USB network function or raw bulk; 224x224x3 at 155 FPS is 23 MB/s |
