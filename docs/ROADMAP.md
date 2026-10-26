@@ -136,7 +136,9 @@ Expect little from the GPU in every engine: a plain float4 OpenCL kernel reached
 and the GPU shares the memory bandwidth with the CPU, so the CPU may stay faster for small models. Whatever the
 measurement says goes into the tables in the documentation. NCNN has no row: it needs Vulkan, which this GPU lacks.
 
-### Planned: an open NPU stack on VeriSilicon's TIM-VX (replaces RKNN)
+### In progress: an open NPU stack on VeriSilicon's TIM-VX (replaces RKNN); milestone 1 reached, code in [npu-open/](../npu-open/README.md)
+
+Milestone 1 (2026-10-26): the whole path works on the board: server on the NPU die, own USB channel (38-52 MB/s), class `NpuModel` with `exec` (110 FPS) and `async_exec` (158 FPS, experimental: an unsolved USB hang is avoided with a pause), cache of the compiled graph (load 13 s -> 0.1 s), MobileNet V2 uint8 gives the same class as the CPU. Left: other data types and models, memory estimate, behaviour on a crash, the real cause of the hang, build in the Debian container, the image build, the test in `test-board.sh`, the comparison of operators (TFLite 2.6 against RKNN 1.7.5), removal of RKNN.
 
 Decision (2026-10-26): RKNN goes out of the product once this path has caught up. Why it can: the Vivante driver and libraries in
 Rockchip's NPU firmware (SDK 6.4.6) run **TIM-VX v1.1.32** (the same SDK version; all 104 of its unit tests pass on the NPU) and the

@@ -1,0 +1,65 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 4af0ff9..32588a9 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -67,3 +67,6 @@ add_library(vx_delegate SHARED ${VX_DELEGATES_SRCS})
+ target_link_libraries(vx_delegate ${VX_DELEGATE_DEPENDENCIES})
+ 
+ add_subdirectory(examples/minimal)
++if(EXISTS /w/server/CMakeLists.txt)
++  add_subdirectory(/w/server ${CMAKE_BINARY_DIR}/npu_server)
++endif()
+diff --git a/cmake/tflite.cmake b/cmake/tflite.cmake
+index cdf2b7d..71bf357 100644
+--- a/cmake/tflite.cmake
++++ b/cmake/tflite.cmake
+@@ -447,14 +447,14 @@ list(APPEND TFLITE_BENCHMARK_SRCS
+     ${TFLITE_SOURCE_DIR}/tools/delegates/external_delegate_provider.cc
+     ${TFLITE_SOURCE_DIR}/delegates/external/external_delegate.cc
+   )
+-add_subdirectory(${TFLITE_SOURCE_DIR}/tools/benchmark)
++add_subdirectory(${TFLITE_SOURCE_DIR}/tools/benchmark ${CMAKE_BINARY_DIR}/benchmark)
+ 
+ # The label_image example.
+ list(APPEND TFLITE_LABEL_IMAGE_SRCS
+     ${TFLITE_SOURCE_DIR}/tools/delegates/external_delegate_provider.cc
+     ${TFLITE_SOURCE_DIR}/delegates/external/external_delegate.cc
+   )
+-add_subdirectory(${TFLITE_SOURCE_DIR}/examples/label_image)
++add_subdirectory(${TFLITE_SOURCE_DIR}/examples/label_image ${CMAKE_BINARY_DIR}/label_image)
+ 
+ # Python interpreter wrapper.
+ add_library(_pywrap_tensorflow_interpreter_wrapper SHARED EXCLUDE_FROM_ALL
+diff --git a/delegate_main.cc b/delegate_main.cc
+index 29eac51..b7ee417 100644
+--- a/delegate_main.cc
++++ b/delegate_main.cc
+@@ -16,6 +16,8 @@ limitations under the License.
+ #include "delegate_main.h"
+ 
+ #include <algorithm>
++#include <cstdlib>
++#include <cstdio>
+ #include <cstring>
+ #include <iostream>
+ #include <limits>
+@@ -561,6 +563,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+     TFLITE_LOG(INFO) << "Verifying graph";
+     // Do layout inference and get a new graph(first) and a tensor map(second).
+     layout_infered_ = tim::transform::LayoutInference(graph_, context_);
++    // rnd/verisilicon: VX_NBG_EXPORT=<file> writes the compiled graph (NBG) of this subgraph to the file (to be loaded later without the compiler)
++    if (const char* nbg_path = getenv("VX_NBG_EXPORT")) {
++      size_t nbg_size = 0;
++      if (layout_infered_.first->CompileToBinary(nullptr, &nbg_size) && nbg_size) {
++        std::vector<char> nbg(nbg_size);
++        if (layout_infered_.first->CompileToBinary(nbg.data(), &nbg_size)) {
++          FILE* f = fopen(nbg_path, "wb");
++          if (f) { fwrite(nbg.data(), 1, nbg_size, f); fclose(f); TFLITE_LOG(INFO) << "NBG written: " << nbg_size << " bytes"; }
++        }
++      } else {
++        TFLITE_LOG(WARN) << "NBG export failed";
++      }
++    }
+     compiled_ = layout_infered_.first->Compile();
+     if (!compiled_) {
+       TFLITE_LOG(FATAL) << "Failed to verify graph";
