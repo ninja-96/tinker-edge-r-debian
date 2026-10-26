@@ -1,10 +1,10 @@
 #!/bin/bash
 # Load the firmware into the RK3399Pro NPU over USB (loader mode) and start it.
-# Reimplements the USB branch of the stock ASUS `npu_upgrade`; the GPIO/clock
+# Reimplements the USB branch of the stock ASUS `npu_upgrade` with the open rkdeveloptool; the GPIO/clock
 # power sequencing is done by the tinker-npu-power kernel driver (-npu DTB).
 set -u
 FW=${NPU_FW_DIR:-/usr/share/npu_fw}
-TOOL=${UPGRADE_TOOL:-/usr/bin/upgrade_tool}
+TOOL=${RKDEVELOPTOOL:-/usr/bin/rkdeveloptool}   # with the 'rs' patch, see patches/rkdeveloptool/
 LOG=/run/npu-load.log
 UBOOT_ADDR=0x20000
 TRUST_ADDR=0x20800
@@ -14,7 +14,7 @@ log() { echo "$(date +%T) $*" | tee -a "$LOG"; }
 
 ctl=$(ls /sys/bus/platform/drivers/tinker-npu-power/*/reset 2>/dev/null | head -1)
 [ -n "$ctl" ] || { log "tinker-npu-power not bound (boot a *-npu or *-full DTB)"; exit 1; }
-[ -x "$TOOL" ] || { log "$TOOL missing (extract it from the ASUS image, see docs/NPU.md)"; exit 1; }
+[ -x "$TOOL" ] || { log "$TOOL missing (see docs/NPU.md)"; exit 1; }
 for f in MiniLoaderAll.bin uboot.img trust.img boot.img; do
     [ -f "$FW/$f" ] || { log "missing $FW/$f"; exit 1; }
 done
@@ -24,7 +24,7 @@ reset_npu() { echo 1 > "$ctl"; sleep 1; }
 wait_device() {
     local i
     for i in $(seq 1 10); do
-        "$TOOL" ld >/dev/null 2>&1 && { sleep 0.1; return 0; }
+        "$TOOL" ld 2>/dev/null | grep -q 'Vid=0x2207' && { sleep 0.1; return 0; }
         [ "$i" = 5 ] && { log "reset NPU to retry"; reset_npu; sleep 3; }
         sleep 0.1
     done

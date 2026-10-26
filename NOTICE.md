@@ -21,6 +21,8 @@ This is the project's own summary, not legal advice.
 | `u-boot-mods/` | GPL-2.0+ | additions to U-Boot (board defconfig, device tree include) |
 | `patches/tf-a/*.patch` | BSD-3-Clause | patch against Trusted Firmware-A |
 | `third_party/rkdeveloptool/` | GPL-2.0+ (sources), `license.txt` is the GPL-2 text | Rockchip's flashing tool, **byte-identical** to `rockchip-linux/rkdeveloptool` commit `304f0737`, see its `ORIGIN.md` |
+| `patches/rkdeveloptool/`, `scripts/npu-fw-tinker.py` | GPL-2.0+ (patch of the GPL tool), MIT (script) | the `rs` command, and the device-tree adaptation of the Rockchip NPU boot image |
+| `python/rknn3399pro/` | MIT | own work, binding for the closed `librknn_api.so` |
 | `blobs/rockchip/` | Rockchip licence, see below | unmodified Rockchip binaries and one file assembled from them |
 
 ## 2. Binary-only files (Rockchip)
@@ -50,10 +52,11 @@ loader), which is the one point a reader may want to judge for themselves.
 | Trusted Firmware-A (tag in `sources.lock`), only with `USE_TFA=1` | BSD-3-Clause | built by `scripts/build-tfa.sh` |
 | Rockchip `mpp` (commit in `sources.lock`) | Apache-2.0 OR MIT for almost all files; `osal/allocator/ion.h` is a copy of a Linux kernel header under GPL-2.0 | userspace codec library, built by `scripts/build-mpp.sh` |
 | Rockchip GStreamer plugins (`JeffyCN/mirrors`, branch `gstreamer-rockchip`, commit in `sources.lock`) | LGPL-2.0-or-later (file headers; `COPYING` is the LGPL-2.1 text) | built by `scripts/build-gst-rockchip.sh` |
+| Rockchip NPU files (`airockchip/RK3399Pro_npu`, commit in `sources.lock`): `npu_transfer_proxy`, `librknn_api.so`, `rknn_api.h`, firmware of the NPU die | Apache-2.0 (the repository's `LICENSE`, installed as `licenses/RK3399Pro_npu-LICENSE`); binary only. The firmware contains GPL software (Linux 4.4.185, BusyBox, the galcore driver) whose sources Rockchip publishes in its repositories; the image's `boot.img` differs from the original only in the device tree (`scripts/npu-fw-tinker.py`) | downloaded and sha256-checked by `scripts/fetch-npu.sh`, installed by `scripts/stage-rootfs.sh` |
 | Debian 13 packages (kernel modules excepted), including the `non-free-firmware` packages | per package; see `/usr/share/doc/<package>/copyright` in the image | installed into the root filesystem |
 
 Used for research only and **never distributed**: the ASUS TinkerOS image, ASUS schematics and
-wiki copies (`reference/`, git-ignored), and the closed NPU vendor files used in local tests
+wiki copies (`reference/`, git-ignored), and the ASUS copies of the NPU files used in local tests
 (`third_party/npu/`, git-ignored; see [`docs/NPU.md`](docs/NPU.md)).
 
 ## 4. Sources for the release images

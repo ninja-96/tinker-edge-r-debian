@@ -1,11 +1,12 @@
 # RK3399Pro NPU on the Tinker Edge R
 
-> **Status: works on the board (verified 2026-10-23), optional, not part of the default
-> image.** The NPU stack is closed (see [OPEN.md](OPEN.md)); its binaries are not stored in
-> this repository and are not downloaded by the build. Verified: power-up, firmware load,
-> ADB shell on the NPU die, RKNN transport, and a MobileNet inference through `librknn_api`
-> (kernel 6.18 on the host). Place the files described below in `third_party/npu/`
-> (git-ignored) to include them in an image.
+> **Status: works on the board (verified 2026-10-26), part of the 0.3 image.** The NPU stack is
+> closed (see [OPEN.md](OPEN.md)). Its files come from Rockchip's Apache-2.0 repository
+> `airockchip/RK3399Pro_npu` at a pinned commit, downloaded and sha256-checked by
+> `scripts/fetch-npu.sh` and installed unchanged, except for the device tree inside the NPU boot image
+> (below). Verified with exactly these files: power-up, firmware load without any closed tool,
+> RKNN transport, MobileNet through `librknn_api` and through the Python module
+> (74 inferences/s, 3000 in a row without errors).
 
 The NPU is a separate die with its own CPU, DDR and a frozen Linux 4.4.185.
 The host only powers it, loads its firmware and talks to it through the
@@ -54,16 +55,25 @@ Two details that cost a day to find, both fixed in the driver and the device tre
 
 ## Userspace
 
-Closed files, to be obtained by you and placed in `third_party/npu/` (git-ignored):
-
-| File | Where to get it |
+| File | Origin |
 |---|---|
-| `npu_transfer_proxy` (`linux-aarch64`), `npu_fw/*` (USB firmware), `npu_fw_pcie/*`, `librknn_api.so` (`Linux/lib64`), `rknn_api.h` | https://github.com/airockchip/RK3399Pro_npu (Apache-2.0, binary only) |
-| `upgrade_tool` | Rockchip Linux upgrade tool; the ASUS TinkerOS image ships a copy in `/usr/bin` (not redistributable) |
-| `npu-load`, `npu_powerctrl` shim, systemd units | this repository, `overlay/` |
+| `npu_transfer_proxy` (2.1.0), `librknn_api.so` and `rknn_api.h` (1.7.5), firmware `MiniLoaderAll.bin`, `uboot.img`, `trust.img`, `boot.img` | https://github.com/airockchip/RK3399Pro_npu, commit in `sources.lock`, fetched by `scripts/fetch-npu.sh` (Apache-2.0, binary only; the GPL parts inside the firmware, Linux 4.4.185, BusyBox and the galcore driver, have their sources at Rockchip) |
+| `rkdeveloptool` with the `rs` command | `third_party/rkdeveloptool` plus `patches/rkdeveloptool/` (GPL-2.0+), built for arm64 by `scripts/build-rkdeveloptool-arm64.sh` |
+| `npu-load`, `npu-proxy-run`, systemd units | this repository, `overlay/` |
+| `rknn3399pro` (Python module) | this repository, `python/` (MIT) |
 
-Without `upgrade_tool` the firmware cannot be loaded (`rkdeveloptool` lacks the
-`td` and `rs` commands used by the sequence).
+**Loading the firmware needs no closed tool.** The loader sequence of the stock `upgrade_tool`
+(`db`, `td`, `wl` x3, `rs`) is done by `rkdeveloptool`; the missing `rs` ("run system") was added after
+watching its USB traffic, see `rnd/npu/RS-PROTOCOL.md` in the working copy and the patch.
+
+**One change to Rockchip's firmware.** The image is made for Rockchip's evaluation board, where the NPU
+is powered by two I2C regulators (`tcs452x`, `syr837`). On the Tinker Edge R the kernel of the image
+fails with `galcore: failed to get regulator` and the NPU resets the moment a model is loaded. The
+ASUS image has a `fan53555` there, which the Rockchip kernel's driver does not accept ("Chip ID 0 with rev 0 not
+supported"). `scripts/npu-fw-tinker.py` therefore replaces the two regulators in the device tree inside
+`boot.img` with one fixed regulator (0.85 V, no control over I2C, so the NPU stays at the voltage that
+the board sets by default); kernel and root file system are copied as they are. With ASUS images
+the script is not needed.
 
 The stock `npu_transfer_proxy` reads the `Hardware` and `Serial` lines of `/proc/cpuinfo`,
 which only the vendor kernel prints, and otherwise exits silently with status 0.
@@ -73,7 +83,7 @@ private `/proc/cpuinfo` that has those two lines (the serial is the NPU's USB se
 Services (active only with an `-npu` or `-full` DTB, via
 `ConditionPathExists=/proc/device-tree/npu-power`):
 
-- `npu-firmware.service`: runs `npu-load` (reset, `upgrade_tool db/td/wl/rs`)
+- `npu-firmware.service`: runs `npu-load` (reset, `rkdeveloptool db/td/wl/rs`)
 - `npu-transfer-proxy.service`: runs the proxy
 
 Enable on the board: `sudo tinker-boot-select npu` (or `full`), reboot.

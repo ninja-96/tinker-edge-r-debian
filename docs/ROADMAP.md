@@ -59,14 +59,13 @@ No browser is installed by the image.
 
 ### Release 0.3: NPU
 
-| Item | Notes |
+| Item | Status |
 |---|---|
-| NPU firmware ("the OS of the NPU die") | from `airockchip/RK3399Pro_npu` (Apache-2.0), unchanged, pinned commit and sha256, with a `NOTICE` that points to the sources of the GPL parts (Linux 4.4.185, BusyBox, galcore). Untested so far: the board was tested with the ASUS copy of the images |
-| `npu_transfer_proxy`, `librknn_api.so` | from the same repository, unchanged; the proxy runs through `npu-proxy-run` |
-| Open replacement for `upgrade_tool` | `rkdeveloptool` has `db` and `wl` but not `td` and `rs`; observe the USB protocol and implement them (or a small `libusb` loader) |
-| Python 3.13 module for the host side | `ctypes` binding over `librknn_api.so` (init, query, inputs, run, outputs) with `numpy`, MIT; checked against the C demos and the `.rknn` models of the Apache repository |
-| Model conversion | RKNN-Toolkit 1.7.x (BSD-3) only runs on Python 3.6-3.8 on x86: a Docker image for it; operator set is old (ONNX opset about 12) |
-| Tests | `scripts/test-board.sh` gets an NPU phase |
+| Rockchip NPU files, pinned commit and sha256 | done: `scripts/fetch-npu.sh`; verified on the board together (firmware, proxy 2.1.0, `librknn_api` 1.7.5) |
+| Device tree of the NPU boot image | done: the Rockchip kernel cannot drive the board's regulator; `scripts/npu-fw-tinker.py` replaces it by a fixed one ([NPU.md](NPU.md)) |
+| Open replacement for `upgrade_tool` | done: `rs` added to `rkdeveloptool` (`patches/rkdeveloptool/`); `npu-load` uses it. **Pending**: the arm64 build for the image (`scripts/build-rkdeveloptool-arm64.sh` needs the qemu binfmt handler registered on the build host) |
+| Python module for the host side | done: `python/rknn3399pro` (`ctypes` + `python3-numpy` from apt); to do: install check in the image, NPU phase in `scripts/test-board.sh` |
+| Model conversion ONNX to `.rknn` | open: RKNN-Toolkit 1.7.x is closed and runs only on Python 3.6-3.8 / x86; plan: a thin command-line wrapper around Rockchip's Docker image; the format is undocumented, an own converter is a research project |
 
 ### Release 0.3: power profiles
 
