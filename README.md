@@ -9,48 +9,44 @@ Unofficial; not affiliated with ASUS or Rockchip.
 Goal of this repository: a user with a board clones it, runs the commands below and
 ends up with a working board (boots from the eMMC, network and SSH up, hardware video).
 
-## Status (release 0.2)
+## Status
 
-Checked on a real board with Linux 6.18.56 by `scripts/test-board.sh` (phases of 120 s, no failures) and by hand.
-"Checked" says how far; things that need a person or extra hardware are listed separately.
+Legend. **Works**: yes / partly / no. **Tested on a board**: yes (by `scripts/test-board.sh` or by hand), partly
+(only the software side or a short run), no (written, never run on hardware), needs you (needs a monitor, a
+device or a person). Release 0.2 is published; items marked **0.3** are in the repository and in the 0.3 image, which
+is being tested.
 
-### Works
+| Area | Works | Tested on a board | Details |
+|---|---|---|---|
+| Boot: DRAM init, U-Boot, extlinux, Linux 6.18.56 from the eMMC | yes | yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
+| Flashing over USB, backup, restore, kernel update | yes | yes | read-back verification |
+| Ethernet, SSH, mDNS name, NTP | yes | partly | link and names; about 500 Mbit/s measured on a 500 Mbit/s line, gigabit not measured |
+| CPU (6 cores, cpufreq), RAM 4 GB | yes | yes | `stress-ng` 8 + 10 min, `memtester` full pass, 47 C at full load; 933 MHz not benchmarked against 800 |
+| eMMC (HS200) | yes | yes | read 164 MB/s, write 26-52 MB/s; root grows to the whole eMMC on the first boot |
+| GPU: OpenGL ES 3.1, OpenGL 3.1 (Panfrost), OpenCL 3.0 (Rusticl) | yes | yes | OpenCL kernels give correct results; Vulkan: no |
+| Hardware video: H.264 / VP8 / JPEG encode, H.264 decode (`mpp`), GStreamer plugins | yes | yes | 720p H.264 encode 54 fps, decode 116 fps |
+| HDMI picture | yes | yes | KDE Plasma on Wayland works; on X11 the frame rate drops from 60 to 30 while windows move |
+| HDMI audio | not known | needs you | |
+| Wi-Fi (RTL8822CE) | scan only | partly | access points are seen; connection and throughput not tested |
+| Bluetooth | adapter only | partly | `hci0` up, scan finds a device; pairing not tested |
+| Audio, 3.5 mm jack (RK809) | not known | partly | tone and recording run without errors; not listened to |
+| RTC | yes | partly | write and read back; retention without power not tested |
+| 40-pin header: GPIO, I2C6/7, SPI1/5, PWM0/1/3 | software side | partly | every plain GPIO pin driven and read; no loopback, no real devices ([GPIO.md](docs/GPIO.md)) |
+| USB-A ports, USB-C as host | not known | needs you | plug devices into every port; USB 3 speed |
+| Boot from an SD card, swap file | not known | needs you | `scripts/flash-sd.sh` |
+| **0.3** NPU: firmware load without closed tools, MobileNet from Python 3.13 | yes | yes (with the files of this build) | `rknn3399pro` module, 74 inferences/s; closed Rockchip files, fetched and checked by the build ([NPU.md](docs/NPU.md)); the 0.3 image itself not yet tested |
+| **0.3** Converter ONNX to `.rknn` (Docker, Python 3.8, on the PC) | in progress | no | [docker/rknn-toolkit](docker/rknn-toolkit/README.md); ONNX opset 8-12 only |
+| **0.3** Power profiles `tinker-power` | partly | no | tested on a fake sysfs only ([POWER.md](docs/POWER.md)) |
+| **0.3** Firewall (nftables), forced password change | written | no | [SECURITY.md](docs/SECURITY.md) |
+| DisplayPort over USB-C | **no** | | mainline has no Type-C DP glue for this SoC; the USB-C port is a USB host only ([OPEN.md](docs/OPEN.md)) |
+| Vulkan | **no** | | Mali-T860 (Midgard) is not supported by PanVK; software `llvmpipe` only |
+| GPU inference engines | **no** | | Arm NN GpuAcc does not run (needs OpenCL 2.0); MNN, TVM and TFLite on the GPU are untried; CPU numbers in [ROADMAP.md](docs/ROADMAP.md) |
+| MIPI DSI display, MIPI CSI cameras | **no** | | drivers are built, no panel or camera is described in the device tree ([MIPI.md](docs/MIPI.md)) |
+| Mini PCIe LTE modem, nano-SIM | **no** | | the slot is there, no modem is fitted, modem drivers are off |
+| Suspend and resume, boot logo | **no** | | not implemented |
+| Open DRAM init and open BL31 | **no** | | the image uses two closed Rockchip binaries; an open TF-A builds, never booted ([OPEN.md](docs/OPEN.md)) |
 
-| Area | What works | How far it was checked |
-|---|---|---|
-| Boot | DRAM init, U-Boot SPL and U-Boot, extlinux, Linux 6.18.56 from the eMMC | boots reliably, many reboots |
-| Flashing | eMMC install over USB with read-back verification, backup and restore, kernel update on a running board | all used |
-| Network | Gigabit Ethernet (DHCP), SSH, mDNS name `tinker-edge-r.local`, NTP | link and name resolution; throughput **not measured** |
-| CPU, RAM | 6 cores (A53 up to 1.4 GHz, A72 up to 1.8 GHz) with cpufreq, 4 GB RAM at 933 MHz (LPDDR4-1866; ASUS used 800 MHz, [fallback](docs/BOOT.md)) | stress tests with result verification (`stress-ng` 8 + 10 min, `memtester` full pass, no errors), 47 C at full load; the 933 MHz setting was **not** benchmarked against 800 MHz |
-| eMMC | 16 GB, HS200: read 164 MB/s, write 26-52 MB/s, root filesystem grows to the whole eMMC on first boot | 512 MiB write and read back with checksum |
-| GPU | Mali-T860 with Panfrost: OpenGL ES 3.1 and OpenGL 3.1; **OpenCL 3.0** through Rusticl (on by default) | `eglinfo` shows Panfrost; OpenCL kernels give correct results; no image on a monitor yet |
-| Hardware video | H.264 encode (720p at 54 fps), H.264 decode (116 fps), VP8 encode, JPEG encode and decode through Rockchip `mpp` (`/dev/mpp_service`) | encode and decode of a 60-frame clip, frame count and size checked |
-| GStreamer | Debian GStreamer 1.26 with the Rockchip plugin: `mpph264enc`, `mppvp8enc`, `mppjpegenc`, `mppvideodec`, `mppjpegdec` | 300-frame 720p encode, decode at about 200 fps |
-| Wi-Fi | Realtek RTL8822CE (PCIe), firmware from Debian | adapter up, scan sees access points; connection and throughput **not tested** |
-| Bluetooth | adapter `hci0` (USB), firmware from Debian | adapter up, a scan finds a nearby device; pairing **not tested** |
-| Audio | Codec RK809 (3.5 mm jack: playback and capture) | a test tone plays and a recording is made without errors; **not listened to** |
-| RTC | RK809 clock `rtc0`, battery header `RTC_BATTERY` | write and read back; retention without power **not tested** |
-| 40-pin header | GPIO (libgpiod), I2C6 and I2C7, SPI1 and SPI5 (`/dev/spidev*`), PWM0, PWM1, PWM3 | every plain GPIO pin driven and read, buses and device nodes present; **no electrical loopback or real devices** |
-| NPU (optional) | power-up, firmware load, ADB shell inside the NPU, MobileNet inference through `librknn_api` on the mainline kernel | works, but needs closed files that are not in the image: [docs/NPU.md](docs/NPU.md) |
-
-### Does not work or is not supported
-
-| Area | State |
-|---|---|
-| **DisplayPort over USB-C** | not supported: mainline has no Type-C DP glue for this SoC ([docs/OPEN.md](docs/OPEN.md)). The USB-C port works as a USB host only, SuperSpeed in one plug orientation |
-| **Vulkan** | none on the GPU: Mali-T860 (Midgard) is not supported by PanVK. Software `llvmpipe` only |
-| GPU inference engines | Arm NN GpuAcc does not run (needs OpenCL 2.0); MNN, TVM and TFLite on the GPU are untried. CPU numbers are in [docs/ROADMAP.md](docs/ROADMAP.md) |
-| MIPI DSI display, MIPI CSI cameras | kernel drivers are built, but no panel or camera is described in the device tree ([docs/MIPI.md](docs/MIPI.md)) |
-| Mini PCIe slot with LTE modem and nano-SIM | the board has the slot, **no modem is fitted**; modem drivers are not enabled |
-| Open DRAM initialisation, open BL31 | the image uses two closed Rockchip binaries ([docs/OPEN.md](docs/OPEN.md)); an open TF-A builds but is not tested |
-| Suspend and resume, boot logo | not implemented |
-
-### Not tested yet (needs a person or hardware)
-
-HDMI picture on a monitor, HDMI audio, USB-A and USB-C with real devices and USB 3 speed,
-boot from an SD card (and the 2 GiB swap file it creates), the KDE desktop below, Bluetooth
-pairing, Wi-Fi connection, network throughput (`iperf3`), the 40-pin electrical side.
-Each of these is a line in [docs/ROADMAP.md](docs/ROADMAP.md).
+Details and plans: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## What you need
 
