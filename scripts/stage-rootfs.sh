@@ -57,7 +57,7 @@ if [ -f "$W/etc/inputrc" ]; then
 fi
 
 # overlay (services, helper scripts, udev rules) and unit enablement
-cp -a overlay/. "$W/"
+cp -a --no-preserve=ownership overlay/. "$W/"
 
 # Licences, the notice and the package manifest travel with the image (see NOTICE.md, section 4)
 DOC="$W/usr/share/doc/tinker-edge-r"
@@ -66,7 +66,7 @@ cp NOTICE.md "$DOC/NOTICE.md"
 cp LICENSES/*.txt "$DOC/licenses/"
 cp blobs/rockchip/LICENSE "$DOC/licenses/Rockchip-rkbin-LICENSE"
 cp blobs/README.md "$DOC/blobs-README.md"
-[ -d downloads/mpp/LICENSES ] && cp -a downloads/mpp/LICENSES "$DOC/licenses/mpp"
+[ -d downloads/mpp/LICENSES ] && cp -a --no-preserve=ownership downloads/mpp/LICENSES "$DOC/licenses/mpp"
 [ -f downloads/gst-rockchip/COPYING ] && cp downloads/gst-rockchip/COPYING "$DOC/licenses/gst-rockchip-COPYING"
 dpkg-query --admindir="$W/var/lib/dpkg" -W -f='${Package}\t${Version}\t${Architecture}\t${Source}\n' | sort > "$DOC/packages.txt"
 cp "$DOC/packages.txt" "$O/packages.txt"
@@ -84,7 +84,7 @@ done
 if [ -d python/rk3399pro_npu ]; then
     mkdir -p "$W/usr/lib/python3/dist-packages"
     rm -rf "$W/usr/lib/python3/dist-packages/rk3399pro_npu"
-    cp -a python/rk3399pro_npu "$W/usr/lib/python3/dist-packages/"
+    cp -a --no-preserve=ownership python/rk3399pro_npu "$W/usr/lib/python3/dist-packages/"
     find "$W/usr/lib/python3/dist-packages/rk3399pro_npu" -name __pycache__ -prune -exec rm -rf {} +
 fi
 N=downloads/npu; [ -d third_party/npu ] && N=third_party/npu
