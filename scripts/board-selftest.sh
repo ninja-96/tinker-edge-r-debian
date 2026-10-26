@@ -329,6 +329,36 @@ if command -v tinker-power >/dev/null; then
     else res "Power profile at boot" FAIL "tinker-power.service not enabled or the udev rule is missing"; fi
 else res "Power profiles" SKIP "tinker-power not installed"; fi
 
+hdr "Firewall (nftables)"
+if command -v nft >/dev/null; then
+    fw=$(nft list chain inet filter input 2>/dev/null)
+    if echo "$fw" | grep -q 'policy drop' && echo "$fw" | grep -q 'dport 22' && systemctl is-enabled nftables >/dev/null 2>&1; then
+        res "Firewall" PASS "input policy drop; SSH, ping and mDNS allowed; nftables.service enabled"
+    else res "Firewall" FAIL "ruleset missing, not policy drop, or service not enabled"; fi
+else res "Firewall" SKIP "nft not installed"; fi
+
+hdr "NPU (Python module rknn3399pro)"
+if [ -e /proc/device-tree/npu-power ] && python3 -c 'import rknn3399pro' 2>/dev/null; then
+    m=$(ls /usr/share/*.rknn /usr/share/npu_fw/*.rknn /home/*/*.rknn 2>/dev/null | head -1)
+    if [ -z "$m" ]; then
+        res "NPU" SKIP "no .rknn model on the board (copy one, e.g. mobilenet_v1.rknn, to the home directory)"
+    else
+        out=$(python3 - "$m" <<'PY' 2>&1 | grep -v '^D '
+import sys, time, numpy as np, rknn3399pro as npu
+print(npu.find_devices())
+with npu.RKNN(sys.argv[1]) as net:
+    x = np.zeros(net.inputs[0].shape, net.inputs[0].dtype)
+    for _ in range(5): net.run([x])
+    t = time.time(); n = 200
+    for _ in range(n): net.run([x])
+    print("OK %.1f inferences/s, last run %s us" % (n / (time.time() - t), net.last_run_us))
+PY
+)
+        echo "$out" | tail -3
+        echo "$out" | grep -q '^OK' && res "NPU" PASS "$(echo "$out" | grep '^OK')" || res "NPU" FAIL "inference did not run, see above"
+    fi
+else res "NPU" SKIP "no NPU device tree (boot the full or npu variant) or module missing"; fi
+
 hdr "Health after the tests"
 tm=$(awk -F'temp=' '{split($2,a," "); if (a[1]+0>m) m=a[1]+0} END{print m+0}' "$W/sample.log")
 lmin=$(awk '{for(i=1;i<=NF;i++) if ($i ~ /^little=[0-9]+$/) {split($i,a,"="); if (min==""||a[2]<min) min=a[2]; if (a[2]>max) max=a[2]}} END{print (min==""?"n/a":min"-"max)}' "$W/sample.log")

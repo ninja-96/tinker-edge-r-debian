@@ -15,5 +15,5 @@ TTY=(); [ -t 0 ] && TTY=(-it)
 exec docker run --rm "${TTY[@]}" --privileged \
     -v "$PWD":/work -w /work \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
-    -e FREE -e DTB_VARIANT -e ROOTFS_MIB -e BL31 -e DDR_BLOB -e UBOOT_BIN -e USE_TFA \
+    -e FREE -e DTB_VARIANT -e ROOTFS_MIB -e BL31 -e DDR_BLOB -e UBOOT_BIN -e USE_TFA -e FORCE_PW_CHANGE \
     "$IMAGE" "${@:-bash}"

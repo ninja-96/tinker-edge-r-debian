@@ -14,7 +14,7 @@ PASS_=${PASS_:-debian}
 
 PACKAGES=(
     systemd-sysv systemd-resolved udev dbus kmod
-    openssh-server sudo ca-certificates
+    openssh-server sudo ca-certificates nftables
     iproute2 iputils-ping ethtool wpasupplicant iw
     usbutils pciutils less nano curl
     htop bash-completion fdisk util-linux-extra e2fsprogs python3 python3-numpy libusb-1.0-0
@@ -43,9 +43,10 @@ mmdebstrap --arch=arm64 --variant=minbase \
         mkdir -p "$1/etc/systemd/network"
         printf "[Match]\nName=e*\n\n[Network]\nDHCP=yes\n" > "$1/etc/systemd/network/20-wired.network"
         ln -sf /run/systemd/resolve/stub-resolv.conf "$1/etc/resolv.conf"
-        chroot "$1" systemctl enable systemd-networkd systemd-resolved ssh
+        chroot "$1" systemctl enable systemd-networkd systemd-resolved ssh nftables
         chroot "$1" useradd -m -s /bin/bash -G sudo,video,render,audio,dialout,plugdev '"$USER_"'
         echo "'"$USER_"':'"$PASS_"'" | chroot "$1" chpasswd
+        [ "'"${FORCE_PW_CHANGE:-1}"'" = 1 ] && chroot "$1" chage -d 0 '"$USER_"'
         echo "en_US.UTF-8 UTF-8" > "$1/etc/locale.gen"
         chroot "$1" locale-gen
         echo "LANG=en_US.UTF-8" > "$1/etc/default/locale"

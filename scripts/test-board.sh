@@ -4,7 +4,9 @@
 #   scripts/test-board.sh [-d SECONDS] [HOST]
 #   -d  seconds per load phase (default 60; the whole run takes about 8 x that)
 #   HOST defaults to tinker-edge-r.local. SSH_USER (debian) and BOARD_PASS (debian,
-#   used for sudo on the board) can be set in the environment.
+#   used for sudo on the board) can be set in the environment. The image forces a password change
+#   at the first login: log in once by hand (ssh debian@HOST), set a new password, then run this
+#   script with BOARD_PASS=<new password>.
 # The network phase needs iperf3 on this PC (apt install iperf3); it is started and
 # stopped by this script. The PC should be on wired Ethernet for a meaningful result.
 set -euo pipefail

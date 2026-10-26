@@ -75,10 +75,10 @@ No browser is installed by the image.
 
 ### Release 0.3: basic security
 
-| Item | Notes |
+| Item | Status |
 |---|---|
-| `nftables` firewall, on by default | input policy drop; allow loopback, established connections, SSH (22), ping and mDNS (UDP 5353). SSH itself is left as it is (no rate limit, no change of the login methods). Must be tested through the serial console so that a mistake cannot lock the user out. Measure gigabit throughput (`iperf3`) with and without it |
-| Forced password change | `chage -d 0 debian`: the default password `debian` has to be changed at the first login (SSH and console) |
+| `nftables` firewall, on by default | written (`overlay/etc/nftables.conf`, `nftables` in the image): input policy drop; loopback, established connections, SSH (22), ping, IPv6 discovery, DHCP and mDNS (UDP 5353) allowed; SSH itself unchanged. **To be tested on the board**, through the serial console if possible; measure `iperf3` with and without it. See [SECURITY.md](SECURITY.md) |
+| Forced password change | written (`chage -d 0 debian` in `scripts/build-rootfs.sh`, `FORCE_PW_CHANGE=0` turns it off). **To be tested on the board** |
 
 Cheap measures that were discussed and are **not** scheduled (pick any; SSH stays as it is by decision): kernel switches that Debian's kernel has
 and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `YAMA`, `LOCKDOWN`, `LANDLOCK`;
@@ -86,7 +86,7 @@ and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `
 Not done on purpose: secure boot through eFuses (irreversible), a secure OS (OP-TEE / BL32 is not loaded;
 TrustZone only hosts BL31 for PSCI).
 
-### Release 0.3: a browser with hardware video decoding (decided: Chromium is part of the image)
+### A browser with hardware video decoding (decided: Chromium is part of the image; KDE work is not in 0.3)
 
 Why: on the KDE desktop the browser uses a lot of CPU and plays video in software (reported 2026-10-25).
 

@@ -120,12 +120,12 @@ Connect the Ethernet cable and wait **about two minutes** (the first boot grows 
 root filesystem to the whole eMMC and creates the SSH host keys). Then:
 
 ```sh
-ssh debian@tinker-edge-r.local        # password: debian
+ssh debian@tinker-edge-r.local        # password: debian; the first login asks for a new one
 ```
 
 If the name does not resolve, look for `tinker-edge-r` in the DHCP client list of
-your router and use its IP. **Change the password right away** (`passwd`): SSH is
-enabled and the default password is public.
+your router and use its IP. The first login forces a password change (SSH is
+enabled and the default password is public). A firewall lets in only SSH, ping and mDNS, see [docs/SECURITY.md](docs/SECURITY.md).
 
 Serial console (optional, for debugging): UART0 on the 40-pin header, pin 8 (board TX),
 pin 10 (board RX), pin 9 (GND), 115200 8N1, 3.3 V. See [docs/UART.md](docs/UART.md).
@@ -217,7 +217,7 @@ The ASUS TinkerOS image and everything taken from it are never published.
 
 ## Documentation
 
-[KERNEL](docs/KERNEL.md) · [TESTING](docs/TESTING.md) · [VIDEO](docs/VIDEO.md) · [POWER](docs/POWER.md) ·
+[KERNEL](docs/KERNEL.md) · [TESTING](docs/TESTING.md) · [VIDEO](docs/VIDEO.md) · [POWER](docs/POWER.md) · [SECURITY](docs/SECURITY.md) ·
 [GPIO](docs/GPIO.md) · [MIPI](docs/MIPI.md) · [BOOT](docs/BOOT.md) ·
 [FLASHING](docs/FLASHING.md) · [UART](docs/UART.md) · [HARDWARE](docs/HARDWARE.md) ·
 [BRINGUP](docs/BRINGUP.md) · [NPU](docs/NPU.md) · [NPU-RESEARCH](docs/NPU-RESEARCH.md) ·
