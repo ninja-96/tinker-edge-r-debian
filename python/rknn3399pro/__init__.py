@@ -181,7 +181,7 @@ class TensorAttr:
         n = min(a.n_dims, MAX_DIMS)
         self.index = a.index
         self.name = a.name.decode(errors="replace")
-        self.dims = tuple(a.dims[:n])
+        self.dims = tuple(reversed(a.dims[:n]))   # the library lists them innermost first (W, H, C, N)
         self.n_elems, self.size = a.n_elems, a.size
         self.fmt = _FORMATS[a.fmt] if 0 <= a.fmt < len(_FORMATS) else str(a.fmt)
         self.dtype = np.dtype(_DTYPES[a.type]) if 0 <= a.type < len(_DTYPES) else None

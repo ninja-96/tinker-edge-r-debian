@@ -1,0 +1,129 @@
+--- a/RKComm.h
++++ b/RKComm.h
+@@ -155,6 +155,7 @@
+ 	virtual int RKU_TestDeviceReady(DWORD *dwTotal = NULL, DWORD *dwCurrent = NULL, BYTE bySubCode = TU_NONE_SUBCODE);
+ 	virtual int RKU_WriteLBA(DWORD dwPos, DWORD dwCount, BYTE *lpBuffer, BYTE bySubCode = RWMETHOD_IMAGE);
+ 	virtual int RKU_WriteSector(DWORD dwPos, DWORD dwCount, BYTE *lpBuffer);
++	virtual int RKU_RunSystem(BYTE *lpParam, DWORD dwSize);
+     virtual int RKU_DeviceRequest(DWORD dwRequest, BYTE *lpBuffer, DWORD dwDataSize);
+ 	CRKUsbComm(STRUCT_RKDEVICE_DESC devDesc, CRKLog *pLog, bool &bRet);
+ 	virtual ~CRKUsbComm();
+--- a/RKComm.cpp
++++ b/RKComm.cpp
+@@ -882,3 +882,37 @@
+ }
+ 
+ 
++
++/*
++ * Run System ("rs"): make the loader boot the images that were written with wl. Two commands,
++ * as seen on the USB bus when the stock tool does it: WRITE_SDRAM (0x18, sub-code 0xaa) with a
++ * parameter block, then EXECUTE_SDRAM (0x19, sub-code 0xaa) without data.
++ */
++int CRKUsbComm::RKU_RunSystem(BYTE* lpParam, DWORD dwSize)
++{
++	CBW cbw;
++	CSW csw;
++
++	InitializeCBW(&cbw, WRITE_SDRAM);
++	cbw.dwCBWTransferLength = dwSize;
++	cbw.cbwcb.ucReserved = 0xaa;
++	cbw.cbwcb.usLength = EndianU16_LtoB(dwSize);
++	if (!RKU_Write((BYTE *)&cbw, sizeof(CBW)))
++		return ERR_DEVICE_WRITE_FAILED;
++	if (!RKU_Write(lpParam, dwSize))
++		return ERR_DEVICE_WRITE_FAILED;
++	if (!RKU_Read((BYTE *)&csw, sizeof(CSW)))
++		return ERR_DEVICE_READ_FAILED;
++	if (!UFI_CHECK_SIGN(cbw, csw))
++		return ERR_CMD_NOTMATCH;
++
++	InitializeCBW(&cbw, EXECUTE_SDRAM);
++	cbw.cbwcb.ucReserved = 0xaa;
++	if (!RKU_Write((BYTE *)&cbw, sizeof(CBW)))
++		return ERR_DEVICE_WRITE_FAILED;
++	if (!RKU_Read((BYTE *)&csw, sizeof(CSW)))
++		return ERR_DEVICE_READ_FAILED;
++	if (!UFI_CHECK_SIGN(cbw, csw))
++		return ERR_CMD_NOTMATCH;
++	return ERR_SUCCESS;
++}
+--- a/main.cpp
++++ b/main.cpp
+@@ -55,6 +55,7 @@
+ 	printf("PrintPartition:\t\tppt \r\n");
+ 	printf("EraseFlash:\t\tef \r\n");
+ 	printf("TestDevice:\t\ttd\r\n");
++	printf("RunSystem:\t\trs <uboot-LBA> <trust-LBA> <boot-LBA> <uboot-file> <trust-file> <boot-file>\r\n");
+ 	printf("ResetDevice:\t\trd [subcode]\r\n");
+ 	printf("ChangeStorage:\t\tcs [storage: 1=EMMC, 2=SD, 9=SPINOR]\r\n");
+ 	printf("ReadFlashID:\t\trid\r\n");
+@@ -2209,6 +2210,56 @@
+ 	return bSuccess;
+ }
+ 
++/*
++ * Run System: after the uboot, trust and boot images were written with wl, tell the loader to
++ * start them (used for the NPU die of the RK3399Pro). The parameter block is "RSPM", the
++ * number of images, then per image: type (2 uboot, 1 trust, 4 boot), byte offset
++ * (LBA * 512), size in bytes, 0.
++ */
++bool run_system(STRUCT_RKDEVICE_DESC &dev, char *argv[])
++{
++	if (!check_device_type(dev, RKUSB_LOADER | RKUSB_MASKROM))
++		return false;
++	static const unsigned int types[3] = { 2, 1, 4 };
++	unsigned int blk[2 + 3 * 4];
++	unsigned int i;
++	memset(blk, 0, sizeof(blk));
++	memcpy(&blk[0], "RSPM", 4);
++	blk[1] = 3;
++	for (i = 0; i < 3; i++) {
++		char *pszEnd;
++		unsigned long lba = strtoul(argv[2 + i], &pszEnd, 0);
++		struct stat st;
++		if (*pszEnd || stat(argv[5 + i], &st) != 0) {
++			printf("Run System: bad LBA or file for image %u!\r\n", i + 1);
++			return false;
++		}
++		blk[2 + i * 4 + 0] = types[i];
++		blk[2 + i * 4 + 1] = (unsigned int)(lba * 512);
++		blk[2 + i * 4 + 2] = (unsigned int)st.st_size;
++	}
++	CRKUsbComm *pComm = NULL;
++	bool bRet, bSuccess = false;
++	int iRet;
++	pComm = new CRKUsbComm(dev, g_pLogObject, bRet);
++	if (bRet) {
++		iRet = pComm->RKU_RunSystem((BYTE *)blk, sizeof(blk));
++		if (iRet != ERR_SUCCESS) {
++			if (g_pLogObject)
++				g_pLogObject->Record("Error: RKU_RunSystem failed, err=%d", iRet);
++			printf("Run System failed!\r\n");
++		} else {
++			bSuccess = true;
++			printf("Run System OK.\r\n");
++		}
++	} else {
++		printf("Run System quit, creating comm object failed!\r\n");
++	}
++	if (pComm)
++		delete pComm;
++	return bSuccess;
++}
++
+ bool test_device(STRUCT_RKDEVICE_DESC &dev)
+ {
+ 	if (!check_device_type(dev, RKUSB_LOADER | RKUSB_MASKROM))
+@@ -3198,6 +3249,11 @@
+ 		}
+ 	} else if(strcmp(strCmd.c_str(), "TD") == 0) {
+ 		bSuccess = test_device(dev);
++	} else if(strcmp(strCmd.c_str(), "RS") == 0) {
++		if (argc != 8)
++			printf("Parameter of [RS] command is invalid, please check help!\r\n");
++		else
++			bSuccess = run_system(dev, argv);
+ 	} else if (strcmp(strCmd.c_str(), "RID") == 0) {//Read Flash ID
+ 		bSuccess = read_flash_id(dev);
+ 	} else if (strcmp(strCmd.c_str(), "RFI") == 0){//Read Flash Info

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the PC-side flashing tools into out/tools/:
-#   rkdeveloptool       from third_party/rkdeveloptool (GPL, copied unmodified)
+#   rkdeveloptool       from third_party/rkdeveloptool (GPL, copied unmodified) plus patches/rkdeveloptool/
 #   rk3399_loader.bin   the USB loader, copied from blobs/rockchip/
 #   99-rk-rockusb.rules optional udev rule for non-root USB access
 # Nothing is downloaded. Run inside the builder container:
@@ -16,6 +16,7 @@ install -m 0644 blobs/rockchip/rk3399_loader.bin "$OUT/rk3399_loader.bin"
 rm -rf build/rkdeveloptool
 cp -a third_party/rkdeveloptool build/rkdeveloptool
 cd build/rkdeveloptool
+for p in ../../patches/rkdeveloptool/*.patch; do patch -p1 -s < "$p"; done
 autoreconf -i >/dev/null 2>&1
 ./configure CXXFLAGS="-O2 -Wno-error -fpermissive" >/dev/null
 make -j"$(nproc)" >/dev/null
