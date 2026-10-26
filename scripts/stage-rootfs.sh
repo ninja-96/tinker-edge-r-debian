@@ -76,16 +76,16 @@ for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs ssh-hostkeys tinke
 done
 
 # NPU host side. Open parts: rkdeveloptool with the 'rs' patch (loads the NPU firmware), the
-# Python module rknn3399pro. Closed Rockchip files (Apache-2.0 repository airockchip/RK3399Pro_npu, as they
+# Python module rk3399pro_npu. Closed Rockchip files (Apache-2.0 repository airockchip/RK3399Pro_npu, as they
 # are; scripts/fetch-npu.sh downloads and verifies them): firmware of the NPU die, npu_transfer_proxy,
 # librknn_api.so. Not installed with FREE=1. A third_party/npu/ directory (git-ignored, same layout)
 # overrides downloads/npu/.
 [ -x "$O/rkdeveloptool-arm64/usr/bin/rkdeveloptool" ] && install -D -m 0755 "$O/rkdeveloptool-arm64/usr/bin/rkdeveloptool" "$W/usr/bin/rkdeveloptool"
-if [ -d python/rknn3399pro ]; then
+if [ -d python/rk3399pro_npu ]; then
     mkdir -p "$W/usr/lib/python3/dist-packages"
-    rm -rf "$W/usr/lib/python3/dist-packages/rknn3399pro"
-    cp -a python/rknn3399pro "$W/usr/lib/python3/dist-packages/"
-    find "$W/usr/lib/python3/dist-packages/rknn3399pro" -name __pycache__ -prune -exec rm -rf {} +
+    rm -rf "$W/usr/lib/python3/dist-packages/rk3399pro_npu"
+    cp -a python/rk3399pro_npu "$W/usr/lib/python3/dist-packages/"
+    find "$W/usr/lib/python3/dist-packages/rk3399pro_npu" -name __pycache__ -prune -exec rm -rf {} +
 fi
 N=downloads/npu; [ -d third_party/npu ] && N=third_party/npu
 if [ "${FREE:-0}" != 1 ] && [ -d "$N" ]; then

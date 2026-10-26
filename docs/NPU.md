@@ -60,7 +60,7 @@ Two details that cost a day to find, both fixed in the driver and the device tre
 | `npu_transfer_proxy` (2.1.0), `librknn_api.so` and `rknn_api.h` (1.7.5), firmware `MiniLoaderAll.bin`, `uboot.img`, `trust.img`, `boot.img` | https://github.com/airockchip/RK3399Pro_npu, commit in `sources.lock`, fetched by `scripts/fetch-npu.sh` (Apache-2.0, binary only; the GPL parts inside the firmware, Linux 4.4.185, BusyBox and the galcore driver, have their sources at Rockchip) |
 | `rkdeveloptool` with the `rs` command | `third_party/rkdeveloptool` plus `patches/rkdeveloptool/` (GPL-2.0+), built for arm64 by `scripts/build-rkdeveloptool-arm64.sh` |
 | `npu-load`, `npu-proxy-run`, systemd units | this repository, `overlay/` |
-| `rknn3399pro` (Python module) | this repository, `python/` (MIT) |
+| `rk3399pro_npu` (Python module) | this repository, `python/` (MIT) |
 
 **Loading the firmware needs no closed tool.** The loader sequence of the stock `upgrade_tool`
 (`db`, `td`, `wl` x3, `rs`) is done by `rkdeveloptool`; the missing `rs` ("run system") was added after

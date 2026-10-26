@@ -337,14 +337,14 @@ if command -v nft >/dev/null; then
     else res "Firewall" FAIL "ruleset missing, not policy drop, or service not enabled"; fi
 else res "Firewall" SKIP "nft not installed"; fi
 
-hdr "NPU (Python module rknn3399pro)"
-if [ -e /proc/device-tree/npu-power ] && python3 -c 'import rknn3399pro' 2>/dev/null; then
+hdr "NPU (Python module rk3399pro_npu)"
+if [ -e /proc/device-tree/npu-power ] && python3 -c 'import rk3399pro_npu' 2>/dev/null; then
     m=$(ls /usr/share/*.rknn /usr/share/npu_fw/*.rknn /home/*/*.rknn 2>/dev/null | head -1)
     if [ -z "$m" ]; then
         res "NPU" SKIP "no .rknn model on the board (copy one, e.g. mobilenet_v1.rknn, to the home directory)"
     else
         out=$(python3 - "$m" <<'PY' 2>&1 | grep -v '^D '
-import sys, time, numpy as np, rknn3399pro as npu
+import sys, time, numpy as np, rk3399pro_npu as npu
 print(npu.find_devices())
 with npu.RKNN(sys.argv[1]) as net:
     x = np.zeros(net.inputs[0].shape, net.inputs[0].dtype)

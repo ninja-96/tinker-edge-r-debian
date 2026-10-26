@@ -22,7 +22,7 @@ This is the project's own summary, not legal advice.
 | `patches/tf-a/*.patch` | BSD-3-Clause | patch against Trusted Firmware-A |
 | `third_party/rkdeveloptool/` | GPL-2.0+ (sources), `license.txt` is the GPL-2 text | Rockchip's flashing tool, **byte-identical** to `rockchip-linux/rkdeveloptool` commit `304f0737`, see its `ORIGIN.md` |
 | `patches/rkdeveloptool/`, `scripts/npu-fw-tinker.py` | GPL-2.0+ (patch of the GPL tool), MIT (script) | the `rs` command, and the device-tree adaptation of the Rockchip NPU boot image |
-| `python/rknn3399pro/` | MIT | own work, binding for the closed `librknn_api.so` |
+| `python/rk3399pro_npu/` | MIT | own work, binding for the closed `librknn_api.so` |
 | `blobs/rockchip/` | Rockchip licence, see below | unmodified Rockchip binaries and one file assembled from them |
 
 ## 2. Binary-only files (Rockchip)

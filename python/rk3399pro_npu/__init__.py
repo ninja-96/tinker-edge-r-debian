@@ -8,7 +8,7 @@ The library and the NPU stack behind it are Rockchip's closed binaries; this mod
 loads them. The structure layouts follow the public header ``rknn_api.h``.
 
     import numpy as np
-    import rknn3399pro as npu
+    import rk3399pro_npu as npu
 
     print(npu.find_devices())                      # [("RK3399PRO", "e802a990cc82be3a")]
     with npu.RKNN("mobilenet_v1.rknn") as net:
