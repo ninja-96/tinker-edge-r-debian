@@ -136,6 +136,23 @@ Expect little from the GPU in every engine: a plain float4 OpenCL kernel reached
 and the GPU shares the memory bandwidth with the CPU, so the CPU may stay faster for small models. Whatever the
 measurement says goes into the tables in the documentation. NCNN has no row: it needs Vulkan, which this GPU lacks.
 
+### Planned: an open NPU stack on VeriSilicon's TIM-VX (replaces RKNN)
+
+Decision (2026-10-26): RKNN goes out of the product once this path has caught up. Why it can: the Vivante driver and libraries in
+Rockchip's NPU firmware (SDK 6.4.6) run **TIM-VX v1.1.32** (the same SDK version; all 104 of its unit tests pass on the NPU) and the
+**TFLite VX delegate**: MobileNet V2 (uint8) takes 6.5 ms per inference, RKNN is about as fast. Only the closed driver stays; the model format,
+the converter and the server become open and standard (`.tflite` from TensorFlow, MIT code). Research and numbers: `rnd/verisilicon/`.
+
+| Item | Notes |
+|---|---|
+| Thin server on the NPU die | accepts a model and prepares the graph, runs inputs, one model at a time (an error if the memory is not enough or another model is loaded), frees it on request; the models live on the host |
+| Host API (Python, system 3.13) | a class: the constructor loads and prepares the model, `exec(x)` runs synchronously, `async_exec(x, callback)` runs asynchronously and calls the callback with the result, `del` unloads the model and frees the NPU |
+| Transport over USB | to be measured: ADB (about 5 MB/s with `adb push`) against a USB network function or raw bulk; 224x224x3 at 155 FPS is 23 MB/s |
+| Load time | the first inference takes 13 s (the Vivante compiler builds the graph on the two A35 cores): use the delegate's cache of the compiled graph (NBG), kept on the host |
+| Data types | uint8 is fast; float32 is 74 times slower (478 ms); int8, int16 and float16 still to measure |
+| Versions | TIM-VX v1.1.57 and v1.1.88 and a newer TensorFlow Lite on the driver 6.4.6: to try (the unit tests decide) |
+| Removal of RKNN | `rknn_server` (it stays in the firmware unused), `npu_transfer_proxy`, `librknn_api`, the RKNN-Toolkit converter in Docker and the `rk3399pro_npu` module go once the new path has parity (speed, accuracy, tests) |
+
 ### Later
 
 | Item | Notes |
