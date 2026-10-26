@@ -195,6 +195,18 @@ for c in /sys/class/pwm/pwmchip*; do
 done
 [ "$npwm" -ge 3 ] && res "PWM (pins 26, 32, 33)" PASS "$npwm PWM channels start and stop" || res "PWM (pins 26, 32, 33)" FAIL "only $npwm of 3 channels work"
 
+hdr "Python modules for the header"
+if python3 -c 'import gpiod, smbus2, spidev' 2>/dev/null; then
+    r=$(python3 - <<'PY' 2>&1
+import gpiod
+from gpiod.line import Direction
+with gpiod.request_lines("/dev/gpiochip3", consumer="selftest", config={24: gpiod.LineSettings(direction=Direction.INPUT)}) as l:
+    print("OK", l.get_value(24))
+PY
+)
+    echo "$r" | grep -q '^OK' && res "Python GPIO" PASS "gpiod, smbus2 and spidev import; pin 12 read through libgpiod: $r" || res "Python GPIO" FAIL "$r"
+else res "Python GPIO" FAIL "python3-libgpiod, python3-smbus2 or python3-spidev missing"; fi
+
 hdr "MIPI cameras and displays"
 cam=$(for m in /dev/media*; do [ -e "$m" ] && media-ctl -d "$m" -p 2>/dev/null | grep -m1 'driver ' | grep -qi 'rkisp1' && echo "$m"; done)
 [ -n "$cam" ] && res "MIPI camera" PASS "rkisp1 media device: $(echo $cam | tr '\n' ' ')" \

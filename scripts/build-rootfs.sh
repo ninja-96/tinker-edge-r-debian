@@ -17,7 +17,7 @@ PACKAGES=(
     openssh-server sudo ca-certificates nftables
     iproute2 iputils-ping ethtool wpasupplicant iw
     usbutils pciutils less nano curl
-    htop bash-completion fdisk util-linux-extra e2fsprogs python3 python3-numpy libusb-1.0-0
+    htop bash-completion fdisk util-linux-extra e2fsprogs python3 python3-numpy python3-libgpiod python3-smbus2 python3-spidev gpiod i2c-tools libusb-1.0-0
     systemd-timesyncd wireless-regdb rfkill
     gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
     locales alsa-utils bluez libgl1-mesa-dri libegl-mesa0 libgbm1 mesa-utils libdrm-tests mesa-opencl-icd clinfo

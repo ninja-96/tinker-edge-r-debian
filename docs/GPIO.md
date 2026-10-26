@@ -43,12 +43,60 @@ GPIO line numbers: bank `GPIOn_Xm` is `gpiochip n`, line `(X - A) * 8 + m` (`B2`
 ## Using it
 
 ```sh
-sudo apt install gpiod i2c-tools                  # GPIO and I2C tools
+# gpiod, i2c-tools and the Python modules below are in the image
 sudo gpioset -c gpiochip2 25=1                    # pin 7 high (v2 syntax; Ctrl-C releases the line)
 gpioget -c gpiochip3 24                           # read pin 12
 sudo i2cdetect -y 6                               # scan I2C6 (pins 3, 5)
 ls /dev/spidev*                                   # SPI devices
 echo 0 | sudo tee /sys/class/pwm/pwmchip0/export  # PWM channel; then set period, duty_cycle, enable
+```
+
+## From Python
+
+The image has `python3-libgpiod` (version 2 API), `python3-smbus2` and `python3-spidev` from Debian.
+Use `sudo python3` for the device nodes, or add udev rules.
+
+```python
+# GPIO: chip and line numbers are in the table above (pin 7: chip 2, line 25; pin 12: chip 3, line 24)
+import time, gpiod
+from gpiod.line import Direction, Value
+
+with gpiod.request_lines("/dev/gpiochip2", consumer="blink", config={
+        25: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE)}) as out:
+    for _ in range(5):
+        out.set_value(25, Value.ACTIVE); time.sleep(0.5)
+        out.set_value(25, Value.INACTIVE); time.sleep(0.5)
+
+with gpiod.request_lines("/dev/gpiochip3", consumer="read", config={
+        24: gpiod.LineSettings(direction=Direction.INPUT)}) as inp:
+    print(inp.get_value(24))                       # Value.ACTIVE or Value.INACTIVE
+```
+
+```python
+# I2C6 (pins 3, 5): read register 0 of the device at address 0x48
+from smbus2 import SMBus
+with SMBus(6) as bus:
+    print(bus.read_byte_data(0x48, 0x00))
+```
+
+```python
+# SPI5 (pins 13, 15, 16, 18): send three bytes and print the answer
+import spidev
+spi = spidev.SpiDev(); spi.open(5, 0); spi.max_speed_hz = 1_000_000
+print(spi.xfer2([0x9F, 0x00, 0x00]))
+spi.close()
+```
+
+```python
+# PWM: 1 kHz, 25 % on channel 0 of the first chip (see "PWM" above for the chip numbers)
+from pathlib import Path
+chip = Path("/sys/class/pwm/pwmchip0")
+if not (chip / "pwm0").exists():
+    (chip / "export").write_text("0")
+pwm = chip / "pwm0"
+(pwm / "period").write_text("1000000")             # nanoseconds
+(pwm / "duty_cycle").write_text("250000")
+(pwm / "enable").write_text("1")
 ```
 
 Your user is in the `dialout`, `video`, `audio` groups; for GPIO, I2C, SPI and PWM without
