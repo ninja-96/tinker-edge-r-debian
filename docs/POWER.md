@@ -1,7 +1,7 @@
 # Power profiles
 
 `tinker-power` switches the clock policy of the CPU and the GPU between three profiles. It is in
-the image (`/usr/local/sbin/tinker-power`); the choice is applied **at once** when you run the command, saved in
+the image (`/usr/local/bin/tinker-power`); the choice is applied **at once** when you run the command, saved in
 `/etc/tinker-power.conf`, and applied again as early as possible at every boot: the CPU part by
 `tinker-power.service` at the very start of the boot (before the other services), the GPU part by a udev rule
 (`61-tinker-power.rules`) in the moment the GPU driver registers its devfreq device. Nothing waits for anything.

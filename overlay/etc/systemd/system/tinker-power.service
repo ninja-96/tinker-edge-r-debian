@@ -8,7 +8,7 @@ Before=basic.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/sbin/tinker-power apply-cpu
+ExecStart=/usr/local/bin/tinker-power apply-cpu
 
 [Install]
 WantedBy=multi-user.target
