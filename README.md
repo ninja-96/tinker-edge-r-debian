@@ -32,7 +32,8 @@ is being tested.
 | Audio, 3.5 mm jack (RK809) | not known | partly | tone and recording run without errors; not listened to |
 | RTC | yes | partly | write and read back; retention without power not tested |
 | 40-pin header: GPIO, I2C6/7, SPI1/5, PWM0/1/3 | software side | partly | every plain GPIO pin driven and read; no loopback, no real devices ([GPIO.md](docs/GPIO.md)) |
-| USB-A ports, USB-C as host | not known | needs you | plug devices into every port; USB 3 speed |
+| USB-A ports (keyboard, mouse) | yes | partly | a keyboard and a mouse work; a flash drive and USB 3 speed not tried |
+| USB-C as host | not known | needs you | plug a device in; USB 3 speed |
 | Boot from an SD card, swap file | not known | needs you | `scripts/flash-sd.sh` |
 | **0.3** NPU: firmware load without closed tools, MobileNet from Python 3.13 | yes | yes (with the files of this build) | `rk3399pro_npu` module, 74 inferences/s; closed Rockchip files, fetched and checked by the build ([NPU.md](docs/NPU.md)); the 0.3 image itself not yet tested |
 | **0.3** Converter ONNX to `.rknn` (Docker, Python 3.8, on the PC) | in progress | no | [docker/rknn-toolkit](docker/rknn-toolkit/README.md); ONNX opset 8-12 only |

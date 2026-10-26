@@ -23,7 +23,7 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 | Item | What to do |
 |---|---|
 | HDMI picture, HDMI audio | connect a monitor, run `scripts/test-board.sh`, look and listen |
-| USB-A and USB-C with real devices, USB 3 speed | plug a USB 3 disk into every port, run the test |
+| USB-A with a flash drive, USB-C with a device, USB 3 speed | a keyboard and a mouse work on USB-A (checked by the user); plug a USB 3 disk into every port, run the test |
 | Boot from an SD card, the 2 GiB swap file | `scripts/flash-sd.sh`, boot |
 | KDE Plasma desktop | install `task-kde-desktop` once HDMI works |
 | Bluetooth pairing, Wi-Fi connection | pair a device, connect to an access point |
