@@ -22,7 +22,7 @@ rm -f "$W"/etc/ssh/ssh_host_*
 
 # kernel modules
 mkdir -p "$W/lib/modules"
-cp -a "$O/modules/lib/modules/$KVER" "$W/lib/modules/"
+cp -a --no-preserve=ownership "$O/modules/lib/modules/$KVER" "$W/lib/modules/"
 rm -f "$W/lib/modules/$KVER/build" "$W/lib/modules/$KVER/source"
 
 # kernel + all device tree variants (tinker-boot-select repacks the boot partition)
@@ -34,12 +34,12 @@ install -D -m 0755 scripts/mkbootimg.py "$W/usr/local/sbin/tinker-mkbootimg"
 # Rockchip mpp library and test tools (built by build-mpp.sh; used with the -mpp device tree)
 if [ -d "$O/mpp/usr" ]; then
     mkdir -p "$W/usr"
-    cp -a "$O/mpp/usr/." "$W/usr/"
+    cp -a --no-preserve=ownership "$O/mpp/usr/." "$W/usr/"
 fi
 
 # Rockchip GStreamer plugins (built by build-gst-rockchip.sh)
 if [ -d "$O/gst-rockchip/usr" ]; then
-    cp -a "$O/gst-rockchip/usr/." "$W/usr/"
+    cp -a --no-preserve=ownership "$O/gst-rockchip/usr/." "$W/usr/"
 fi
 
 # Comfortable Tab completion in the shell: bash-completion (installed in the rootfs) covers
