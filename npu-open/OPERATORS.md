@@ -22,7 +22,7 @@ so that the RKNN path can be dropped when the open stack has parity.
 |---|---|
 | work in both | 44 |
 | accepted by RKNN, **not on the NPU** in the open stack (CPU fallback of TFLite) | CEIL, COS, FLOOR, FLOOR_DIV, GREATER, LOG_SOFTMAX, MIRROR_PAD, ROUND, SLICE, SUM, TILE, UNPACK |
-| accepted by RKNN, wrong or crashing in the open stack | GATHER_ND and RESIZE_NEAREST_NEIGHBOR (wrong numbers); FULLY_CONNECTED and TRANSPOSE_CONV in a *float* graph (TIM-VX aborts in layout inference; int8 FULLY_CONNECTED and TRANSPOSE_CONV-free networks run fine: ResNet50 has a FULLY_CONNECTED) |
+| accepted by RKNN, wrong or crashing in the open stack | GATHER_ND and RESIZE_NEAREST_NEIGHBOR (wrong numbers); FULLY_CONNECTED and TRANSPOSE_CONV in a *float* graph (TIM-VX aborts in layout inference; the int8 `FULLY_CONNECTED` of ResNet50 runs fine, so this is a float-graph problem; `TRANSPOSE_CONV` was not tested in int8) |
 | work only in the open stack | L2_NORMALIZATION, REDUCE_PROD (RKNN refuses them although L2_NORMALIZATION is in its list) |
 | refused by both | ONE_HOT, REVERSE_V2, SPLIT_V (in the RKNN list, but refused), SQUARED_DIFFERENCE, TOPK_V2, CAST |
 | not tested | the operator vanished in the converter, or no model could be made: BATCH_MATMUL, DEQUANTIZE, DIV, EXPAND_DIMS, L2_POOL_2D, LSTM, PRELU, QUANTIZE, REDUCE_ANY, RELU6, RELU_N1_TO_1, SELECT_V2, SHAPE, SQUEEZE, SVDF, UNIDIRECTIONAL_SEQUENCE_LSTM, ... |
