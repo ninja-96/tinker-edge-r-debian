@@ -146,7 +146,7 @@ clinfo | grep -i "device name"          # Mali-T860 (Panfrost) through Rusticl, 
 sudo gpioset -c gpiochip2 25=1          # 40-pin header, pin 7 (see docs/GPIO.md)
 ```
 
-The `mpp` device tree turns off the mainline V4L2 decoders (`hantro`, `rkvdec`) because
+The default (`full`) and the `mpp` device trees turn off the mainline V4L2 decoders (`hantro`, `rkvdec`) because
 `mpp_service` owns the same hardware; `sudo tinker-boot-select base` switches back
 ([docs/VIDEO.md](docs/VIDEO.md)).
 
