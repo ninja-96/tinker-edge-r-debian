@@ -31,20 +31,86 @@ index cdf2b7d..71bf357 100644
  # Python interpreter wrapper.
  add_library(_pywrap_tensorflow_interpreter_wrapper SHARED EXCLUDE_FROM_ALL
 diff --git a/delegate_main.cc b/delegate_main.cc
-index 29eac51..cf1e8c6 100644
+index 29eac51..b83074c 100644
 --- a/delegate_main.cc
 +++ b/delegate_main.cc
-@@ -16,6 +16,9 @@ limitations under the License.
+@@ -16,6 +16,10 @@ limitations under the License.
  #include "delegate_main.h"
  
  #include <algorithm>
 +#include <cmath>
++#include <deque>
 +#include <cstdlib>
 +#include <cstdio>
  #include <cstring>
  #include <iostream>
  #include <limits>
-@@ -272,6 +275,43 @@ bool TransposeTensorData(const TfLiteTensor* tensor,
+@@ -125,10 +129,24 @@ std::vector<uint32_t> TfLiteTensorDims(const TfLiteTensor* tensor) {
+   return dims;
+ }
+ 
++// rnd/verisilicon: float32 tensors of the model run as float16 on the NPU (the whole graph: weights, activations, input, output);
++// the conversion of the model input and output happens on the CPU. Experimental, off by default (VX_FP16=1): TIM-VX crashes in layout inference on MobileNet V2.
++static bool Fp16Mode() {
++  static const bool on = [] { const char* e = getenv("VX_FP16"); return e && e[0] == '1'; }();
++  return on;
++}
++
++static void FloatToHalf(const float* src, uint16_t* dst, size_t n) {
++  for (size_t i = 0; i < n; i++) { __fp16 h = (__fp16)src[i]; memcpy(&dst[i], &h, 2); }
++}
++static void HalfToFloat(const uint16_t* src, float* dst, size_t n) {
++  for (size_t i = 0; i < n; i++) { __fp16 h; memcpy(&h, &src[i], 2); dst[i] = (float)h; }
++}
++
+ tim::vx::DataType TfLiteDtypeToVsiDtype(TfLiteType type) {
+   switch (type) {
+     case kTfLiteFloat32:
+-      return tim::vx::DataType::FLOAT32;
++      return Fp16Mode() ? tim::vx::DataType::FLOAT16 : tim::vx::DataType::FLOAT32;
+     case kTfLiteInt32:
+       return tim::vx::DataType::INT32;
+     case kTfLiteUInt8:
+@@ -159,11 +177,29 @@ bool IsVariableTensor(const TfLiteTensor* tensor) {
+   return tensor->is_variable;
+ }
+ 
++// rnd/verisilicon: the NPU gives wrong results for signed int8 tensors (a per-tensor int8 model made by the converter gives noise, uint8 models are fine).
++// int8 tensors go to the NPU as uint8: data ^ 0x80 and zero point + 128 (the same numbers). Per-channel int8 weights that are not requantised stay int8.
++// VX_INT8_AS_UINT8=0 switches it off.
++static bool Int8AsUint8() {
++  static const bool on = [] { const char* e = getenv("VX_INT8_AS_UINT8"); return !(e && e[0] == '0'); }();
++  return on;
++}
++static bool ShiftInt8(const TfLiteTensor* t) {
++  if (!Int8AsUint8() || t->type != kTfLiteInt8) return false;
++  if (t->quantization.type == kTfLiteAffineQuantization) {
++    const TfLiteAffineQuantization* q = reinterpret_cast<const TfLiteAffineQuantization*>(t->quantization.params);
++    if (q && q->scale && q->scale->size > 1) { const char* e = getenv("VX_REQUANT_PER_CHANNEL"); return e && e[0] == '1'; }
++  }
++  return true;
++}
++
+ tim::vx::TensorSpec CreateTensorSpec(
+     const TfLiteTensor* tensor,
+     const std::vector<uint32_t>& perm,
+     tim::vx::TensorAttribute attr = tim::vx::TensorAttribute::TRANSIENT) {
+   tim::vx::DataType datatype = TfLiteDtypeToVsiDtype(tensor->type);
++  const bool shift = ShiftInt8(tensor);
++  if (shift) datatype = tim::vx::DataType::UINT8;
+   std::vector<uint32_t> dims(TfLiteTensorDims(tensor));
+   tim::vx::ShapeType whcn_shape(dims.size());
+ 
+@@ -202,7 +238,7 @@ tim::vx::TensorSpec CreateTensorSpec(
+       quantization =
+           tim::vx::Quantization(qtype, vx_channel_dim, scales, zero_points);
+     } else {
+-      quantization = tim::vx::Quantization(qtype, scales[0], zero_points[0]);
++      quantization = tim::vx::Quantization(qtype, scales[0], zero_points[0] + (shift ? 128 : 0));
+     }
+ 
+     return tim::vx::TensorSpec(datatype, whcn_shape, attr, quantization);
+@@ -272,6 +308,54 @@ bool TransposeTensorData(const TfLiteTensor* tensor,
    return true;
  }
  
@@ -54,7 +120,7 @@ index 29eac51..cf1e8c6 100644
 +// the channel scales); channels with a smaller scale lose some resolution. VX_REQUANT_PER_CHANNEL=1 switches it on (default: off).
 +static bool RequantizePerTensor(const TfLiteTensor* t, std::vector<uint8_t>& out, float* new_scale) {
 +  const char* env = getenv("VX_REQUANT_PER_CHANNEL");
-+  if (!env || env[0] != '1') return false;   // off unless VX_REQUANT_PER_CHANNEL=1: it costs accuracy where the channel scales differ a lot
++  if (!env || env[0] != '1') return false;   // off unless VX_REQUANT_PER_CHANNEL=1: one scale per layer costs accuracy (the server splits such layers into groups instead)
 +  if (t->quantization.type != kTfLiteAffineQuantization) return false;
 +  if (t->type != kTfLiteInt8 && t->type != kTfLiteInt32) return false;
 +  const TfLiteAffineQuantization* q = reinterpret_cast<const TfLiteAffineQuantization*>(t->quantization.params);
@@ -85,10 +151,21 @@ index 29eac51..cf1e8c6 100644
 +  return true;
 +}
 +
++// TIM-VX keeps the pointer given to CreateTensor and copies the data only when the graph is compiled, so every buffer we build
++// (transposed, requantised, folded constants) must stay alive until then.
++static std::deque<std::vector<uint8_t>>& KeptBuffers() {
++  static std::deque<std::vector<uint8_t>> kept;
++  return kept;
++}
++static const void* Keep(std::vector<uint8_t>&& v) {
++  KeptBuffers().push_back(std::move(v));
++  return KeptBuffers().back().data();
++}
++
  std::shared_ptr<tim::vx::Tensor> CreateTensor(
      std::shared_ptr<tim::vx::Graph>& graph,
      const TfLiteTensor* tensor,
-@@ -286,6 +326,22 @@ std::shared_ptr<tim::vx::Tensor> CreateTensor(
+@@ -286,11 +370,48 @@ std::shared_ptr<tim::vx::Tensor> CreateTensor(
        break;
      case tim::vx::TensorAttribute::CONSTANT:
        tensor_data = reinterpret_cast<const uint8_t*>(tensor->data.raw_const);
@@ -96,22 +173,100 @@ index 29eac51..cf1e8c6 100644
 +        std::vector<uint8_t> rq;
 +        float rq_scale = 0;
 +        if (RequantizePerTensor(tensor, rq, &rq_scale)) {
++          const bool sh = tensor->type == kTfLiteInt8 && Int8AsUint8();
++          if (sh) for (auto& b : rq) b ^= 0x80;
 +          TfLiteTensor copy = *tensor;
 +          copy.data.raw_const = reinterpret_cast<const char*>(rq.data());
-+          tim::vx::Quantization quant(tim::vx::QuantType::ASYMMETRIC, rq_scale, 0);
++          tim::vx::Quantization quant(tim::vx::QuantType::ASYMMETRIC, rq_scale, sh ? 128 : 0);
 +          spec.SetQuantization(quant);
 +          if (perm.size() > 0) {
 +            std::vector<uint8_t> data_transposed;
 +            if (TransposeTensorData(&copy, perm, data_transposed))
-+              return graph->CreateTensor(spec, reinterpret_cast<const void*>(data_transposed.data()));
++              return graph->CreateTensor(spec, Keep(std::move(data_transposed)));
 +          }
-+          return graph->CreateTensor(spec, reinterpret_cast<const void*>(rq.data()));
++          return graph->CreateTensor(spec, Keep(std::move(rq)));
 +        }
++      }
++      if (ShiftInt8(tensor) && tensor_data) {
++        std::vector<uint8_t> x(tensor_data, tensor_data + tensor->bytes);
++        for (auto& b : x) b ^= 0x80;
++        TfLiteTensor copy = *tensor;
++        copy.data.raw_const = reinterpret_cast<const char*>(x.data());
++        if (perm.size() > 0) {
++          std::vector<uint8_t> data_transposed;
++          if (TransposeTensorData(&copy, perm, data_transposed)) return graph->CreateTensor(spec, Keep(std::move(data_transposed)));
++        }
++        return graph->CreateTensor(spec, Keep(std::move(x)));
++      }
++      if (tensor->type == kTfLiteFloat32 && Fp16Mode() && tensor_data) {
++        std::vector<uint8_t> tmp;
++        const float* srcf = reinterpret_cast<const float*>(tensor_data);
++        if (perm.size() > 0 && TransposeTensorData(tensor, perm, tmp)) srcf = reinterpret_cast<const float*>(tmp.data());
++        size_t n = tensor->bytes / 4;
++        std::vector<uint8_t> h(n * 2);
++        FloatToHalf(srcf, reinterpret_cast<uint16_t*>(h.data()), n);
++        return graph->CreateTensor(spec, Keep(std::move(h)));
 +      }
        if (perm.size() > 0) {
          std::vector<uint8_t> data_transposed;
          if (TransposeTensorData(tensor, perm, data_transposed)) {
-@@ -561,6 +617,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+-          return graph->CreateTensor(
+-              spec, reinterpret_cast<const void*>(data_transposed.data()));
++          return graph->CreateTensor(spec, Keep(std::move(data_transposed)));
+         }
+       }
+       break;
+@@ -500,6 +621,49 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+       auto& states = op_info.states;
+       auto& builtin_data = op_info.builtin_data;
+ 
++      // rnd/verisilicon: Dequantize over a constant (float16 or int8/uint8 weights) is folded here on the CPU into a float32 constant, so
++      // float16-weight models run and the NPU never sees the conversion op.
++      if (builtin_code == kTfLiteBuiltinDequantize && custom_name.empty() && inputs.size() == 1 && outputs.size() == 1 &&
++          tensors_[outputs[0]].get() == nullptr) {
++        const TfLiteTensor* src = &(context->tensors[inputs[0]]);
++        const TfLiteTensor* dst = &(context->tensors[outputs[0]]);
++        if (IsConstTensor(src) && dst->type == kTfLiteFloat32 &&
++            (src->type == kTfLiteFloat16 || src->type == kTfLiteInt8 || src->type == kTfLiteUInt8)) {
++          size_t n = 1;
++          for (int d = 0; d < src->dims->size; d++) n *= src->dims->data[d];
++          std::vector<float> f(n);
++          if (src->type == kTfLiteFloat16) {
++            const uint16_t* h = reinterpret_cast<const uint16_t*>(src->data.raw_const);
++            for (size_t k = 0; k < n; k++) {
++              uint32_t s = (h[k] >> 15) & 1, e = (h[k] >> 10) & 31, m = h[k] & 1023, bits;
++              if (e == 0) {                       // zero / subnormal
++                float v = std::ldexp((float)m, -24);
++                f[k] = s ? -v : v;
++                continue;
++              }
++              bits = (s << 31) | (e == 31 ? (255u << 23) | (m << 13) : ((e + 112) << 23) | (m << 13));
++              memcpy(&f[k], &bits, 4);
++            }
++          } else {
++            const float sc = src->params.scale;
++            const int zp = src->params.zero_point;
++            for (size_t k = 0; k < n; k++) {
++              int v = src->type == kTfLiteInt8 ? reinterpret_cast<const int8_t*>(src->data.raw_const)[k]
++                                               : reinterpret_cast<const uint8_t*>(src->data.raw_const)[k];
++              f[k] = (v - zp) * sc;
++            }
++          }
++          tim::vx::ShapeType shape;
++          for (int d = dst->dims->size - 1; d >= 0; d--) shape.push_back(dst->dims->data[d]);
++          tim::vx::TensorSpec fs(Fp16Mode() ? tim::vx::DataType::FLOAT16 : tim::vx::DataType::FLOAT32, shape, tim::vx::TensorAttribute::CONSTANT);
++          std::vector<uint8_t> fb(n * (Fp16Mode() ? 2 : 4));
++          if (Fp16Mode()) FloatToHalf(f.data(), reinterpret_cast<uint16_t*>(fb.data()), n);
++          else memcpy(fb.data(), f.data(), fb.size());
++          tensors_[outputs[0]] = graph_->CreateTensor(fs, Keep(std::move(fb)));
++          continue;
++        }
++      }
++
+       std::vector<int> inputs_outputs;
+       std::copy(
+           inputs.begin(), inputs.end(), std::back_inserter(inputs_outputs));
+@@ -561,6 +725,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
      TFLITE_LOG(INFO) << "Verifying graph";
      // Do layout inference and get a new graph(first) and a tensor map(second).
      layout_infered_ = tim::transform::LayoutInference(graph_, context_);
@@ -131,3 +286,43 @@ index 29eac51..cf1e8c6 100644
      compiled_ = layout_infered_.first->Compile();
      if (!compiled_) {
        TFLITE_LOG(FATAL) << "Failed to verify graph";
+@@ -583,7 +760,18 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+         reinterpret_cast<const void*>(tf_tensor.data.raw_const);
+     // TODO(derekjchow): Check result
+     auto infered_input_tensor = layout_infered_.second[src_input_tensor];
+-    infered_input_tensor->CopyDataToTensor(const_cast<void*>(tensor_data));
++    if (ShiftInt8(&tf_tensor)) {
++      std::vector<uint8_t> x(reinterpret_cast<const uint8_t*>(tensor_data), reinterpret_cast<const uint8_t*>(tensor_data) + tf_tensor.bytes);
++      for (auto& b : x) b ^= 0x80;
++      infered_input_tensor->CopyDataToTensor(x.data());
++    } else if (tf_tensor.type == kTfLiteFloat32 && Fp16Mode()) {
++      size_t n = tf_tensor.bytes / 4;
++      std::vector<uint16_t> h(n);
++      FloatToHalf(reinterpret_cast<const float*>(tensor_data), h.data(), n);
++      infered_input_tensor->CopyDataToTensor(h.data());
++    } else {
++      infered_input_tensor->CopyDataToTensor(const_cast<void*>(tensor_data));
++    }
+   }
+ 
+   TFLITE_LOG(INFO) << "Invoking graph";
+@@ -602,7 +790,18 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+     void* tensor_data = reinterpret_cast<void*>(tf_tensor.data.raw);
+     // TODO(derekjchow): Check result
+     auto infered_output_tesnor = layout_infered_.second[src_output_tensor];
+-    infered_output_tesnor->CopyDataFromTensor(tensor_data);
++    if (ShiftInt8(&tf_tensor)) {
++      infered_output_tesnor->CopyDataFromTensor(tensor_data);
++      uint8_t* o = reinterpret_cast<uint8_t*>(tensor_data);
++      for (size_t k = 0; k < tf_tensor.bytes; k++) o[k] ^= 0x80;
++    } else if (tf_tensor.type == kTfLiteFloat32 && Fp16Mode()) {
++      size_t n = tf_tensor.bytes / 4;
++      std::vector<uint16_t> h(n);
++      infered_output_tesnor->CopyDataFromTensor(h.data());
++      HalfToFloat(h.data(), reinterpret_cast<float*>(tensor_data), n);
++    } else {
++      infered_output_tesnor->CopyDataFromTensor(tensor_data);
++    }
+   }
+ 
+   // Copy output states to input states

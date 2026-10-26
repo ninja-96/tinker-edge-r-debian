@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "protocol.h"
+#include "split_per_channel.h"
 #include "tensorflow/lite/delegates/external/external_delegate.h"
 #include "tim/vx/context.h"
 #include "tim/vx/graph.h"
@@ -162,6 +163,11 @@ static std::string do_load(std::vector<uint8_t> &&bytes, std::vector<uint8_t> &r
 	auto m = std::make_unique<Model>();
 	m->bytes = std::move(bytes);
 	uint64_t t0 = now_us();
+	if (!getenv("NPU_SPLIT") || getenv("NPU_SPLIT")[0] != '0') {   /* per-channel int8 layers -> per-tensor groups (fast path of the NPU, exact), see split_per_channel.h */
+		npu_split::Stats st; std::string e = npu_split::run(m->bytes, 4.0, &st);
+		if (!e.empty()) return e;
+		if (st.layers) logf_("per-channel layers: %d, split into groups: %d (+%d convolutions, +%d additions)", st.layers, st.split, st.convs_added, st.adds);
+	}
 	m->fb = tflite::FlatBufferModel::BuildFromBuffer((const char *)m->bytes.data(), m->bytes.size());
 	if (!m->fb) return "not a TFLite model (or a version TFLite 2.6 cannot read)";
 	tflite::ops::builtin::BuiltinOpResolver resolver;
@@ -181,6 +187,8 @@ static std::string do_load(std::vector<uint8_t> &&bytes, std::vector<uint8_t> &r
 	unsetenv("VX_NBG_EXPORT");
 	std::string nbg = read_file("/tmp/npu_model.nbg");
 	unlink("/tmp/npu_model.nbg");
+	/* a float input/output is converted by the delegate (the graph itself is float16): the cached graph would not match the tensor description */
+	for (auto &d : m->info) if (d.type == 1) nbg.clear();
 	uint32_t nbg_len = nbg.size();
 	size_t tl = m->info.size() * sizeof(npu_tensor);
 	reply.resize(sizeof lr + tl + 4 + nbg_len);
@@ -226,8 +234,10 @@ static std::string do_load_nbg(std::vector<uint8_t> &&p, std::vector<uint8_t> &r
 	auto make = [&](const npu_tensor &t, tim::vx::TensorAttribute attr) {
 		tim::vx::ShapeType shape;
 		for (int i = t.ndims - 1; i >= 0; i--) shape.push_back(t.dims[i]);   /* TFLite NHWC dims -> TIM-VX WHCN */
-		tim::vx::TensorSpec spec(vx_type(t.type), shape, attr);
-		if (t.scale != 0 && (t.type == 3 || t.type == 9 || t.type == 7)) spec.SetQuantization(*new tim::vx::Quantization(tim::vx::QuantType::ASYMMETRIC, t.scale, t.zero_point));
+		/* the delegate runs int8 tensors as uint8 (data ^ 0x80, zero point + 128): the compiled graph has uint8 inputs and outputs */
+		const bool i8 = t.type == 9;
+		tim::vx::TensorSpec spec(i8 ? tim::vx::DataType::UINT8 : vx_type(t.type), shape, attr);
+		if (t.scale != 0 && (t.type == 3 || t.type == 9 || t.type == 7)) spec.SetQuantization(*new tim::vx::Quantization(tim::vx::QuantType::ASYMMETRIC, t.scale, t.zero_point + (i8 ? 128 : 0)));
 		return m->graph->CreateTensor(spec);
 	};
 	for (uint32_t i = 0; i < n_in; i++) m->tin.push_back(make(m->info[i], tim::vx::TensorAttribute::INPUT));
@@ -264,14 +274,23 @@ static std::string do_run(const std::vector<uint8_t> &in, std::vector<uint8_t> &
 		size_t need = 0, off = 0;
 		for (size_t i = 0; i < m.n_in; i++) need += m.info[i].bytes;
 		if (in.size() != need) { char b[100]; snprintf(b, sizeof b, "input size %zu, the model wants %zu bytes", in.size(), need); return b; }
-		for (size_t i = 0; i < m.n_in; i++) { if (!m.tin[i]->CopyDataToTensor(in.data() + off, m.info[i].bytes)) return "cannot copy the input"; off += m.info[i].bytes; }
+		for (size_t i = 0; i < m.n_in; i++) {
+			const uint8_t *src = in.data() + off; std::vector<uint8_t> x;
+			if (m.info[i].type == 9) { x.assign(src, src + m.info[i].bytes); for (auto &c : x) c ^= 0x80; src = x.data(); }   /* int8 -> uint8 */
+			if (!m.tin[i]->CopyDataToTensor(src, m.info[i].bytes)) return "cannot copy the input";
+			off += m.info[i].bytes;
+		}
 		uint64_t t0 = now_us();
 		if (!m.graph->Run()) return "Run failed";
 		uint32_t us = (uint32_t)(now_us() - t0);
 		size_t total = 4;
 		for (size_t i = 0; i < m.n_out; i++) total += m.info[m.n_in + i].bytes;
 		out.resize(total); memcpy(out.data(), &us, 4); off = 4;
-		for (size_t i = 0; i < m.n_out; i++) { if (!m.tout[i]->CopyDataFromTensor(out.data() + off)) return "cannot copy the output"; off += m.info[m.n_in + i].bytes; }
+		for (size_t i = 0; i < m.n_out; i++) {
+			if (!m.tout[i]->CopyDataFromTensor(out.data() + off)) return "cannot copy the output";
+			if (m.info[m.n_in + i].type == 9) for (size_t k = 0; k < m.info[m.n_in + i].bytes; k++) out[off + k] ^= 0x80;   /* uint8 -> int8 */
+			off += m.info[m.n_in + i].bytes;
+		}
 		return "";
 	}
 	size_t ni = m.interp->inputs().size(), need = 0;

@@ -35,13 +35,39 @@ host (the board, Debian, Python 3.13)                         NPU die (2 x A35, 
 | accuracy | the same top-1 class as TFLite on the CPU; cosine similarity 0.98 to the CPU result (uint8) |
 | other numbers | float32 on the same NPU 478 ms (the fast path is integer); 104 of 104 unit tests of TIM-VX pass; RKNN: 89 inferences/s through its proxy |
 
+## Model types (MobileNet V2 224 on the same board)
+
+| Model | NPU time | Accuracy | Notes |
+|---|---|---|---|
+| uint8 (TF Hub quantised) | 7 ms | as TFLite on the CPU | the fast path of the NPU |
+| int8, per-channel weights (what TensorFlow 2.x makes) | **27 ms** (134 ms without our transform) | cosine 1.000 to float32, same top-5 | see "per-channel int8" below |
+| float32 | 479 ms | exact | slow path |
+| float16 weights (TFLite float16 quantisation) | 479 ms | exact | the `Dequantize` of constants is folded on the CPU, then it is a float32 model: no speed gain |
+| dynamic range (int8 weights, float activations) | not supported | | the model is refused or crashes in the engine child process; the USB function survives |
+| all-float16 graph | not working | | `VX_FP16=1` (experimental): TIM-VX crashes in layout inference |
+
+Other architectures with per-channel int8 (Keras, TensorFlow 2.13, calibrated on one photograph): ResNet50 **71 ms**, cosine 1.0000 to the CPU result; Inception V3 **52 ms**, cosine 0.9992.
+Keras MobileNet V1 is refused by the delegate (its tail has `SHAPE / STRIDED_SLICE / PACK / RESHAPE`, a dynamic reshape): a known limit of the delegate, not of the transform.
+
+### Per-channel int8
+
+Two facts found with the board:
+
+1. **The NPU runs convolutions with per-tensor weights on its fast path** (7 ms) **and per-channel weights on a slow one** (134 ms), and one scale per layer is not an option: the channel scales of
+   MobileNet V2 differ by tens of times and a single scale gives noise (cosine 0.02; a per-tensor model made by TensorFlow itself collapses the same way on the CPU).
+2. `server/split_per_channel.h` rewrites such a model before it is loaded: the channels of a layer are grouped so that the scales inside a group differ at most 4 times (2.5 groups per layer on
+   average for MobileNet V2); the layer becomes one convolution per group with per-tensor weights (other channels are zero) and the outputs are added. The sum is exact: a channel outside the group
+   gives the zero point. `NPU_SPLIT=0` in the environment of the server switches it off.
+
+The NPU also returns wrong results for **signed** int8 tensors: the delegate hands them over as uint8 (`data ^ 0x80`, zero point + 128; the same numbers) and the server does the same for the compiled-graph cache.
+
 ## Known problems
 
 * **`async_exec` can hang the USB bus.** A request sent immediately after a reply (as pipelining does) made the OUT transfer stall in about every other run; after the 60 s time-out the cancel (`stop endpoint`)
   killed the xHCI of the board (`HC died`, the whole USB 3 hub gone, the NPU stuck until it is reloaded). A pause of 300 us before each request (`async_gap_us`, the default) avoided it in all later tests
   (thousands of frames, several runs); `exec` has never hung. The real cause is not found (not libusb, not the NPU clock, not queue depth, not U1/U2). Recovery after a hang:
   `echo fe900000.usb > /sys/bus/platform/drivers/dwc3/unbind`, then `bind`, then reload the NPU (`systemctl restart npu-firmware`). The long list of what was tried is in the maintainer's notes (not in this repository).
-* One model at a time; float32 models are slow (integer models only for speed); TFLite 2.6.0 on the NPU reads models of TensorFlow up to about that age: newer operator versions are untested.
+* One model at a time; float models are slow (integer models only for speed); the first load of a split int8 model takes about a minute (the compiler works on a bigger graph; later loads come from the cache in 0.3 s); TFLite 2.6.0 on the NPU reads models of TensorFlow up to about that age: newer operator versions are untested.
 * The build script was assembled from steps that were run by hand with the Ubuntu 20.04 toolchain image; it has not been run as a whole yet with the Debian 11 one.
 * Interface numbers and endpoints are read from the USB descriptors (class 0xff / 0x4e / 0x50); the host needs access to `/dev/bus/usb` (root or a udev rule) and `npu-transfer-proxy` stopped.
 
@@ -49,7 +75,7 @@ host (the board, Debian, Python 3.13)                         NPU die (2 x A35, 
 
 | Path | What |
 |---|---|
-| `server/` | the server on the NPU die (C++): `protocol.h`, `npu_server.cc`, `CMakeLists.txt` (built inside the delegate tree) |
+| `server/` | the server on the NPU die (C++): `protocol.h`, `npu_server.cc`, `split_per_channel.h`, `CMakeLists.txt` (built inside the delegate tree) |
 | `host/` | `npu_client.py` (class `NpuModel`, `usbfs`, numpy only), `test_client.py`, `test_modes.py`, `stress_ping.py` |
 | `ramdisk/modify_init.py` | changes the two init scripts of Rockchip's ramdisk so that our server starts instead of `rknn_server` (with a fallback to it) |
 | `tools/npu_ramdisk.py` | list, extract, add, remove files in the ramdisk of a `boot.img` without root |
