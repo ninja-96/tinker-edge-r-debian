@@ -61,6 +61,8 @@ Two facts found with the board:
 
 The NPU also returns wrong results for **signed** int8 tensors: the delegate hands them over as uint8 (`data ^ 0x80`, zero point + 128; the same numbers) and the server does the same for the compiled-graph cache.
 
+Operator coverage against RKNN-Toolkit 1.7.5: [OPERATORS.md](OPERATORS.md).
+
 ## Known problems
 
 * **`async_exec` can hang the USB bus.** A request sent immediately after a reply (as pipelining does) made the OUT transfer stall in about every other run; after the 60 s time-out the cancel (`stop endpoint`)

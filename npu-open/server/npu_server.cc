@@ -179,6 +179,16 @@ static std::string do_load(std::vector<uint8_t> &&bytes, std::vector<uint8_t> &r
 	m->delegate = TfLiteExternalDelegateCreate(&opt);
 	if (!m->delegate) return "cannot load the VX delegate " DELEGATE_SO;
 	if (m->interp->ModifyGraphWithDelegate(m->delegate) != kTfLiteOk) return "the VX delegate refused the model";
+	if (getenv("NPU_STRICT") && getenv("NPU_STRICT")[0] == '1') {   /* a test mode: refuse a model with an operator that the delegate left to the CPU, and name the operators */
+		std::string cpu;
+		for (int idx : m->interp->execution_plan()) {
+			const auto *nr = m->interp->node_and_registration(idx);
+			if (nr->first.delegate) continue;
+			const char *nm = nr->second.custom_name ? nr->second.custom_name : tflite::EnumNameBuiltinOperator((tflite::BuiltinOperator)nr->second.builtin_code);
+			if (cpu.find(nm) == std::string::npos) cpu += std::string(cpu.empty() ? "" : ",") + nm;
+		}
+		if (!cpu.empty()) return "not on the NPU: " + cpu;
+	}
 	if (m->interp->AllocateTensors() != kTfLiteOk) return "cannot allocate the tensors";
 	if (m->interp->Invoke() != kTfLiteOk) return "the first run failed";   /* the Vivante compiler builds the graph here (seconds) */
 	describe(*m);
