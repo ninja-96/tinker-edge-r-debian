@@ -15,7 +15,7 @@ sudo tinker-power performance --no-save    # try it, forget it at the next reboo
 | Profile | CPU Cortex-A53 | CPU Cortex-A72 | GPU Mali-T860 |
 |---|---|---|---|
 | `powersave` | `schedutil`, up to 816 MHz | `schedutil`, up to 1008 MHz | automatic, 200-400 MHz |
-| `normal` (default) | `schedutil`, up to 1416 MHz | `schedutil`, up to 1800 MHz | automatic, 200-800 MHz |
+| `normal` (default) | `schedutil`, up to 1416 MHz | `schedutil`, up to 1800 MHz | automatic, 400-800 MHz |
 | `performance` | `performance`, 1416 MHz all the time | `performance`, 1800 MHz all the time | fixed at 800 MHz |
 
 What it does and does not do:

@@ -81,7 +81,7 @@ apply_profile() {
         powersave)   [ "$part" = gpu ] || { set_cpu "$LITTLE" schedutil 816;  set_cpu "$BIG" schedutil 1008; }
                      [ "$part" = cpu ] || set_gpu 200 400 ;;
         normal)      [ "$part" = gpu ] || { set_cpu "$LITTLE" schedutil 1416; set_cpu "$BIG" schedutil 1800; }
-                     [ "$part" = cpu ] || set_gpu 200 800 ;;
+                     [ "$part" = cpu ] || set_gpu 400 800 ;;
         performance) [ "$part" = gpu ] || { set_cpu "$LITTLE" performance 1416; set_cpu "$BIG" performance 1800; }
                      [ "$part" = cpu ] || set_gpu 800 800 ;;
         *) die "unknown profile '$1' (powersave, normal, performance)" ;;
@@ -107,7 +107,7 @@ detect() {
     [ -d "$GPU" ] && { glo=$(gmhz "$GPU/min_freq"); ghi=$(gmhz "$GPU/max_freq"); }
     if [ "$lg" = performance ] && [ "$bg" = performance ] && [ "$glo" = "$ghi" ] && [ "$ghi" -ge 800 ]; then echo performance
     elif [ "$lg" = schedutil ] && [ "$bg" = schedutil ] && [ "$lmax" -le 816 ] && [ "$bmax" -le 1008 ] && [ "$ghi" -le 400 ]; then echo powersave
-    elif [ "$lg" = schedutil ] && [ "$bg" = schedutil ] && [ "$lmax" -ge 1416 ] && [ "$bmax" -ge 1800 ] && [ "$glo" -le 200 ] && [ "$ghi" -ge 800 ]; then echo normal
+    elif [ "$lg" = schedutil ] && [ "$bg" = schedutil ] && [ "$lmax" -ge 1416 ] && [ "$bmax" -ge 1800 ] && [ "$glo" -le 400 ] && [ "$ghi" -ge 800 ]; then echo normal
     else echo custom; fi
 }
 
