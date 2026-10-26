@@ -7,16 +7,22 @@
 
 Build and flash scripts for an open-source system on the **ASUS Tinker Edge R**
 (Rockchip RK3399Pro). The stock ASUS system has been stuck on Linux 4.4 since 2022; this is a way to run
-current software on the board. Unofficial; not affiliated with ASUS or Rockchip.
+current software on the board.
+
+**Unofficial**, not affiliated with **ASUS** or **Rockchip**.
 
 🎯 **Goal:** a user with a board clones this repository, runs the commands below and ends up with a working board:
 boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles, a firewall.
 
 ## 📊 Status
 
-Legend. Works: ✅ yes, ⚠️ partly, ❌ no, ❔ not known. Tested on a board: ✅ yes (by `scripts/test-board.sh` or by hand), 🟡 partly
-(only the software side or a short run), ⬜ no (never run on hardware), 🙋 needs you (needs a monitor, a
-device or a person). Items marked 0.3 are new in release 0.3; `scripts/test-board.sh` passes on this image (45 checks, no failures).
+|  | ✅ | ⚠️ | ❌ | ❔ |
+|---|:---:|:---:|:---:|:---:|
+| **Works** | yes | partly | no | not known |
+
+|  | ✅ | 🟡 | ⬜ | 🙋 |
+|---|:---:|:---:|:---:|:---:|
+| **Tested on a board** | yes | partly: the software side or a short run | not yet | needs a person or a device |
 
 | Area | Works | Tested on a board | Details |
 |---|---|---|---|
@@ -37,11 +43,11 @@ device or a person). Items marked 0.3 are new in release 0.3; `scripts/test-boar
 | USB-A ports (keyboard, mouse) | ✅ yes | 🟡 partly | a keyboard and a mouse work; a flash drive and USB 3 speed not tried |
 | USB-C as host | ❔ not known | 🙋 needs you | plug a device in; USB 3 speed |
 | Boot from an SD card, swap file | ❔ not known | 🙋 needs you | `scripts/flash-sd.sh` |
-| 0.3 NPU: firmware loaded at boot with open tools, MobileNet from Python 3.13 | ✅ yes | ✅ yes | `rk3399pro_npu` module: 69-90 inferences/s depending on the power profile, 3000 in a row without errors; closed Rockchip files, fetched and checked by the build ([NPU.md](docs/NPU.md)); the NPU is on by default (`full` device tree) |
-| 0.3 Converter ONNX to `.rknn` | ⏳ not in 0.3 | ⬜ no | needs Rockchip's closed RKNN-Toolkit (Python 3.8 only, ONNX opset 8-12); planned as a Docker image ([ROADMAP.md](docs/ROADMAP.md)) |
-| 0.3 Power profiles `tinker-power` (powersave / normal / performance) | ✅ yes | ✅ yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
-| 0.3 Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
-| 0.3 Python for the header: libgpiod, smbus2, spidev | ✅ yes | 🟡 partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
+| NPU: firmware loaded at boot with open tools, MobileNet from Python 3.13 | ✅ yes | ✅ yes | `rk3399pro_npu` module: 69-90 inferences/s depending on the power profile, 3000 in a row without errors; closed Rockchip files, fetched and checked by the build ([NPU.md](docs/NPU.md)); the NPU is on by default (`full` device tree) |
+| Converter ONNX to `.rknn` (on the PC, in Docker with Python 3.8) | ✅ yes | ✅ yes | [docker/rknn-toolkit](docker/rknn-toolkit/README.md): a small model converted and run on the NPU; ONNX opset 8-12 only; Rockchip's closed RKNN-Toolkit is downloaded by the build, not stored here |
+| Power profiles `tinker-power` (powersave / normal / performance) | ✅ yes | ✅ yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
+| Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
+| Python for the header: libgpiod, smbus2, spidev | ✅ yes | 🟡 partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
 | DisplayPort over USB-C | ❌ no | | mainline has no Type-C DP glue for this SoC; the USB-C port is a USB host only ([OPEN.md](docs/OPEN.md)) |
 | Vulkan | ❌ no | | Mali-T860 (Midgard) is not supported by PanVK; software `llvmpipe` only |
 | GPU inference engines | ❌ no | | Arm NN GpuAcc does not run (needs OpenCL 2.0); MNN, TVM and TFLite on the GPU are untried; CPU numbers in [ROADMAP.md](docs/ROADMAP.md) |

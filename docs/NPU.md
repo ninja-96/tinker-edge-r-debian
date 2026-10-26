@@ -88,6 +88,27 @@ Services (active only with an `-npu` or `-full` DTB, via
 
 Enable on the board: `sudo tinker-boot-select npu` (or `full`), reboot.
 
+## Run your own model
+
+1. **Convert on the PC** (x86_64, Docker; the converter is Rockchip's closed RKNN-Toolkit 1.7.5, which only runs on
+   Python 3.8, so it lives in an image, see [docker/rknn-toolkit](../docker/rknn-toolkit/README.md)):
+   ```sh
+   docker build -t rk3399pro-npu-converter docker/rknn-toolkit          # once
+   docker run --rm -u $(id -u):$(id -g) -v "$PWD":/work rk3399pro-npu-converter model.onnx -o model.rknn
+   ```
+   The model must be **ONNX opset 8-12** (export from PyTorch with `opset_version=12`); newer graphs are refused and
+   `onnx.version_converter` cannot always lower them. 8-bit quantisation needs a text file with image paths
+   (`--quantize images.txt`). The operators the NPU supports are listed in Rockchip's `RKNN_OP_Support_V1.7.5.md`.
+2. **Copy `model.rknn` to the board** and run it with the system Python (the NPU is on with the default device tree):
+   ```python
+   import numpy as np, rk3399pro_npu as npu
+   with npu.RKNN("model.rknn") as net:
+       print(net.inputs[0], net.outputs[0])           # name, shape, dtype, quantisation
+       (out,) = net.run([np.zeros(net.inputs[0].shape, net.inputs[0].dtype)])
+       print(out.shape, net.last_run_us, "us")
+   ```
+   Checked: a small convolution network converted in the image and run on the board (252 us per inference).
+
 ## ADB on the NPU die
 
 The stock NPU firmware enables ADB next to the RKNN link (`/etc/init.d/.usb_config` has

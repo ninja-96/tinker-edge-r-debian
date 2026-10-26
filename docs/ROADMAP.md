@@ -65,7 +65,7 @@ No browser is installed by the image.
 | Device tree of the NPU boot image | done: the Rockchip kernel cannot drive the board's regulator; `scripts/npu-fw-tinker.py` replaces it by a fixed one ([NPU.md](NPU.md)) |
 | Open replacement for `upgrade_tool` | done: `rs` added to `rkdeveloptool` (`patches/rkdeveloptool/`); `npu-load` uses it. built for arm64 by `scripts/build-rkdeveloptool-arm64.sh` (needs the qemu binfmt handler on the build host); in the image |
 | Python module for the host side | done: `python/rk3399pro_npu` (`ctypes` + `python3-numpy` from apt); in the image, NPU phase in `scripts/test-board.sh` passes |
-| Model conversion ONNX to `.rknn` | **not in 0.3** (the user does it separately): RKNN-Toolkit 1.7.x is closed and runs only on Python 3.6-3.8 / x86; plan: a thin command-line wrapper around Rockchip's Docker image; the format is undocumented, an own converter is a research project |
+| Model conversion ONNX to `.rknn` | done: `docker/rknn-toolkit` (Python 3.8 image with Rockchip's closed Toolkit downloaded at build time; ONNX opset 8-12); tested: converted and run on the NPU. The format is undocumented, an own converter is a research project |
 
 ### Release 0.3: power profiles
 
