@@ -136,7 +136,7 @@ a 2 GiB swap file.
 ## Using the hardware
 
 ```sh
-# H.264 hardware encoding and decoding with GStreamer (the image boots the "mpp" device tree)
+# H.264 hardware encoding and decoding with GStreamer (the image boots the "full" device tree: mpp video and the NPU)
 gst-launch-1.0 videotestsrc num-buffers=300 ! video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 \
   ! mpph264enc ! h264parse ! filesink location=test.h264
 gst-launch-1.0 filesrc location=test.h264 ! h264parse ! mppvideodec ! fpsdisplaysink video-sink=fakesink sync=false
@@ -202,7 +202,7 @@ The ASUS TinkerOS image and everything taken from it are never published.
 |---|---|
 | `scripts/` | build, flash and test scripts (`make-image.sh` is the entry point) |
 | `docker/` | build environment (Debian 13, cross toolchain, QEMU) |
-| `dts/` | device trees: base, `-mpp` (default), `-npu`, `-full` |
+| `dts/` | device trees: base, `-mpp`, `-npu`, `-full` (default) |
 | `patches/` | patches to Linux and TF-A |
 | `kernel-mods/`, `u-boot-mods/` | new kernel and U-Boot files (`mpp_service` port, NPU power driver, board defconfig) |
 | `config/` | kernel configuration fragment |

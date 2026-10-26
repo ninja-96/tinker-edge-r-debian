@@ -14,7 +14,7 @@ O=out
 KVER=${LINUX_VERSION}${KERNEL_LOCALVERSION}
 # mpp: Rockchip mpp_service drives the video codecs (H.264/VP8/JPEG encode, H.265/VP9 decode)
 # and GStreamer uses it; base uses the mainline V4L2 decoders only (no encoder).
-DTB_VARIANT=${DTB_VARIANT:-mpp}
+DTB_VARIANT=${DTB_VARIANT:-full}
 case "$DTB_VARIANT" in
     base) DTB=rk3399pro-tinker-edge-r.dtb ;;
     *)    DTB=rk3399pro-tinker-edge-r-$DTB_VARIANT.dtb ;;

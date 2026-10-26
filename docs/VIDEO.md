@@ -29,8 +29,8 @@ included here.
 
 ## Selecting a device tree variant
 
-The image boots the **`mpp`** variant by default, so hardware encoding and the GStreamer
-plugins work right after flashing. In this variant the mainline V4L2 decoders (`hantro`,
+The image boots the **`full`** variant by default (the `mpp` video drivers and the NPU), so hardware encoding,
+the GStreamer plugins and the NPU work right after flashing. In this variant the mainline V4L2 decoders (`hantro`,
 `rkvdec`) are off, because `mpp_service` owns the same hardware; for the V4L2 stateless
 decoders run `sudo tinker-boot-select base` and reboot.
 
