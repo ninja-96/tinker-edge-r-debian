@@ -114,18 +114,27 @@ that must be played with hardware decoding). Image size grows by about 300 MB (`
 | DMC: DRAM frequency scaling (`CONFIG_ARM_RK3399_DMC_DEVFREQ`, `rockchip,rk3399-dmc`) | saves power and heat at idle. Switched off today (`config/linux-tinker.fragment`) because a failing frequency change hangs the board. Needs: a device tree node with an OPP table and the DFI monitor, DRAM timings for every step (the Rockchip blob reports "dts ddr timing unavailable, use default"), and BL31 that handles the frequency change calls (the Rockchip BL31 does; the open TF-A has the code too). Test with the serial console attached and a way back (maskrom), under a memory stress test |
 | NoC QoS priorities | the vendor kernel raises the priority of the display controller so that a 4K picture does not tear under heavy memory traffic; mainline does not. Check with HDMI at 4K under load once a monitor is available |
 
-### Release 0.4: Arm NN inference on the CPU and the GPU
+### Release 0.4: inference engines on the CPU and the GPU
 
-Goal: a user converts a model on a PC (x86_64 or arm64) and runs it on the board with the system Python (3.13),
-on the CPU and on the GPU, from files that are in the image or one download away.
+Goal: a user converts or takes a model and runs it on the board with the system Python (3.13), on the CPU and on
+the GPU, from files that are in the image or one download away. Converters work on x86_64 and, where possible,
+arm64. The order is fixed: **Arm NN, TFLite, MNN, TVM**; each engine gets its own build script, a Python
+binding for the system Python, a phase in `scripts/test-board.sh` (the same model gives the same result on CPU
+and GPU within a tolerance, FPS reported) and a page in the documentation.
 
-| Item | Notes |
-|---|---|
-| Arm NN for the board, CPU (`CpuAcc`) | Arm NN with the Arm Compute Library built for arm64 with `-mcpu=cortex-a72.cortex-a53 -O3`; measured earlier with a pip build: MobileNetV2 20 FPS (TFLite XNNPACK 33, ONNX Runtime 22) |
-| Arm NN on the GPU (`GpuAcc`) | **known obstacle**: it failed on Rusticl with "Non uniform workgroup size is not supported": Mesa's Rusticl on Midgard (Mali-T860) offers OpenCL C 1.2 only, the Compute Library wants OpenCL 2.0 features. Options to investigate: a Compute Library build or tuning that works with 1.2 (uniform work-group sizes), a newer Mesa, a custom OpenCL kernel set. The GPU part may end as "not possible", with the reasons written down; the float4 FMA test reached about 8 GFLOPS of a peak near 100, so even a working GPU path may not beat the CPU |
-| System Python binding | PyArmNN is built with SWIG against the Python of the board (3.13); to check whether the current Arm NN still ships it and builds with 3.13, otherwise a small `ctypes` binding over the C++ API through a C shim |
-| Model path, PC side | Arm NN's own parsers (ONNX, TFLite) read the model at run time, so conversion may be only an optional step (an optimised, serialised network, `.armnn`); to be a Docker image or a pip-free script that runs on x86_64 and arm64 |
-| Test | a phase in `scripts/test-board.sh` (output of the same model equal on CPU and GPU within a tolerance, FPS reported) |
+Earlier CPU numbers (MobileNetV2, pip builds, [INFERENCE-BENCH](INFERENCE-BENCH.md) in the working copy): TFLite 33 FPS, ONNX Runtime 22,
+Arm NN 20, MNN 18, TVM untuned 1.4. Builds in 0.4 use `-mcpu=cortex-a72.cortex-a53 -O3`.
+
+| Order | Engine | CPU | GPU | Notes |
+|---|---|---|---|---|
+| 1 | **Arm NN** (the official runtime for Arm Mali) | `CpuAcc` with the Compute Library | `GpuAcc` | **GPU is the known obstacle**: it failed on Rusticl with "Non uniform workgroup size is not supported": Rusticl on Midgard (Mali-T860) offers OpenCL C 1.2 only, the Compute Library wants OpenCL 2.0 features. To investigate: Compute Library settings or patches for uniform work-group sizes, a newer Mesa. If it cannot be done the reasons are written down. Binding: PyArmNN built with SWIG for Python 3.13 if the current Arm NN still has it, otherwise a `ctypes` binding. Models: Arm NN's parsers (ONNX, TFLite) read them at run time; an optional PC-side step can write the optimised network |
+| 2 | **TFLite** | XNNPACK | GPU delegate | the GPU delegate can use OpenGL ES 3.1 compute shaders, which Panfrost has; needs a source build of the delegate and the Python `tflite_runtime` for 3.13. Models: `.tflite` (conversion from ONNX or TensorFlow on the PC) |
+| 3 | **MNN** | CPU backend | OpenCL backend | pip's MNN has no OpenCL (it silently falls back to the CPU): source build with `MNN_OPENCL=ON`, Python module for 3.13. Model: `.mnn` from the MNN converter (x86_64 and arm64) |
+| 4 | **TVM** | LLVM target for the A72/A53 | OpenCL target (`opencl`/`mali`) | untuned CPU result was 1.4 FPS: autotuning is part of the job (done on the board or with RPC); Python package for 3.13 |
+
+Expect little from the GPU in every engine: a plain float4 OpenCL kernel reached about 8 GFLOPS of a peak near 100,
+and the GPU shares the memory bandwidth with the CPU, so the CPU may stay faster for small models. Whatever the
+measurement says goes into the tables in the documentation. NCNN has no row: it needs Vulkan, which this GPU lacks.
 
 ### Later
 
