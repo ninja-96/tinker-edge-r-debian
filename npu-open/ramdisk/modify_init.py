@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Makes the two init scripts of the Rockchip NPU ramdisk start our server instead of rknn_server.
 
-    modify_init.py S50usbdevice S50usbdevice.new
-    modify_init.py S60NPU_init   S60NPU_init.new
+    modify_init.py S50usbdevice  <original file>  <new file>
+    modify_init.py S60NPU_init   <original file>  <new file>
 
 (the originals come from the ramdisk of Rockchip's boot.img: unpack with tools/npu_ramdisk.py --list / take them from the image, do not store them here)
 S50usbdevice: after the FunctionFS mount of the "ntb" function our server is started and must write its descriptors before the USB controller is bound;
@@ -42,19 +42,19 @@ S60_OLD = "\t\tstart_rknn.sh &"
 S60_NEW = "\t\t[ -e /tmp/npu.fallback ] && start_rknn.sh &"
 
 
-def main(src, dst):
+def main(which, src, dst):
     text = open(src).read()
-    if "S50usbdevice" in src:
+    if which == "S50usbdevice":
         old, new = S50_OLD, S50_NEW
-    elif "S60NPU_init" in src:
+    elif which == "S60NPU_init":
         old, new = S60_OLD, S60_NEW
     else:
-        sys.exit("give S50usbdevice or S60NPU_init")
+        sys.exit("the first argument is S50usbdevice or S60NPU_init")
     if old not in text:
         sys.exit("%s: the expected text was not found: another version of the firmware?" % src)
     open(dst, "w").write(text.replace(old, new, 1))
 
 
-if len(sys.argv) != 3:
+if len(sys.argv) != 4:
     sys.exit(__doc__)
 main(*sys.argv[1:])
