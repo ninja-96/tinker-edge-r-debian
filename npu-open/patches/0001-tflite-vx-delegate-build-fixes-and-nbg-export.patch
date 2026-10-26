@@ -31,19 +31,87 @@ index cdf2b7d..71bf357 100644
  # Python interpreter wrapper.
  add_library(_pywrap_tensorflow_interpreter_wrapper SHARED EXCLUDE_FROM_ALL
 diff --git a/delegate_main.cc b/delegate_main.cc
-index 29eac51..b7ee417 100644
+index 29eac51..cf1e8c6 100644
 --- a/delegate_main.cc
 +++ b/delegate_main.cc
-@@ -16,6 +16,8 @@ limitations under the License.
+@@ -16,6 +16,9 @@ limitations under the License.
  #include "delegate_main.h"
  
  #include <algorithm>
++#include <cmath>
 +#include <cstdlib>
 +#include <cstdio>
  #include <cstring>
  #include <iostream>
  #include <limits>
-@@ -561,6 +563,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+@@ -272,6 +275,43 @@ bool TransposeTensorData(const TfLiteTensor* tensor,
+   return true;
+ }
+ 
++
++// rnd/verisilicon: the fast (integer) path of the Vivante NPU wants weights quantised per tensor; TensorFlow 2.x makes int8 weights per channel, which
++// runs on a slow path (MobileNet V2: 134 ms against 6 ms). Per-channel int8 weights and their int32 biases are requantised here to ONE scale (the largest of
++// the channel scales); channels with a smaller scale lose some resolution. VX_REQUANT_PER_CHANNEL=1 switches it on (default: off).
++static bool RequantizePerTensor(const TfLiteTensor* t, std::vector<uint8_t>& out, float* new_scale) {
++  const char* env = getenv("VX_REQUANT_PER_CHANNEL");
++  if (!env || env[0] != '1') return false;   // off unless VX_REQUANT_PER_CHANNEL=1: it costs accuracy where the channel scales differ a lot
++  if (t->quantization.type != kTfLiteAffineQuantization) return false;
++  if (t->type != kTfLiteInt8 && t->type != kTfLiteInt32) return false;
++  const TfLiteAffineQuantization* q = reinterpret_cast<const TfLiteAffineQuantization*>(t->quantization.params);
++  if (!q || !q->scale || q->scale->size <= 1 || !t->data.raw_const) return false;
++  const int n = q->scale->size;
++  const float* sc = q->scale->data;
++  float mx = 0;
++  for (int i = 0; i < n; i++) mx = std::max(mx, sc[i]);
++  if (mx <= 0) return false;
++  const int qd = q->quantized_dimension;
++  size_t inner = 1;
++  for (int i = qd + 1; i < t->dims->size; i++) inner *= t->dims->data[i];
++  out.assign(t->bytes, 0);
++  if (t->type == kTfLiteInt8) {
++    const int8_t* src = reinterpret_cast<const int8_t*>(t->data.raw_const);
++    int8_t* dst = reinterpret_cast<int8_t*>(out.data());
++    for (size_t i = 0; i < t->bytes; i++) {
++      double v = std::round(src[i] * (double)sc[(i / inner) % n] / mx);
++      dst[i] = static_cast<int8_t>(std::max(-127.0, std::min(127.0, v)));
++    }
++  } else {
++    const int32_t* src = reinterpret_cast<const int32_t*>(t->data.raw_const);
++    int32_t* dst = reinterpret_cast<int32_t*>(out.data());
++    for (size_t i = 0; i < t->bytes / 4; i++)
++      dst[i] = static_cast<int32_t>(std::llround(src[i] * (double)sc[(i / inner) % n] / mx));
++  }
++  *new_scale = mx;
++  return true;
++}
++
+ std::shared_ptr<tim::vx::Tensor> CreateTensor(
+     std::shared_ptr<tim::vx::Graph>& graph,
+     const TfLiteTensor* tensor,
+@@ -286,6 +326,22 @@ std::shared_ptr<tim::vx::Tensor> CreateTensor(
+       break;
+     case tim::vx::TensorAttribute::CONSTANT:
+       tensor_data = reinterpret_cast<const uint8_t*>(tensor->data.raw_const);
++      {
++        std::vector<uint8_t> rq;
++        float rq_scale = 0;
++        if (RequantizePerTensor(tensor, rq, &rq_scale)) {
++          TfLiteTensor copy = *tensor;
++          copy.data.raw_const = reinterpret_cast<const char*>(rq.data());
++          tim::vx::Quantization quant(tim::vx::QuantType::ASYMMETRIC, rq_scale, 0);
++          spec.SetQuantization(quant);
++          if (perm.size() > 0) {
++            std::vector<uint8_t> data_transposed;
++            if (TransposeTensorData(&copy, perm, data_transposed))
++              return graph->CreateTensor(spec, reinterpret_cast<const void*>(data_transposed.data()));
++          }
++          return graph->CreateTensor(spec, reinterpret_cast<const void*>(rq.data()));
++        }
++      }
+       if (perm.size() > 0) {
+         std::vector<uint8_t> data_transposed;
+         if (TransposeTensorData(tensor, perm, data_transposed)) {
+@@ -561,6 +617,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
      TFLITE_LOG(INFO) << "Verifying graph";
      // Do layout inference and get a new graph(first) and a tensor map(second).
      layout_infered_ = tim::transform::LayoutInference(graph_, context_);

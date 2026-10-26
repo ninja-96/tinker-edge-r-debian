@@ -7,7 +7,11 @@
 #include <linux/usb/ch9.h>
 #include <linux/usb/functionfs.h>
 #include <linux/aio_abi.h>
+#include <poll.h>
 #include <pthread.h>
+#include <signal.h>
+#include <sys/socket.h>
+#include <sys/wait.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -292,21 +296,133 @@ struct Msg { npu_hdr h; std::vector<uint8_t> payload; };
 static std::mutex q_mu; static std::condition_variable q_cv; static std::deque<Msg> q; static bool q_closed = false;
 static const size_t QMAX = 3;   /* RUN requests waiting while one runs: enough to hide the USB transfer */
 
-static bool reply(int in_fd, const npu_hdr &req, bool err, const void *p, size_t n)
+/* usb = true: a message for the host (padded so that it does not end on a multiple of 1024, see protocol.h); false: a message between the processes */
+static bool send_msg(int fd, const npu_hdr &req, bool err, const void *p, size_t n, bool usb)
 {
 	static std::mutex wmu; std::lock_guard<std::mutex> lk(wmu);
-	bool pad = ((sizeof(npu_hdr) + n) % 1024) == 0;
+	bool pad = usb && ((sizeof(npu_hdr) + n) % 1024) == 0;
 	npu_hdr h = { NPU_MAGIC, req.type, (uint16_t)((err ? NPU_FLAG_ERROR : 0) | (pad ? NPU_FLAG_PAD : 0)), req.tag, (uint32_t)n };
 	static std::vector<uint8_t> buf; buf.resize(sizeof h + n + (pad ? 1 : 0));
 	memcpy(buf.data(), &h, sizeof h);
 	if (n) memcpy(buf.data() + sizeof h, p, n);
 	if (pad) buf[sizeof h + n] = 0;
-	static const int gap = getenv("NPU_REPLY_GAP_US") ? atoi(getenv("NPU_REPLY_GAP_US")) : REPLY_GAP_US;   /* experiment */
-	if (gap) usleep(gap);
-	g_wstate = "writing a reply to USB";
-	return write_all(in_fd, buf.data(), buf.size());
+	if (usb) {
+		static const int gap = getenv("NPU_REPLY_GAP_US") ? atoi(getenv("NPU_REPLY_GAP_US")) : REPLY_GAP_US;   /* experiment */
+		if (gap) usleep(gap);
+		g_wstate = "writing a reply to USB";
+	}
+	return write_all(fd, buf.data(), buf.size());
 }
+static bool reply(int in_fd, const npu_hdr &req, bool err, const void *p, size_t n) { return send_msg(in_fd, req, err, p, n, true); }
 static bool reply_err(int in_fd, const npu_hdr &req, const std::string &t) { logf_("error reply: %s", t.c_str()); return reply(in_fd, req, true, t.data(), t.size()); }
+
+/* ================= the engine: a child process that owns the model =================
+ * The parent keeps the USB function and the protocol and never touches TFLite or TIM-VX. A model that crashes the delegate or the driver
+ * (segmentation fault, abort) or hangs kills only this child; the parent answers the host with the reason and stays on the bus. */
+static bool read_exact(int fd, void *b, size_t n)
+{
+	uint8_t *p = (uint8_t *)b;
+	while (n) { ssize_t r = read(fd, p, n); if (r < 0) { if (errno == EINTR) continue; return false; } if (r == 0) return false; p += r; n -= r; }
+	return true;
+}
+static int engine_main(int fd)
+{
+	g_log = fopen("/tmp/npu_server.log", "a");
+	for (;;) {
+		npu_hdr h;
+		if (!read_exact(fd, &h, sizeof h) || h.magic != NPU_MAGIC || h.len > MAX_MSG) return 0;
+		std::vector<uint8_t> payload(h.len);
+		if (h.len && !read_exact(fd, payload.data(), h.len)) return 0;
+		std::vector<uint8_t> out; std::string e;
+		switch (h.type) {
+		case NPU_LOAD: e = do_load(std::move(payload), out); break;
+		case NPU_LOAD_NBG: e = do_load_nbg(std::move(payload), out); break;
+		case NPU_RUN: e = do_run(payload, out); break;
+		default: e = "the engine does not know this request";
+		}
+		if ((h.type == NPU_LOAD || h.type == NPU_LOAD_NBG) && e.empty()) { if (!freopen("/dev/null", "w", stderr)) {} }   /* the delegate prints on every run: only the load is logged */
+		bool ok = e.empty() ? send_msg(fd, h, false, out.data(), out.size(), false) : send_msg(fd, h, true, e.data(), e.size(), false);
+		if (!ok) return 0;
+	}
+}
+
+struct Engine { pid_t pid = -1; int fd = -1; bool loaded = false; };
+static Engine g_eng;
+#define ENGINE_LOG "/tmp/npu_engine.log"
+
+static void engine_kill()
+{
+	if (g_eng.pid > 0) { kill(g_eng.pid, SIGKILL); int st; waitpid(g_eng.pid, &st, 0); logf_("engine %d stopped", (int)g_eng.pid); }
+	if (g_eng.fd >= 0) close(g_eng.fd);
+	g_eng = Engine();
+}
+static bool engine_spawn()
+{
+	int sv[2];
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) return false;
+	int lg = open(ENGINE_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	pid_t pid = fork();
+	if (pid < 0) { close(sv[0]); close(sv[1]); if (lg >= 0) close(lg); return false; }
+	if (pid == 0) {
+		close(sv[0]);
+		if (sv[1] != 3) { dup2(sv[1], 3); close(sv[1]); }
+		if (lg >= 0) { dup2(lg, 2); if (lg != 2) close(lg); }
+		for (int i = 4; i < 256; i++) close(i);
+		signal(SIGPIPE, SIG_DFL);
+		execl("/proc/self/exe", "npu_server", "--engine", "3", (char *)NULL);
+		_exit(127);
+	}
+	close(sv[1]); if (lg >= 0) close(lg);
+	fcntl(sv[0], F_SETFD, FD_CLOEXEC);
+	g_eng.pid = pid; g_eng.fd = sv[0]; g_eng.loaded = false;
+	return true;
+}
+static std::string engine_log_tail()
+{
+	std::string s = read_file(ENGINE_LOG), keep;
+	size_t pos = 0; int lines = 0;
+	std::vector<std::string> v;
+	while (pos < s.size()) { size_t e = s.find('\n', pos); if (e == std::string::npos) e = s.size(); v.push_back(s.substr(pos, e - pos)); pos = e + 1; }
+	for (size_t i = v.size(); i > 0 && lines < 4; i--) { if (v[i - 1].empty() || v[i - 1].find("Tensor has not beed inserted") != std::string::npos) continue; keep = v[i - 1] + (keep.empty() ? "" : " | ") + keep; lines++; }
+	return keep.size() > 400 ? keep.substr(keep.size() - 400) : keep;
+}
+/* forward a request to the engine and wait for the reply; false = the engine is gone or silent (err_text says why) */
+static bool engine_call(const Msg &req, int timeout_s, npu_hdr &rh, std::vector<uint8_t> &rp, std::string &err_text)
+{
+	bool wrote;
+	{ npu_hdr h = req.h; h.flags = 0; npu_hdr hh = h; hh.len = req.payload.size();
+	  wrote = write_all(g_eng.fd, &hh, sizeof hh) && (req.payload.empty() || write_all(g_eng.fd, req.payload.data(), req.payload.size())); }
+	auto dead = [&](const char *what) {
+		int st = 0; pid_t r = waitpid(g_eng.pid, &st, WNOHANG);
+		char b[160];
+		if (r == g_eng.pid && WIFSIGNALED(st)) snprintf(b, sizeof b, "the engine process %s: killed by signal %d (%s)", what, WTERMSIG(st), strsignal(WTERMSIG(st)));
+		else if (r == g_eng.pid) snprintf(b, sizeof b, "the engine process %s: exit status %d", what, WEXITSTATUS(st));
+		else snprintf(b, sizeof b, "the engine process %s", what);
+		err_text = b; std::string t = engine_log_tail(); if (!t.empty()) err_text += ". Last lines of its log: " + t;
+		g_eng.pid = r == g_eng.pid ? -1 : g_eng.pid;   /* already reaped */
+		engine_kill();
+	};
+	if (!wrote) { dead("went away"); return false; }
+	auto wait_read = [&](void *b, size_t n) {
+		uint8_t *p = (uint8_t *)b;
+		while (n) {
+			struct pollfd pf = { g_eng.fd, POLLIN, 0 };
+			int pr = poll(&pf, 1, timeout_s * 1000);
+			if (pr == 0) return 2;
+			if (pr < 0) { if (errno == EINTR) continue; return 1; }
+			ssize_t r = read(g_eng.fd, p, n);
+			if (r <= 0) { if (r < 0 && errno == EINTR) continue; return 1; }
+			p += r; n -= r;
+		}
+		return 0;
+	};
+	int rc = wait_read(&rh, sizeof rh);
+	if (rc == 0 && (rh.magic != NPU_MAGIC || rh.len > MAX_MSG)) rc = 1;
+	if (rc == 0) { rp.assign(rh.len, 0); if (rh.len) rc = wait_read(rp.data(), rh.len); }
+	if (rc == 2) { char b[40]; snprintf(b, sizeof b, "did not answer in %d s (killed)", timeout_s); dead(b); return false; }
+	if (rc != 0) { dead("crashed"); return false; }
+	return true;
+}
 
 static void handle(int in_fd, Msg &m)
 {
@@ -318,12 +434,23 @@ static void handle(int in_fd, Msg &m)
 		chip_identity(&hl.chip_model, &hl.chip_revision, &hl.chip_product, hl.driver);
 		hl.chip_ok = hl.chip_model == 0x8000 && hl.chip_revision == 0x7100 && hl.chip_product == 0x45080001;
 		hl.mem_total_kb = meminfo_kb("MemTotal:"); hl.mem_avail_kb = meminfo_kb("MemAvailable:");
-		{ std::lock_guard<std::mutex> lk(g_model_mu); hl.model_loaded = g_model != nullptr; }
+		hl.model_loaded = g_eng.loaded;
 		reply(in_fd, m.h, false, &hl, sizeof hl); break; }
-	case NPU_LOAD: { std::string e = do_load(std::move(m.payload), out); if (e.empty()) reply(in_fd, m.h, false, out.data(), out.size()); else reply_err(in_fd, m.h, e); break; }
-	case NPU_LOAD_NBG: { std::string e = do_load_nbg(std::move(m.payload), out); if (e.empty()) reply(in_fd, m.h, false, out.data(), out.size()); else reply_err(in_fd, m.h, e); break; }
-	case NPU_RUN: { std::string e = do_run(m.payload, out); if (e.empty()) reply(in_fd, m.h, false, out.data(), out.size()); else reply_err(in_fd, m.h, e); break; }
-	case NPU_UNLOAD: do_unload(); reply(in_fd, m.h, false, nullptr, 0); break;
+	case NPU_LOAD: case NPU_LOAD_NBG: {
+		if (g_eng.pid > 0) { reply_err(in_fd, m.h, "a model is already loaded (one model at a time): unload it first"); break; }
+		if (!engine_spawn()) { reply_err(in_fd, m.h, "cannot start the engine process"); break; }
+		npu_hdr rh; std::string et;
+		if (!engine_call(m, 180, rh, out, et)) { reply_err(in_fd, m.h, et); break; }
+		if (rh.flags & NPU_FLAG_ERROR) { std::string t = engine_log_tail(); std::string msg((const char *)out.data(), out.size()); engine_kill(); reply_err(in_fd, m.h, msg); break; }
+		g_eng.loaded = true;
+		reply(in_fd, m.h, false, out.data(), out.size()); break; }
+	case NPU_RUN: {
+		if (!g_eng.loaded) { reply_err(in_fd, m.h, "no model loaded"); break; }
+		npu_hdr rh; std::string et;
+		if (!engine_call(m, 30, rh, out, et)) { reply_err(in_fd, m.h, et); break; }
+		if (rh.flags & NPU_FLAG_ERROR) reply_err(in_fd, m.h, std::string((const char *)out.data(), out.size())); else reply(in_fd, m.h, false, out.data(), out.size());
+		break; }
+	case NPU_UNLOAD: engine_kill(); reply(in_fd, m.h, false, nullptr, 0); break;
 	case NPU_PING: reply(in_fd, m.h, false, m.payload.data(), m.payload.size()); break;
 	default: reply_err(in_fd, m.h, "unknown request type");
 	}
@@ -367,8 +494,10 @@ static void ep0_events(int ep0)
 	g_rebind = true;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+	signal(SIGPIPE, SIG_IGN);
+	if (argc >= 3 && strcmp(argv[1], "--engine") == 0) return engine_main(atoi(argv[2]));
 	g_log = fopen("/tmp/npu_server.log", "a");
 	std::thread([] {
 		unsigned long lrx = 0, ltx = 0; int quiet = 0;
@@ -465,7 +594,7 @@ lost:
 		{ std::lock_guard<std::mutex> lk(q_mu); q_closed = true; q_cv.notify_all(); }
 		close(out); close(in);
 		w.join();
-		do_unload();
+		engine_kill();
 		/* ep0: wait for the UNBIND event (the function is rebuilt from the descriptors again), but not for ever */
 		for (int i = 0; i < 30 && !g_rebind; i++) usleep(100000);
 		g_ev_stop = true;
