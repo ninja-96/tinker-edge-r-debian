@@ -13,8 +13,7 @@ ends up with a working board (boots from the eMMC, network and SSH up, hardware 
 
 Legend. **Works**: yes / partly / no. **Tested on a board**: yes (by `scripts/test-board.sh` or by hand), partly
 (only the software side or a short run), no (written, never run on hardware), needs you (needs a monitor, a
-device or a person). Release 0.2 is published; items marked **0.3** are in the repository and in the 0.3 image, which
-is being tested.
+device or a person). Items marked **0.3** are new in release 0.3; `scripts/test-board.sh` passes on this image (45 checks, no failures).
 
 | Area | Works | Tested on a board | Details |
 |---|---|---|---|
@@ -35,10 +34,11 @@ is being tested.
 | USB-A ports (keyboard, mouse) | yes | partly | a keyboard and a mouse work; a flash drive and USB 3 speed not tried |
 | USB-C as host | not known | needs you | plug a device in; USB 3 speed |
 | Boot from an SD card, swap file | not known | needs you | `scripts/flash-sd.sh` |
-| **0.3** NPU: firmware load without closed tools, MobileNet from Python 3.13 | yes | yes (with the files of this build) | `rk3399pro_npu` module, 74 inferences/s; closed Rockchip files, fetched and checked by the build ([NPU.md](docs/NPU.md)); the 0.3 image itself not yet tested |
-| **0.3** Converter ONNX to `.rknn` (Docker, Python 3.8, on the PC) | in progress | no | [docker/rknn-toolkit](docker/rknn-toolkit/README.md); ONNX opset 8-12 only |
-| **0.3** Power profiles `tinker-power` | partly | no | tested on a fake sysfs only ([POWER.md](docs/POWER.md)) |
-| **0.3** Firewall (nftables), forced password change | written | no | [SECURITY.md](docs/SECURITY.md) |
+| **0.3** NPU: firmware loaded at boot with open tools, MobileNet from Python 3.13 | yes | yes | `rk3399pro_npu` module: 69-90 inferences/s depending on the power profile, 3000 in a row without errors; closed Rockchip files, fetched and checked by the build ([NPU.md](docs/NPU.md)); the NPU is on by default (`full` device tree) |
+| **0.3** Converter ONNX to `.rknn` | not in 0.3 | no | needs Rockchip's closed RKNN-Toolkit (Python 3.8 only, ONNX opset 8-12); planned as a Docker image ([ROADMAP.md](docs/ROADMAP.md)) |
+| **0.3** Power profiles `tinker-power` (powersave / normal / performance) | yes | yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
+| **0.3** Firewall (nftables), forced password change at the first login | yes | yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
+| **0.3** Python for the header: libgpiod, smbus2, spidev | yes | partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
 | DisplayPort over USB-C | **no** | | mainline has no Type-C DP glue for this SoC; the USB-C port is a USB host only ([OPEN.md](docs/OPEN.md)) |
 | Vulkan | **no** | | Mali-T860 (Midgard) is not supported by PanVK; software `llvmpipe` only |
 | GPU inference engines | **no** | | Arm NN GpuAcc does not run (needs OpenCL 2.0); MNN, TVM and TFLite on the GPU are untried; CPU numbers in [ROADMAP.md](docs/ROADMAP.md) |

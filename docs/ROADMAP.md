@@ -63,22 +63,22 @@ No browser is installed by the image.
 |---|---|
 | Rockchip NPU files, pinned commit and sha256 | done: `scripts/fetch-npu.sh`; verified on the board together (firmware, proxy 2.1.0, `librknn_api` 1.7.5) |
 | Device tree of the NPU boot image | done: the Rockchip kernel cannot drive the board's regulator; `scripts/npu-fw-tinker.py` replaces it by a fixed one ([NPU.md](NPU.md)) |
-| Open replacement for `upgrade_tool` | done: `rs` added to `rkdeveloptool` (`patches/rkdeveloptool/`); `npu-load` uses it. **Pending**: the arm64 build for the image (`scripts/build-rkdeveloptool-arm64.sh` needs the qemu binfmt handler registered on the build host) |
-| Python module for the host side | done: `python/rk3399pro_npu` (`ctypes` + `python3-numpy` from apt); to do: install check in the image, NPU phase in `scripts/test-board.sh` |
-| Model conversion ONNX to `.rknn` | open: RKNN-Toolkit 1.7.x is closed and runs only on Python 3.6-3.8 / x86; plan: a thin command-line wrapper around Rockchip's Docker image; the format is undocumented, an own converter is a research project |
+| Open replacement for `upgrade_tool` | done: `rs` added to `rkdeveloptool` (`patches/rkdeveloptool/`); `npu-load` uses it. built for arm64 by `scripts/build-rkdeveloptool-arm64.sh` (needs the qemu binfmt handler on the build host); in the image |
+| Python module for the host side | done: `python/rk3399pro_npu` (`ctypes` + `python3-numpy` from apt); in the image, NPU phase in `scripts/test-board.sh` passes |
+| Model conversion ONNX to `.rknn` | **not in 0.3** (the user does it separately): RKNN-Toolkit 1.7.x is closed and runs only on Python 3.6-3.8 / x86; plan: a thin command-line wrapper around Rockchip's Docker image; the format is undocumented, an own converter is a research project |
 
 ### Release 0.3: power profiles
 
 | Item | Notes |
 |---|---|
-| `tinker-power`: powersave / normal / performance (CPU and GPU clocks), saved and applied at boot | written and tested on a fake sysfs; **to be tested on the board** (the `test-board.sh` phase checks it); see [POWER.md](POWER.md). Memory clock is not included until the DMC driver (0.4) |
+| `tinker-power`: powersave / normal / performance (CPU and GPU clocks), saved and applied at boot | tested on the board (applied at boot, survives a reboot; the `test-board.sh` phase checks it); see [POWER.md](POWER.md). Memory clock is not included until the DMC driver (0.4) |
 
 ### Release 0.3: basic security
 
 | Item | Status |
 |---|---|
-| `nftables` firewall, on by default | written (`overlay/etc/nftables.conf`, `nftables` in the image): input policy drop; loopback, established connections, SSH (22), ping, IPv6 discovery, DHCP and mDNS (UDP 5353) allowed; SSH itself unchanged. **To be tested on the board**, through the serial console if possible; measure `iperf3` with and without it. See [SECURITY.md](SECURITY.md) |
-| Forced password change | written (`chage -d 0 debian` in `scripts/build-rootfs.sh`, `FORCE_PW_CHANGE=0` turns it off). **To be tested on the board** |
+| `nftables` firewall, on by default | written (`overlay/etc/nftables.conf`, `nftables` in the image): input policy drop; loopback, established connections, SSH (22), ping, IPv6 discovery, DHCP and mDNS (UDP 5353) allowed; SSH itself unchanged. **Tested on the board**: closes other ports, lets SSH, ping, mDNS through, starts at boot; throughput with and without it is the same (about 400 Mbit/s with a Python test; `iperf3` gigabit not measured). The test found that the kernel had no `nf_tables`: fixed. See [SECURITY.md](SECURITY.md) |
+| Forced password change | written (`chage -d 0 debian` in `scripts/build-rootfs.sh`, `FORCE_PW_CHANGE=0` turns it off). **Tested on the board** |
 
 Cheap measures that were discussed and are **not** scheduled (pick any; SSH stays as it is by decision): kernel switches that Debian's kernel has
 and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `YAMA`, `LOCKDOWN`, `LANDLOCK`;
