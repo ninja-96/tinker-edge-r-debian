@@ -16,7 +16,7 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 | GStreamer with `mpph264enc`, `mppvideodec`, ... | plugin built from a pinned commit |
 | Wi-Fi (RTL8822CE, PCIe), Bluetooth (USB), RK809 audio, RTC | link-level checks only, see below |
 | 40-pin header: GPIO, I2C6/7, SPI1/5, PWM0/1/3 | [GPIO.md](GPIO.md) |
-| NPU (optional, closed stack) | power-up needs the reference clock at 24 MHz; [NPU.md](NPU.md) |
+| NPU: TensorFlow Lite 2.21 on an open stack (TIM-VX, TFLite VX delegate), several models and programs, C++ and Python, `device` plans and `autotune()` | only Rockchip's firmware of the NPU die and the Vivante driver are closed; power-up needs the reference clock at 24 MHz; [NPU.md](NPU.md) |
 
 ## Not tested yet (needs a person or hardware)
 

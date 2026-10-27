@@ -152,6 +152,20 @@ gst-launch-1.0 filesrc location=test.h264 ! h264parse ! mppvideodec ! fpsdisplay
 eglinfo -p gbm -B | grep renderer       # Mali-T860 (Panfrost)
 clinfo | grep -i "device name"          # Mali-T860 (Panfrost) through Rusticl, OpenCL 3.0
 sudo gpioset -c gpiochip2 25=1          # 40-pin header, pin 7 (see docs/GPIO.md)
+
+npu-info                                # the NPU: chip, driver, free memory, loaded models
+npu-selftest                            # 17 checks with two small TensorFlow Lite models
+npu-models                              # the models loaded on the NPU; npu-models stop ID|NAME|all
+```
+
+TensorFlow Lite on the NPU from Python (C++: `#include <rk3399pro_npu.hpp>`, `-lrk3399pro_npu`), details in [docs/NPU.md](docs/NPU.md):
+
+```python
+import numpy as np, rk3399pro_npu as npu
+net = npu.Model("mobilenet_v2_quant.tflite")      # device="auto": NPU + CPU; "npu" / "cpu": strictly one of them
+(scores,) = net.exec(np.zeros(net.inputs[0].shape, net.inputs[0].dtype))
+net.autotune()                                     # once: the fastest plan with the same result, kept for the next loads
+net.close()                                        # the model stays loaded for other programs; net.stop() unloads it
 ```
 
 The default (`full`) and the `mpp` device trees turn off the mainline V4L2 decoders (`hantro`, `rkvdec`) because
@@ -214,7 +228,7 @@ The ASUS TinkerOS image and everything taken from it are never published.
 | `patches/` | patches to Linux and TF-A |
 | `kernel-mods/`, `u-boot-mods/` | new kernel and U-Boot files (`mpp_service` port, NPU power driver, board defconfig) |
 | `config/` | kernel configuration fragment |
-| `overlay/` | files copied into the rootfs (services, helper scripts, `npu-info`, `npu-selftest`) |
+| `overlay/` | files copied into the rootfs (services such as `npu-firmware` and `npu-daemon`, helper scripts, `npu-info`, `npu-models`, `npu-selftest`) |
 | `npu-open/`, `python/`, `tests/npu/` | the NPU stack: server for the NPU die, the board side (daemon, C++ library, Python binding), patches, tools, operator comparison; the Python package `rk3399pro_npu`; self-test models |
 | `blobs/` | the Rockchip binaries, unmodified, with licence and origin |
 | `third_party/` | `rkdeveloptool` (GPL), copied unmodified |

@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 """The models loaded on the NPU.
-    npu-models                 list them (id, name, memory, runs, age)
+    npu-models                 list them (id, name, plan, memory, runs, age)
     npu-models stop ID|NAME    unload one (a number is an id, anything else a name or sha256 key)
     npu-models stop all        unload every model"""
 import sys
