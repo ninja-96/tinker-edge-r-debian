@@ -137,7 +137,7 @@ public:
 	// is better); tolerance: the lowest cosine similarity of the outputs to the reference accepted; runs: exec() calls timed per candidate; max_trials: mixed
 	// plans tried. Every candidate is loaded once (for big models: minutes); the loaded copy of this model is unloaded meanwhile (programs attached to it
 	// lose it). The best plan is kept in the cache (later loads with device "auto" use it) and this object is loaded with it. Returns the candidates, the chosen one first.
-	std::vector<TuneResult> autotune(const std::vector<std::vector<uint8_t>> &sample = {}, double tolerance = 0.99, int runs = 5, int max_trials = 8);
+	std::vector<TuneResult> autotune(const std::vector<std::vector<uint8_t>> &sample = {}, double tolerance = 0.98, int runs = 5, int max_trials = 8);
 	bool closed() const { return !link_; }
 
 	// One run. in[i] points to the bytes of input i (inputs()[i].bytes long, in the dtype of the model); out[i] receives output i

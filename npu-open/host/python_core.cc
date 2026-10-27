@@ -103,7 +103,7 @@ PYBIND11_MODULE(_core, mod)
 			py::list out;
 			for (auto &t : r) { py::dict d; d["plan"] = t.plan; d["ms"] = t.ms; d["cosine"] = t.cosine; d["ok"] = t.ok; d["error"] = t.error; out.append(d); }
 			return out;
-		}, py::arg("sample") = py::none(), py::arg("tolerance") = 0.99, py::arg("runs") = 5, py::arg("max_trials") = 8)
+		}, py::arg("sample") = py::none(), py::arg("tolerance") = 0.98, py::arg("runs") = 5, py::arg("max_trials") = 8)
 		.def("exec", [](Model &m, const py::list &xs, int timeout) {
 			auto bi = input_buffers(m, xs);
 			std::vector<const void *> in; for (auto &b : bi) in.push_back(b.ptr);

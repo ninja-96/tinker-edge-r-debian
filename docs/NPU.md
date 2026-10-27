@@ -32,7 +32,7 @@
   * `"npu"`: strictly the whole model on the NPU. If an operator would stay on the CPU, the load fails with `NpuError` naming it and recommending `"auto"`.
   * `"cpu"`: strictly the whole model on the CPU of the NPU die.
   Comparisons, logical operators and `CAST` (bool tensors) are never given to the NPU: they crash TIM-VX on this driver. `Model.autotune()` measures the plans of one model (whole NPU, NPU without the per-channel split, mixed: operator types moved to the CPU, CPU only)
-  against the CPU result and keeps the fastest one with the same result (cosine similarity of the outputs at least 0.99); later loads use it.
+  against the CPU result and keeps the fastest one with the same result (cosine similarity of the outputs at least 0.98 by default, about 20 % relative error); later loads use it.
 * The server checks the chip identity (model 0x8000, revision 0x7100, product 0x45080001 - every Tinker Edge R has it, see "The chip" below) and refuses to run on anything else.
 
 ## The chip
@@ -170,7 +170,7 @@ same model on the CPU of the NPU die, TensorFlow Lite 2.21 with XNNPACK on two C
 |---|---|---|---|---|---|---|
 | classification | ResNet18 | int8 | **19 ms** | 532 ms | 0.993 | NPU / NPU |
 | classification | SqueezeNet 1.1 | int8 | **9.7 ms** | 112 ms | 0.999 | NPU / NPU |
-| classification | MobileNet V3 large | int8 | 70 ms | 98 ms | 0.974 | NPU / CPU (the NPU result is below 0.99) |
+| classification | MobileNet V3 large | int8 | 70 ms | 98 ms | 0.974 | NPU / CPU (the NPU result was below the threshold of 0.4.1, 0.99) |
 | classification | EfficientNet-B0 | int8 | 742 ms | 364 ms | 0.973 | NPU / CPU |
 | detection | YOLOX-nano | float32 | 996 ms | 887 ms | 1.000 | CPU / CPU |
 | detection | EfficientDet-Lite0 | float32 | 216 ms | 427 ms | 0.40 | CPU |

@@ -154,13 +154,14 @@ class Model:
         """The operator types of the model and where they run: a list of OpStat (empty for a model loaded from its compiled graph: all on the NPU)."""
         return [OpStat(o) for o in self._m.ops()]
 
-    def autotune(self, sample=None, tolerance=0.99, runs=5, max_trials=8):
+    def autotune(self, sample=None, tolerance=0.98, runs=5, max_trials=8):
         """Find the fastest way to run this model with the same results, keep it, and switch to it.
 
         Candidates: the whole model on the CPU of the NPU die (the reference: TensorFlow Lite with XNNPACK), the whole model on the NPU, the same without
         the split of per-channel int8 layers, and mixed plans in which operator types move from the NPU to the CPU one by one (kept when that is faster or
         makes the result right; at most max_trials of them). Each candidate runs the sample (an input array, or a list for several inputs; None: random
-        data, but real data is better) and is compared with the reference: the lowest cosine similarity of the outputs must be at least `tolerance`.
+        data, but real data is better) and is compared with the reference: the lowest cosine similarity of the outputs must be at least `tolerance`
+        (default 0.98: about 20 % relative error of the outputs; 0.99: about 14 %, 0.95: about 32 %).
         Every candidate is loaded and compiled once: for a big model this takes minutes, once.
 
         The fastest candidate that passes is kept next to the compiled-graph cache (later loads with device "auto" use it, a whole-NPU plan from its cached
