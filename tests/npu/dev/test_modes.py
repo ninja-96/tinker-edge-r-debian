@@ -1,7 +1,7 @@
 import sys, time, threading, faulthandler, os, numpy as np
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "python"))
 faulthandler.dump_traceback_later(60, exit=True)
-from npu_client import NpuModel
+from rk3399pro_npu import NpuModel
 inflight = int(sys.argv[1]); mode = sys.argv[2]; n = int(sys.argv[3])
 npu = NpuModel("/tmp/mobilenet_v2_1.0_224_quant.tflite", max_inflight=inflight)
 x = np.random.RandomState(0).randint(0, 255, npu.inputs[0].shape).astype(npu.inputs[0].dtype)

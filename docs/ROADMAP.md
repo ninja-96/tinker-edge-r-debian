@@ -57,7 +57,7 @@ does not build against Debian's `libv4l2` (its plugin interface lacks `mmap`; th
 `v4l-utils`) and it is made for a Chromium built with the author's patches, so Debian's Chromium would not use it.
 No browser is installed by the image.
 
-### Release 0.3: NPU
+### Release 0.3: NPU (RKNN; replaced by the TensorFlow Lite stack in 0.4)
 
 | Item | Status |
 |---|---|
@@ -71,7 +71,7 @@ No browser is installed by the image.
 
 | Item | Notes |
 |---|---|
-| `tinker-power`: powersave / normal / performance (CPU and GPU clocks), saved and applied at boot | tested on the board (applied at boot, survives a reboot; the `test-board.sh` phase checks it); see [POWER.md](POWER.md). Memory clock is not included until the DMC driver (0.4) |
+| `tinker-power`: powersave / normal / performance (CPU and GPU clocks), saved and applied at boot | tested on the board (applied at boot, survives a reboot; the `test-board.sh` phase checks it); see [POWER.md](POWER.md). Memory clock is not included until the DMC driver (0.5) |
 
 ### Release 0.3: basic security
 
@@ -107,14 +107,14 @@ the CPU load by itself); (2) install `chromium` on the board and test A and B wi
 browser and its configuration (flags in `/etc/chromium.d/`) into the image, with a test in `scripts/test-board.sh` (a clip
 that must be played with hardware decoding). Image size grows by about 300 MB (`ROOTFS_MIB`).
 
-### Release 0.4: memory controller
+### Release 0.5: memory controller
 
 | Item | Notes |
 |---|---|
 | DMC: DRAM frequency scaling (`CONFIG_ARM_RK3399_DMC_DEVFREQ`, `rockchip,rk3399-dmc`) | saves power and heat at idle. Switched off today (`config/linux-tinker.fragment`) because a failing frequency change hangs the board. Needs: a device tree node with an OPP table and the DFI monitor, DRAM timings for every step (the Rockchip blob reports "dts ddr timing unavailable, use default"), and BL31 that handles the frequency change calls (the Rockchip BL31 does; the open TF-A has the code too). Test with the serial console attached and a way back (maskrom), under a memory stress test |
 | NoC QoS priorities | the vendor kernel raises the priority of the display controller so that a 4K picture does not tear under heavy memory traffic; mainline does not. Check with HDMI at 4K under load once a monitor is available |
 
-### Release 0.4: inference engines on the CPU and the GPU
+### Release 0.5: inference engines on the CPU and the GPU
 
 Goal: a user converts or takes a model and runs it on the board with the system Python (3.13), on the CPU and on
 the GPU, from files that are in the image or one download away. Converters work on x86_64 and, where possible,
@@ -123,7 +123,7 @@ binding for the system Python, a phase in `scripts/test-board.sh` (the same mode
 and GPU within a tolerance, FPS reported) and a page in the documentation.
 
 Earlier CPU numbers (MobileNetV2, pip builds, [INFERENCE-BENCH](INFERENCE-BENCH.md) in the working copy): TFLite 33 FPS, ONNX Runtime 22,
-Arm NN 20, MNN 18, TVM untuned 1.4. Builds in 0.4 use `-mcpu=cortex-a72.cortex-a53 -O3`.
+Arm NN 20, MNN 18, TVM untuned 1.4. Builds in 0.5 use `-mcpu=cortex-a72.cortex-a53 -O3`.
 
 | Order | Engine | CPU | GPU | Notes |
 |---|---|---|---|---|
@@ -136,27 +136,24 @@ Expect little from the GPU in every engine: a plain float4 OpenCL kernel reached
 and the GPU shares the memory bandwidth with the CPU, so the CPU may stay faster for small models. Whatever the
 measurement says goes into the tables in the documentation. NCNN has no row: it needs Vulkan, which this GPU lacks.
 
-### In progress: an open NPU stack on VeriSilicon's TIM-VX (replaces RKNN); milestone 1 reached, code in [npu-open/](../npu-open/README.md)
+### Release 0.4: NPU on TensorFlow Lite (open stack; RKNN is removed)
 
-Milestone 1 (2026-10-26): the whole path works on the board: server on the NPU die, own USB channel (38-52 MB/s), class `NpuModel` with `exec` (110 FPS) and `async_exec` (158 FPS, experimental: an unsolved USB hang is avoided with a pause), cache of the compiled graph (load 13 s -> 0.1 s), MobileNet V2 uint8 gives the same class as the CPU. Left: other data types and models, memory estimate, behaviour on a crash, the real cause of the hang, build in the Debian container, the image build, the test in `test-board.sh`, the comparison of operators (TFLite 2.6 against RKNN 1.7.5), removal of RKNN.
+Decision (2026-10-26/27): 0.4 is the NPU release. RKNN (`rknn_server` use, `npu_transfer_proxy`, `librknn_api`, the RKNN-Toolkit converter, the `.rknn` module) leaves the product; TensorFlow Lite
+models run on the NPU through VeriSilicon's **TIM-VX v1.1.32** (the same SDK version as the Vivante driver of Rockchip's firmware; its 104 unit tests pass on the NPU) and the **TFLite VX delegate**.
+Only the driver and Rockchip's firmware stay closed. The memory controller work and the CPU/GPU inference engines (below) moved to 0.5. Documentation: [NPU.md](NPU.md), [operators](../npu-open/OPERATORS.md); code: [npu-open/](../npu-open/README.md).
 
-Decision (2026-10-26): RKNN goes out of the product once this path has caught up. Why it can: the Vivante driver and libraries in
-Rockchip's NPU firmware (SDK 6.4.6) run **TIM-VX v1.1.32** (the same SDK version; all 104 of its unit tests pass on the NPU) and the
-**TFLite VX delegate**: MobileNet V2 (uint8) takes 6.5 ms per inference, RKNN is about as fast. Only the closed driver stays; the model format,
-the converter and the server become open and standard (`.tflite` from TensorFlow, MIT code). Research and numbers: `rnd/verisilicon/`.
-
-| Item | Notes |
+| Item | Status |
 |---|---|
-| One chip | decision (2026-10-26): every Tinker Edge R has the same NPU, model 0x8000 revision 0x7100 product 0x45080001 (the only chip that Rockchip's and ASUS's `galcore` know); the build is made for it only. The server reads the identity from sysfs at the start and refuses to run on anything else, with a clear message; `test-board.sh` prints it |
-| Transport: the `ntb` USB function | the gadget of the NPU die already has a FunctionFS function `ntb` (two bulk endpoints, 1024-byte packets, SuperSpeed) next to `adb`; today `rknn_server` opens it and `npu_transfer_proxy` talks to it with libusb. Our server can take it over (write the descriptors to `/dev/usb-ffs/ntb/ep0`, then use `ep1` and `ep2`) and the host client talks bulk USB with `libusb` (`ctypes`, no ADB, no gadget change). **Measured (2026-10-26):** stock ADB gives 5-6 MB/s and 1.3 ms for 1 KB (even through `adb forward`); our own bulk channel on the `ntb` function gives 38 MB/s each way for a 150 KB frame (3.9 ms round trip) and 52 MB/s for 1 MiB (0.3-0.5 ms for small messages). Rules found: write the FunctionFS descriptors before the USB controller is bound (our own `S50usbdevice` in the NPU ramdisk, with a fallback to `rknn_server`), read OUT endpoints in multiples of 1024 bytes, give the interface a class that ADB does not take |
-| Compiled graph (NBG) | TIM-VX can export a compiled graph (`Graph::CompileToBinary`) and run it (the NBG operation); the unit tests of the export pass on the NPU. The TFLite delegate (needed once, to build the graph from a `.tflite` on the NPU) does not cache by itself; the server would then run NBG only, without TFLite |
-| Thin server on the NPU die | accepts a model and prepares the graph, runs inputs, one model at a time (an error if the memory is not enough or another model is loaded), frees it on request; the models live on the host |
-| Host API (Python, system 3.13) | a class: the constructor loads and prepares the model, `exec(x)` runs synchronously, `async_exec(x, callback)` runs asynchronously and calls the callback with the result, `del` unloads the model and frees the NPU |
-| Transport over USB | to be measured: ADB (about 5 MB/s with `adb push`) against a USB network function or raw bulk; 224x224x3 at 155 FPS is 23 MB/s |
-| Load time | the first inference takes 13 s (the Vivante compiler builds the graph on the two A35 cores): use the delegate's cache of the compiled graph (NBG), kept on the host |
-| Data types | uint8 is fast; float32 is 74 times slower (478 ms); int8, int16 and float16 still to measure |
-| Versions | TIM-VX v1.1.57 and v1.1.88 and a newer TensorFlow Lite on the driver 6.4.6: to try (the unit tests decide) |
-| Removal of RKNN | `rknn_server` (it stays in the firmware unused), `npu_transfer_proxy`, `librknn_api`, the RKNN-Toolkit converter in Docker and the `rk3399pro_npu` module go once the new path has parity (speed, accuracy, tests) |
+| One chip | decision: every Tinker Edge R has the same NPU, model 0x8000 revision 0x7100 product 0x45080001; the server reads it from sysfs and refuses anything else; `npu-selftest` and `npu-info` print it |
+| Transport | done: the `ntb` USB function with our own bulk channel (38-52 MB/s, 0.3-0.5 ms for small messages; ADB gives 5-6 MB/s). The server writes the FunctionFS descriptors before the controller is bound (own `S50usbdevice`, fallback to the stock `rknn_server`) |
+| Server on the NPU die | done: model in a child process (a crashing model is answered with the reason, the USB function stays), memory check, one model at a time |
+| Build from source | done: `scripts/build-npu-open.sh` (Debian 11 container, sources pinned in `sources.lock`, `-O3 -mcpu=cortex-a35`), `scripts/build-npu-boot.sh` makes the firmware image of the NPU die (device tree + our files + two init scripts); part of `scripts/make-image.sh` |
+| Python module | done: `rk3399pro_npu.Model` (`exec`; `async_exec` is experimental), the cache of the compiled graph (13-60 s -> 0.1-0.3 s), `npu-info`, udev rule for the group `plugdev` |
+| Data types | done: uint8 (6-7 ms for MobileNet V2), int8 with per-channel weights (27 ms: layers split by scale, exact), float32 and float16 weights (480 ms, slow path). Not supported: dynamic-range models, an all-float16 graph |
+| Tests | done: `npu-selftest` (two small models against TFLite on the CPU, speed, cache, a broken model, one model per NPU), the NPU phase of `scripts/test-board.sh`, run as the ordinary user |
+| Operators | compared with RKNN-Toolkit 1.7.5 in [OPERATORS.md](../npu-open/OPERATORS.md). Open: `GATHER_ND` and `RESIZE_NEAREST_NEIGHBOR` give wrong results, float `FULLY_CONNECTED` and `TRANSPOSE_CONV` crash TIM-VX, `SUM` / `TILE` / `UNPACK` / `SLICE` / `FLOOR` / `LOG_SOFTMAX` / `MIRROR_PAD` / comparisons / `LSTM` / `SVDF` are left to the CPU of the NPU die |
+| Known problems | `async_exec` can hang the USB bus (cause not found; a pause of 300 us avoids it; use `exec`); Keras MobileNet V1 (dynamic reshape) is refused by the delegate |
+| Not in 0.4 | a converter in Docker for ONNX/PyTorch to TFLite (the documentation says how to make an integer model); newer TIM-VX (v1.1.57 crashes on this driver); an own kernel for the NPU die |
 
 ### Later
 

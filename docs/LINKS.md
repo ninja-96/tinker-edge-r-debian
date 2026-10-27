@@ -49,3 +49,5 @@ depend on any of these at build time except the open upstream sources listed und
 | NXP Vivante kernel driver (same code family as the NPU's `galcore`) | https://github.com/nxp-imx/linux-imx (`drivers/mxc/gpu-viv`) |
 | arm64 boot protocol | https://docs.kernel.org/arch/arm64/booting.html |
 | RK3399Pro mainline device tree (Rock Pi N10) | https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/rockchip/rk3399pro-rock-pi-n10.dts |
+| TIM-VX (VeriSilicon, the NPU graph library of the open stack) | https://github.com/VeriSilicon/TIM-VX |
+| TFLite VX delegate | https://github.com/VeriSilicon/tflite-vx-delegate |

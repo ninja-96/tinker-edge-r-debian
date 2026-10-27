@@ -31,3 +31,5 @@ third_party/npu/
 # Private research notes and extracted vendor files
 rnd/
 docker/rknn-toolkit/pk.tgz
+__pycache__/
+*.pyc

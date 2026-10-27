@@ -71,15 +71,14 @@ cp blobs/README.md "$DOC/blobs-README.md"
 dpkg-query --admindir="$W/var/lib/dpkg" -W -f='${Package}\t${Version}\t${Architecture}\t${Source}\n' | sort > "$DOC/packages.txt"
 cp "$DOC/packages.txt" "$O/packages.txt"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
-for u in npu-firmware npu-transfer-proxy tinker-expand-rootfs ssh-hostkeys tinker-power; do
+for u in npu-firmware tinker-expand-rootfs ssh-hostkeys tinker-power; do
     ln -sf "/etc/systemd/system/$u.service" "$W/etc/systemd/system/multi-user.target.wants/$u.service"
 done
 
-# NPU host side. Open parts: rkdeveloptool with the 'rs' patch (loads the NPU firmware), the
-# Python module rk3399pro_npu. Closed Rockchip files (Apache-2.0 repository airockchip/RK3399Pro_npu, as they
-# are; scripts/fetch-npu.sh downloads and verifies them): firmware of the NPU die, npu_transfer_proxy,
-# librknn_api.so. Not installed with FREE=1. A third_party/npu/ directory (git-ignored, same layout)
-# overrides downloads/npu/.
+# NPU host side. Open parts: rkdeveloptool with the 'rs' patch (loads the firmware into the NPU die), the Python module rk3399pro_npu
+# (TensorFlow Lite models over our own USB channel), npu-info. The firmware image of the NPU die (out/npu_fw/, scripts/build-npu-boot.sh) is Rockchip's
+# (closed, Apache-2.0 repository airockchip/RK3399Pro_npu, as it is except for the device tree) with our open server added: TIM-VX, the TFLite VX
+# delegate and npu_server (scripts/build-npu-open.sh). Not installed with FREE=1.
 [ -x "$O/rkdeveloptool-arm64/usr/bin/rkdeveloptool" ] && install -D -m 0755 "$O/rkdeveloptool-arm64/usr/bin/rkdeveloptool" "$W/usr/bin/rkdeveloptool"
 if [ -d python/rk3399pro_npu ]; then
     mkdir -p "$W/usr/lib/python3/dist-packages"
@@ -87,18 +86,16 @@ if [ -d python/rk3399pro_npu ]; then
     cp -a --no-preserve=ownership python/rk3399pro_npu "$W/usr/lib/python3/dist-packages/"
     find "$W/usr/lib/python3/dist-packages/rk3399pro_npu" -name __pycache__ -prune -exec rm -rf {} +
 fi
-N=downloads/npu; [ -d third_party/npu ] && N=third_party/npu
-if [ "${FREE:-0}" != 1 ] && [ -d "$N" ]; then
-    [ -f "$N/npu_transfer_proxy" ] && install -D -m 0755 "$N/npu_transfer_proxy" "$W/usr/bin/npu_transfer_proxy"
-    [ -f "$N/librknn_api.so" ] && install -D -m 0644 "$N/librknn_api.so" "$W/usr/lib/aarch64-linux-gnu/librknn_api.so"
-    [ -f "$N/rknn_api.h" ]     && install -D -m 0644 "$N/rknn_api.h" "$W/usr/include/rknn_api.h"
-    [ -f "$N/LICENSE" ]        && install -D -m 0644 "$N/LICENSE" "$DOC/licenses/RK3399Pro_npu-LICENSE"
-    if [ -d "$N/npu_fw" ]; then
-        mkdir -p "$W/usr/share/npu_fw"; cp "$N/npu_fw"/* "$W/usr/share/npu_fw/"
-        # Rockchip's image expects the regulators of their EVB; only its device tree is adapted to this board
-        # (the ASUS image from third_party/npu/ does not need it and is left as it is)
-        python3 scripts/npu-fw-tinker.py "$N/npu_fw/boot.img" "$W/usr/share/npu_fw/boot.img" \
-            || cp "$N/npu_fw/boot.img" "$W/usr/share/npu_fw/boot.img"
+cp docs/NPU.md npu-open/OPERATORS.md "$DOC/"
+mkdir -p "$W/usr/share/tinker-edge-r/npu-selftest"
+cp tests/npu/net_int8.tflite tests/npu/net_uint8.tflite tests/npu/expected.npz "$W/usr/share/tinker-edge-r/npu-selftest/"   # for /usr/local/bin/npu-selftest
+if [ "${FREE:-0}" != 1 ]; then
+    if [ -f "$O/npu_fw/boot.img" ]; then
+        mkdir -p "$W/usr/share/npu_fw"; cp "$O"/npu_fw/{MiniLoaderAll.bin,uboot.img,trust.img,boot.img} "$W/usr/share/npu_fw/"
+        [ -f downloads/npu/LICENSE ] && install -D -m 0644 downloads/npu/LICENSE "$DOC/licenses/RK3399Pro_npu-LICENSE"
+        [ -d "$O/npu-open/licenses" ] && cp "$O"/npu-open/licenses/* "$DOC/licenses/"
+    else
+        echo "WARNING: out/npu_fw/boot.img missing (scripts/build-npu-open.sh, then scripts/build-npu-boot.sh): the image gets no NPU firmware" >&2
     fi
 fi
 exit 0

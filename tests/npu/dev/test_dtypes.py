@@ -1,6 +1,6 @@
 import sys, time, os, numpy as np
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from npu_client import NpuModel
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "python"))
+from rk3399pro_npu import NpuModel
 from PIL import Image
 img = np.asarray(Image.open("/tmp/dog_224x224.jpg").convert("RGB").resize((224, 224)), np.float32)
 x = img / 127.5 - 1.0                      # the normalisation of these MobileNets: [-1, 1]

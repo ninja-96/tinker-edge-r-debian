@@ -1,6 +1,6 @@
 import sys, os, time, numpy as np
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from npu_client import NpuModel, NpuError
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "python"))
+from rk3399pro_npu import NpuModel, NpuError
 order = sys.argv[1:]
 x8 = np.random.RandomState(0).randint(0, 255, (1, 224, 224, 3)).astype(np.uint8)
 for path in order:

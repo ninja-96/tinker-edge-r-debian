@@ -38,3 +38,12 @@ RKDEVELOPTOOL_REV=304f073752fd25c854e1bcf05d8e7f925b1f4e14
 GST_ROCKCHIP_REPO=https://github.com/JeffyCN/mirrors.git
 GST_ROCKCHIP_BRANCH=gstreamer-rockchip
 GST_ROCKCHIP_REV=ebc758a13d425d34858a98dbcdb4a4bd702daa0f
+
+# The open NPU stack (release 0.4): built by scripts/build-npu-open.sh for the NPU die. TIM-VX v1.1.32 matches the Vivante SDK 6.4.6 of Rockchip's
+# firmware (v1.1.57 crashes on that driver); the delegate is the tag for TensorFlow Lite 2.6.0, which also needs its NBG patch applied to TensorFlow.
+TIMVX_REPO=https://github.com/VeriSilicon/TIM-VX.git
+TIMVX_REV=47119a569dcdc1cae7720c126222c6c0991d1519          # tag v1.1.32
+TFLITE_VX_DELEGATE_REPO=https://github.com/VeriSilicon/tflite-vx-delegate.git
+TFLITE_VX_DELEGATE_REV=404a0a5f8a2be793be72719a01a20ec97f96f8ec   # tag tflite_v2.6.0
+TENSORFLOW_URL=https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.6.0.tar.gz
+TENSORFLOW_SHA256=41b32eeaddcbc02b0583660bcf508469550e4cd0f86b22d2abe72dfebeacde0f

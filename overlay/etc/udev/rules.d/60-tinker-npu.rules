@@ -1,0 +1,3 @@
+# The NPU die of the RK3399Pro once its firmware is running (USB 2207:0019): the open channel that python3-rk3399pro_npu uses.
+# Members of plugdev (the default user) can load and run models without root.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="2207", ATTR{idProduct}=="0019", MODE="0660", GROUP="plugdev"

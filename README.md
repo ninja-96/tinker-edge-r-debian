@@ -43,8 +43,7 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 | USB-A ports (keyboard, mouse) | ✅ yes | 🟡 partly | a keyboard and a mouse work; a flash drive and USB 3 speed not tried |
 | USB-C as host | ❔ not known | 🙋 needs you | plug a device in; USB 3 speed |
 | Boot from an SD card, swap file | ❔ not known | 🙋 needs you | `scripts/flash-sd.sh` |
-| NPU: firmware loaded at boot with open tools, MobileNet from Python 3.13 | ✅ yes | ✅ yes | `rk3399pro_npu` module: 69-90 inferences/s depending on the power profile, 3000 in a row without errors; closed Rockchip files, fetched and checked by the build ([NPU.md](docs/NPU.md)); the NPU is on by default (`full` device tree) |
-| Converter ONNX to `.rknn` (on the PC, in Docker with Python 3.8) | ✅ yes | ✅ yes | [docker/rknn-toolkit](docker/rknn-toolkit/README.md): a small model converted and run on the NPU; ONNX opset 8-12 only; Rockchip's closed RKNN-Toolkit is downloaded by the build, not stored here |
+| NPU: TensorFlow Lite models from Python 3.13 (open stack: TIM-VX + TFLite VX delegate, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU (about 110 FPS from Python), int8 27 ms, ResNet50 71 ms; the server and the delegate are built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`full` device tree) |
 | Power profiles `tinker-power` (powersave / normal / performance) | ✅ yes | ✅ yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
 | Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
 | Python for the header: libgpiod, smbus2, spidev | ✅ yes | 🟡 partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
@@ -202,7 +201,7 @@ Only open source lives in this repository. The unavoidable closed binaries are
 listed with their origin and licence in [docs/OPEN.md](docs/OPEN.md) and
 [blobs/README.md](blobs/README.md): the Rockchip DRAM initialisation blob and BL31
 (published unmodified under the Rockchip licence, with a link to where they come from),
-and, for the optional NPU, the vendor stack, which is not in the repository.
+and, for the NPU, Rockchip's firmware with the Vivante driver (fetched and checked by the build, not stored here); the software above the driver is open (TIM-VX, VeriSilicon's TFLite delegate, our server and Python module).
 The ASUS TinkerOS image and everything taken from it are never published.
 
 ## 🗂️ Repository layout
@@ -210,12 +209,13 @@ The ASUS TinkerOS image and everything taken from it are never published.
 | Path | Contents |
 |---|---|
 | `scripts/` | build, flash and test scripts (`make-image.sh` is the entry point) |
-| `docker/` | build environment (Debian 13, cross toolchain, QEMU) |
+| `docker/` | build environments (Debian 13 builder with QEMU; Debian 11 cross toolchain for the NPU die) |
 | `dts/` | device trees: base, `-mpp`, `-npu`, `-full` (default) |
 | `patches/` | patches to Linux and TF-A |
 | `kernel-mods/`, `u-boot-mods/` | new kernel and U-Boot files (`mpp_service` port, NPU power driver, board defconfig) |
 | `config/` | kernel configuration fragment |
-| `overlay/` | files copied into the rootfs (services, helper scripts) |
+| `overlay/` | files copied into the rootfs (services, helper scripts, `npu-info`, `npu-selftest`) |
+| `npu-open/`, `python/`, `tests/npu/` | the NPU stack: server for the NPU die, patches, tools, operator comparison; the Python module `rk3399pro_npu`; self-test models |
 | `blobs/` | the Rockchip binaries, unmodified, with licence and origin |
 | `third_party/` | `rkdeveloptool` (GPL), copied unmodified |
 | `docs/` | documentation and research notes |

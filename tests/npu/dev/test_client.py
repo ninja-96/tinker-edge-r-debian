@@ -1,7 +1,7 @@
 import sys, time, threading, faulthandler, numpy as np
 faulthandler.dump_traceback_later(40, exit=False)   # all threads' stacks if something hangs
-sys.path.insert(0, __import__("os").path.dirname(__file__))
-from npu_client import NpuModel
+sys.path.insert(0, __import__("os").path.join(__import__("os").path.dirname(__file__), "..", "..", "..", "python"))
+from rk3399pro_npu import NpuModel
 t = time.time()
 npu = NpuModel(sys.argv[1] if len(sys.argv) > 1 else "/tmp/mobilenet_v2_1.0_224_quant.tflite")
 print("loaded in %.1f s (server says %d ms, %d MB)" % (time.time() - t, npu.load_ms, npu.mem_used_kb // 1024))

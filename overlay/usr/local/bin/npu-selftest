@@ -1,0 +1,63 @@
+#!/usr/bin/python3
+"""Self-test of the NPU with TensorFlow Lite: chip, two small models against the results of TFLite on the CPU, speed, the compiled-graph cache,
+a broken model (the NPU must stay usable) and the rule of one model per NPU.   npu-selftest [-n RUNS]
+Prints one line per check and ends with 'OK ...' (exit 0) or 'FAIL ...' (exit 1)."""
+import os, sys, tempfile, time
+import numpy as np
+import rk3399pro_npu as npu
+
+DATA = os.environ.get("NPU_SELFTEST_DATA", "/usr/share/tinker-edge-r/npu-selftest")
+RUNS = int(sys.argv[sys.argv.index("-n") + 1]) if "-n" in sys.argv else 200
+fails, total = [], [0]
+
+def check(name, ok, detail=""):
+    total[0] += 1
+    print("%-34s %s  %s" % (name, "ok  " if ok else "FAIL", detail), flush=True)
+    if not ok:
+        fails.append(name)
+
+try:
+    i = npu.info()
+except npu.NpuError as e:
+    print("FAIL: %s" % e); sys.exit(1)
+check("chip 8000/7100/45080001", i["chip_ok"], "driver %s, memory %d MB free" % (i["driver"], i["mem_avail_kb"] // 1024))
+exp = np.load(os.path.join(DATA, "expected.npz"))
+cache = tempfile.mkdtemp(prefix="npu-selftest-")
+for name, kind in (("net_int8", "int8"), ("net_uint8", "uint8")):
+    path = os.path.join(DATA, name + ".tflite")
+    x, ref = exp["in_" + kind], exp["out_" + kind]
+    try:
+        t0 = time.time(); m = npu.Model(path, cache_dir=cache); cold = time.time() - t0
+        out = m.exec(x)[0]
+        diff = int(np.abs(out.astype(np.int32) - ref.astype(np.int32)).max())
+        check("%s: result as TFLite on the CPU" % kind, diff <= 3, "max difference %d (of 255)" % diff)
+        t0 = time.time()
+        for _ in range(RUNS):
+            m.exec(x)
+        dt = (time.time() - t0) / RUNS
+        check("%s: %d runs" % (kind, RUNS), True, "%.2f ms per run, %d FPS (%.2f ms on the NPU)" % (dt * 1e3, 1 / dt, m.last_invoke_us / 1000))
+        xf = m.inputs[0].dequantize(x)                       # a float input is quantised by the module
+        out2 = m.exec(xf)[0]
+        check("%s: float input" % kind, int(np.abs(out2.astype(np.int32) - out.astype(np.int32)).max()) <= 1)
+        if kind == "int8":
+            try:
+                npu.Model(path, cache_dir=cache); check("one model per NPU", False, "a second model was accepted")
+            except npu.NpuError:
+                check("one model per NPU", True, "the second model is refused")
+        m.close()
+        t0 = time.time(); m = npu.Model(path, cache_dir=cache); warm = time.time() - t0
+        check("%s: cached graph" % kind, m.from_cache and warm < cold, "load %.2f s, then %.2f s" % (cold, warm))
+        m.close()
+    except Exception as e:
+        check("%s" % kind, False, str(e)[:200])
+try:
+    npu.Model(b"this is not a TFLite model", cache_dir=cache); check("broken model refused", False, "accepted")
+except npu.NpuError as e:
+    check("broken model refused", True, str(e)[:80])
+try:
+    m = npu.Model(os.path.join(DATA, "net_uint8.tflite"), cache_dir=cache); m.close()
+    check("NPU usable after the broken model", True)
+except Exception as e:
+    check("NPU usable after the broken model", False, str(e)[:120])
+print("OK: %d checks passed" % total[0] if not fails else "FAIL: %s" % ", ".join(fails))
+sys.exit(1 if fails else 0)

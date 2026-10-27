@@ -1,6 +1,6 @@
 import sys, time, threading, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from npu_client import NpuModel, NpuLink, T_PING
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "python"))
+from rk3399pro_npu import NpuModel, NpuLink, T_PING
 class Link(NpuModel):
     def __init__(self): NpuLink.__init__(self, 2)
 secs = float(sys.argv[1]) if len(sys.argv) > 1 else 40

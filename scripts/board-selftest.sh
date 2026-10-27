@@ -349,27 +349,20 @@ if command -v nft >/dev/null; then
     else res "Firewall" FAIL "ruleset missing, not policy drop, or service not enabled"; fi
 else res "Firewall" SKIP "nft not installed"; fi
 
-hdr "NPU (Python module rk3399pro_npu)"
-if [ -e /proc/device-tree/npu-power ] && python3 -c 'import rk3399pro_npu' 2>/dev/null; then
-    m=$(ls /usr/share/*.rknn /usr/share/npu_fw/*.rknn /home/*/*.rknn 2>/dev/null | head -1)
-    if [ -z "$m" ]; then
-        res "NPU" SKIP "no .rknn model on the board (copy one, e.g. mobilenet_v1.rknn, to the home directory)"
+hdr "NPU (TensorFlow Lite on the NPU, module rk3399pro_npu)"
+if [ -e /proc/device-tree/npu-power ] && command -v npu-selftest >/dev/null; then
+    if ! systemctl is-active --quiet npu-firmware; then
+        res "NPU firmware" FAIL "npu-firmware.service is not active: $(journalctl -u npu-firmware -n 3 --no-pager 2>/dev/null | tail -2 | tr '\n' ' ')"
     else
-        out=$(python3 - "$m" <<'PY' 2>&1 | grep -v '^D '
-import sys, time, numpy as np, rk3399pro_npu as npu
-print(npu.find_devices())
-with npu.RKNN(sys.argv[1]) as net:
-    x = np.zeros(net.inputs[0].shape, net.inputs[0].dtype)
-    for _ in range(5): net.run([x])
-    t = time.time(); n = 200
-    for _ in range(n): net.run([x])
-    print("OK %.1f inferences/s, last run %s us" % (n / (time.time() - t), net.last_run_us))
-PY
-)
-        echo "$out" | tail -3
-        echo "$out" | grep -q '^OK' && res "NPU" PASS "$(echo "$out" | grep '^OK')" || res "NPU" FAIL "inference did not run, see above"
+        # as the ordinary user: the udev rule must give plugdev access to the NPU without root
+        NPU_USER=$(getent passwd 1000 | cut -d: -f1)
+        if [ -n "$NPU_USER" ]; then out=$(runuser -u "$NPU_USER" -- npu-selftest 2>&1); else out=$(npu-selftest 2>&1); fi
+        echo "$out" | tail -16
+        if echo "$out" | tail -1 | grep -q '^OK'; then
+            res "NPU" PASS "$(echo "$out" | tail -1); $(echo "$out" | grep -m1 ' 200 runs\| runs ' | sed 's/  */ /g') [as ${NPU_USER:-root}]"
+        else res "NPU" FAIL "$(echo "$out" | tail -1)"; fi
     fi
-else res "NPU" SKIP "no NPU device tree (boot the full or npu variant) or module missing"; fi
+else res "NPU" SKIP "no NPU device tree (boot the full or npu variant) or npu-selftest missing"; fi
 
 hdr "Health after the tests"
 tm=$(awk -F'temp=' '{split($2,a," "); if (a[1]+0>m) m=a[1]+0} END{print m+0}' "$W/sample.log")

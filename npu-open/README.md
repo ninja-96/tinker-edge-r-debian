@@ -1,88 +1,48 @@
-# npu-open: running neural networks on the NPU of the RK3399Pro without RKNN (experimental, milestone 1)
+# npu-open: the open NPU stack (sources for the NPU die)
 
-**Status: a working prototype, not part of the 0.3 image.** Tested on one board (2026-10-26). The release 0.3 still uses RKNN (see [docs/NPU.md](../docs/NPU.md)); this is the
-replacement that the roadmap plans ([docs/ROADMAP.md](../docs/ROADMAP.md), "an open NPU stack on VeriSilicon's TIM-VX").
-
-## What it is
+Since release 0.4 this is how the NPU of the RK3399Pro is used: TensorFlow Lite models, no RKNN. **How to use it is in [docs/NPU.md](../docs/NPU.md)**; this directory holds what runs on the NPU
+die and how it is built. Measured operator coverage against RKNN-Toolkit 1.7.5: [OPERATORS.md](OPERATORS.md).
 
 The NPU die of the RK3399Pro is VeriSilicon (Vivante) IP. Rockchip's firmware for it contains Vivante's driver and libraries (SDK **6.4.6**). VeriSilicon publishes open (MIT) software
-on top of them: **TIM-VX** and the **TFLite VX delegate**. The tag `v1.1.32` of TIM-VX ships the same SDK version as the firmware, so it runs on it unchanged. This directory adds what is
-needed to use the NPU from the host:
+on top of them: **TIM-VX** and the **TFLite VX delegate**. The tag `v1.1.32` of TIM-VX ships the same SDK version as the firmware, so it runs on it unchanged (v1.1.57 crashes on this driver).
 
 ```
-host (the board, Debian, Python 3.13)                         NPU die (2 x A35, Rockchip's Linux 4.4 in RAM)
-  NpuModel (host/npu_client.py)  <-- our USB bulk channel -->   npu_server (server/)  --> TIM-VX / TFLite VX delegate --> NPU
-  models: .tflite, kept on the host                             one model at a time
+board (Debian 13, Python 3.13)                                   NPU die (2 x A35, Rockchip's Linux 4.4 in RAM)
+  python/rk3399pro_npu  <-- our USB bulk channel ("ntb") -->     npu_server (server/) -> child "engine": TFLite 2.6 + VX delegate -> TIM-VX -> Vivante driver
+  models: .tflite, kept on the board                             one model at a time
 ```
 
-* **Protocol** (`server/protocol.h`): `HELLO` (chip, driver, memory), `LOAD` (a `.tflite`), `LOAD_NBG` (a compiled graph), `RUN`, `UNLOAD`, `PING`; replies carry the tag of the request.
-* **Class** `NpuModel(path_or_bytes)`: the constructor loads and prepares the model (and refuses to run on a chip that is not `0x8000 / 0x7100 / 0x45080001`, the only one of the Tinker Edge R),
-  `exec(x)` runs synchronously, `async_exec(x, callback)` runs asynchronously (experimental, see below), `close()` / `del` unloads the model: the NPU is free again.
-  One model per NPU; a second one raises an error. Float inputs are quantised with the scale and zero point of the model.
-* **Cache of the compiled graph:** the first load of a model takes 13 s (the Vivante compiler runs on the two weak A35 cores of the NPU). The server returns the compiled graph (NBG), the host keeps it in
-  `~/.cache/npu-models` (environment `NPU_CACHE`), and later loads take **0.1 s** and need no TFLite on the NPU.
-* **Own USB channel** instead of ADB: the gadget of the NPU die has a FunctionFS function `ntb` (the one `rknn_server` uses); our server takes it over. Measured: 38 MB/s each way for a 150 KB frame
-  (ADB: 5-6 MB/s), 0.3-0.5 ms for small messages.
-* Needs **no Rockchip library above the driver** and no RKNN-Toolkit: models are plain TFLite (made with TensorFlow, any converter).
-
-## Results (MobileNet V2 224, uint8, on the Tinker Edge R)
-
-| | |
-|---|---|
-| load, first time / from the cache | 13 s / 0.1 s (memory on the NPU 101 MB / 6-17 MB) |
-| `exec`, one request at a time | **9.1 ms per frame, 110 FPS** (the NPU itself 6.4 ms, the rest is transfer and copies) |
-| `async_exec`, two in flight | **6.3 ms per frame, 158 FPS** |
-| accuracy | the same top-1 class as TFLite on the CPU; cosine similarity 0.98 to the CPU result (uint8) |
-| other numbers | float32 on the same NPU 478 ms (the fast path is integer); 104 of 104 unit tests of TIM-VX pass; RKNN: 89 inferences/s through its proxy |
-
-## Model types (MobileNet V2 224 on the same board)
-
-| Model | NPU time | Accuracy | Notes |
-|---|---|---|---|
-| uint8 (TF Hub quantised) | 7 ms | as TFLite on the CPU | the fast path of the NPU |
-| int8, per-channel weights (what TensorFlow 2.x makes) | **27 ms** (134 ms without our transform) | cosine 1.000 to float32, same top-5 | see "per-channel int8" below |
-| float32 | 479 ms | exact | slow path |
-| float16 weights (TFLite float16 quantisation) | 479 ms | exact | the `Dequantize` of constants is folded on the CPU, then it is a float32 model: no speed gain |
-| dynamic range (int8 weights, float activations) | not supported | | the model is refused or crashes in the engine child process; the USB function survives |
-| all-float16 graph | not working | | `VX_FP16=1` (experimental): TIM-VX crashes in layout inference |
-
-Other architectures with per-channel int8 (Keras, TensorFlow 2.13, calibrated on one photograph): ResNet50 **71 ms**, cosine 1.0000 to the CPU result; Inception V3 **52 ms**, cosine 0.9992.
-Keras MobileNet V1 is refused by the delegate (its tail has `SHAPE / STRIDED_SLICE / PACK / RESHAPE`, a dynamic reshape): a known limit of the delegate, not of the transform.
-
-### Per-channel int8
-
-Two facts found with the board:
-
-1. **The NPU runs convolutions with per-tensor weights on its fast path** (7 ms) **and per-channel weights on a slow one** (134 ms), and one scale per layer is not an option: the channel scales of
-   MobileNet V2 differ by tens of times and a single scale gives noise (cosine 0.02; a per-tensor model made by TensorFlow itself collapses the same way on the CPU).
-2. `server/split_per_channel.h` rewrites such a model before it is loaded: the channels of a layer are grouped so that the scales inside a group differ at most 4 times (2.5 groups per layer on
-   average for MobileNet V2); the layer becomes one convolution per group with per-tensor weights (other channels are zero) and the outputs are added. The sum is exact: a channel outside the group
-   gives the zero point. `NPU_SPLIT=0` in the environment of the server switches it off.
-
-The NPU also returns wrong results for **signed** int8 tensors: the delegate hands them over as uint8 (`data ^ 0x80`, zero point + 128; the same numbers) and the server does the same for the compiled-graph cache.
-
-Operator coverage against RKNN-Toolkit 1.7.5: [OPERATORS.md](OPERATORS.md).
+* **Protocol** (`server/protocol.h`): 16-byte header `{magic "NPU1", type, flags, tag, length}`; `HELLO` (chip, driver, memory), `LOAD` (a `.tflite`), `LOAD_NBG` (a compiled graph), `RUN`, `UNLOAD`, `PING`;
+  replies carry the tag of the request. A message never ends on a multiple of 1024 bytes (flag `PAD`): the USB controller would wait for a short packet.
+* **Server** (`server/npu_server.cc`): the parent process owns the USB function and the protocol; the model lives in a child process (`npu_server --engine`), so a segmentation fault or a hang of the delegate or the
+  driver is turned into an error reply with the signal and the last lines of the log (`/tmp/npu_engine.log` on the NPU die), and the parent stays on the bus. It checks the chip identity
+  (`/sys/devices/platform/ffbc0000.npu/info`: model 0x8000, revision 0x7100, product 0x45080001) and the free memory. `NPU_STRICT=1` (test mode) refuses a model that has an operator on the CPU and names it; `NPU_SPLIT=0` switches off the split of per-channel layers.
+* **Per-channel int8** (`server/split_per_channel.h`): see "Why integer models" in [docs/NPU.md](../docs/NPU.md). int8 tensors reach the NPU as uint8 (the NPU is wrong for signed int8).
+* **Compiled graph cache:** the delegate writes the compiled graph (NBG) to `VX_NBG_EXPORT=<file>`; the server returns it with the `LOAD` reply and the host keeps it (`~/.cache/npu-models`); `LOAD_NBG` then needs no TFLite on the NPU (0.1-0.3 s).
+  Models with a float input or output are not cached (the graph of those uses float16 inside).
+* **USB rules found:** write the FunctionFS descriptors **before** the USB controller is bound (our `S50usbdevice` in the NPU ramdisk; the gadget of this firmware is unbound and bound at every disconnect, so the server reads the ep0
+  events and writes the descriptors again after UNBIND); OUT reads are multiples of 1024 bytes (AIO, four armed 64 KiB reads); the interface class is 0xff/0x4e/0x50 so that ADB does not take it.
+  The host side uses usbfs (`USBDEVFS_BULK` through ctypes, one blocking call per thread).
+* **The delegate** needs our patch (`patches/`): build fixes for a current CMake, `VX_NBG_EXPORT`, int8 handed to the NPU as uint8, constant `Dequantize` (float16 weights) folded on the CPU, the buffers it builds kept alive
+  (TIM-VX keeps the data pointer of constants and reads it again in layout inference). `VX_REQUANT_PER_CHANNEL=1` (one scale per layer, fast, **loses accuracy**) and `VX_FP16=1` (all-float16 graph, crashes TIM-VX) are experiments, off.
 
 ## Known problems
 
-* **`async_exec` can hang the USB bus.** A request sent immediately after a reply (as pipelining does) made the OUT transfer stall in about every other run; after the 60 s time-out the cancel (`stop endpoint`)
-  killed the xHCI of the board (`HC died`, the whole USB 3 hub gone, the NPU stuck until it is reloaded). A pause of 300 us before each request (`async_gap_us`, the default) avoided it in all later tests
-  (thousands of frames, several runs); `exec` has never hung. The real cause is not found (not libusb, not the NPU clock, not queue depth, not U1/U2). Recovery after a hang:
-  `echo fe900000.usb > /sys/bus/platform/drivers/dwc3/unbind`, then `bind`, then reload the NPU (`systemctl restart npu-firmware`). The long list of what was tried is in the maintainer's notes (not in this repository).
-* One model at a time; float models are slow (integer models only for speed); the first load of a split int8 model takes about a minute (the compiler works on a bigger graph; later loads come from the cache in 0.3 s); TFLite 2.6.0 on the NPU reads models of TensorFlow up to about that age: newer operator versions are untested.
-* The build script was assembled from steps that were run by hand with the Ubuntu 20.04 toolchain image; it has not been run as a whole yet with the Debian 11 one.
-* Interface numbers and endpoints are read from the USB descriptors (class 0xff / 0x4e / 0x50); the host needs access to `/dev/bus/usb` (root or a udev rule) and `npu-transfer-proxy` stopped.
+* **`async_exec` can hang the USB bus** (see docs/NPU.md); `exec` never hung.
+* Operators: [OPERATORS.md](OPERATORS.md). Keras models with a dynamic `Reshape` tail are refused by the delegate.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `server/` | the server on the NPU die (C++): `protocol.h`, `npu_server.cc`, `split_per_channel.h`, `CMakeLists.txt` (built inside the delegate tree) |
-| `host/` | `npu_client.py` (class `NpuModel`, `usbfs`, numpy only), `test_client.py`, `test_modes.py`, `stress_ping.py` |
+| `server/` | the server for the NPU die (C++): `protocol.h`, `npu_server.cc`, `split_per_channel.h`, `CMakeLists.txt` (built inside the delegate tree) |
+| `patches/` | the changes to `tflite-vx-delegate` |
 | `ramdisk/modify_init.py` | changes the two init scripts of Rockchip's ramdisk so that our server starts instead of `rknn_server` (with a fallback to it) |
-| `tools/npu_ramdisk.py` | list, extract, add, remove files in the ramdisk of a `boot.img` without root |
-| `patches/` | the changes to `tflite-vx-delegate` (build fixes for a current CMake; `VX_NBG_EXPORT` writes the compiled graph) |
-| `build/` | `Dockerfile` of the cross toolchain (Debian 11: glibc 2.31 headers, nothing newer references `GLIBC_2.34`; Alpine / musl cannot load the glibc libraries of the driver) and `build.sh` |
+| `tools/npu_ramdisk.py` | list, extract, add, remove files in the ramdisk of a `boot.img` without root (pure Python cpio) |
+| `OPERATORS.md` | the operators, RKNN-Toolkit 1.7.5 against this stack, measured |
+
+Build: `scripts/build-npu-open.sh` (Docker, Debian 11 toolchain from `docker/npu-xtool`, sources pinned in `sources.lock`), then `./run.sh scripts/build-npu-boot.sh`. Python module: `python/rk3399pro_npu`. Tests: `tests/npu/` (the self-test models) and
+`tests/npu/dev/` (stress and mode tests used while developing).
 
 ## Licences
 

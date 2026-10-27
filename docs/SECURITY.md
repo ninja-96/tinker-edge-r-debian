@@ -24,6 +24,10 @@ the first login, over SSH or on the console, asks for a new one before anything 
 without it (for automated tests) with `FORCE_PW_CHANGE=0 ./run.sh scripts/build-rootfs.sh`.
 `scripts/test-board.sh`: log in once by hand, change the password, then run it with `BOARD_PASS=<new>`.
 
+## The NPU
+
+The NPU die is behind an on-board USB hub and is not reachable from the network. The group `plugdev` (the default user) may open its USB device (`60-tinker-npu.rules`) and run a model, which executes on the NPU die; the server there has no authentication and the NPU's Linux has an ADB root shell on the same link. Do not add untrusted users to `plugdev`.
+
 ## Not done on purpose
 
 Secure boot through eFuses (cannot be undone), a secure OS (TrustZone only hosts BL31 for PSCI), SELinux
