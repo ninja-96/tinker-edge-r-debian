@@ -120,6 +120,7 @@ Decision (2026-10-27): a patch release of 0.4 (the kernel and Debian of 0.4 stay
 | C++ library | done: `librk3399pro_npu` (`rk3399pro_npu.hpp`); the Python module is a binding of it (pybind11, Debian packages only) |
 | Where a model runs | done: `device="auto"`: integer models on the NPU, float models on the CPU of the NPU die (TFLite + XNNPACK is 2-2.5 times faster for them than the float16 path of this NPU, which uses 2 of its 10 cores); `Model.autotune()` measures NPU / CPU / mixed plans against the CPU result and keeps the fastest right one |
 | Tests | done: `npu-selftest` (17 checks: also two models, attaching, another process, stopping); LiteRT community vision models measured (docs/NPU.md) |
+| Operators | measured again ([OPERATORS.md](../npu-open/OPERATORS.md)): 68 of 87 single-operator models entirely on the NPU, all right; `GATHER_ND` and `RESIZE_NEAREST_NEIGHBOR` are right now, float `FULLY_CONNECTED` / `TRANSPOSE_CONV` run, `SUM`, `UNPACK`, `FLOOR`, `MIRROR_PAD` and others moved to the NPU; comparisons, logical operators and `CAST` stay on the CPU (TIM-VX crashes on bool tensors) |
 
 ### Release 0.5: LiteRT and LiteRT-LM on the NPU die and on the board (the main goal)
 

@@ -44,7 +44,7 @@ board (Debian 13, Python 3.13)                                                  
 ## Known problems
 
 * **`async_exec` can hang the USB bus** (see docs/NPU.md); `exec` never hung.
-* Operators: [OPERATORS.md](OPERATORS.md) (measured with the 0.4 stack: TIM-VX v1.1.32 and TFLite 2.6; not measured again for 0.4.1).
+* Operators: [OPERATORS.md](OPERATORS.md): 68 of 87 single-operator models run entirely on the NPU with the right result, the others keep an operator on the CPU; none is wrong.
 * A TIM-VX unit test of `main` crashes (`Stack` with int32); a model that hits it crashes only its own engine.
 
 ## Layout
@@ -56,7 +56,7 @@ board (Debian 13, Python 3.13)                                                  
 | `patches/` | the changes to `tflite-vx-delegate` |
 | `ramdisk/modify_init.py` | changes the two init scripts of Rockchip's ramdisk so that our server starts instead of `rknn_server` (with a fallback to it) |
 | `tools/npu_ramdisk.py` | list, extract, add, remove files in the ramdisk of a `boot.img` without root (pure Python cpio) |
-| `OPERATORS.md` | the operators, RKNN-Toolkit 1.7.5 against this stack, measured |
+| `OPERATORS.md` | the operators on the NPU, measured: 0.4.1, 0.4 and RKNN-Toolkit 1.7.5 |
 
 Build: `scripts/build-npu-open.sh` (Docker, Debian 11 toolchain from `docker/npu-xtool`, sources pinned in `sources.lock`), then `./run.sh scripts/build-npu-boot.sh`; the board side:
 `./run.sh scripts/build-npu-host.sh`. Python package: `python/rk3399pro_npu`. Tests: `tests/npu/` (the self-test models) and `tests/npu/dev/` (mode tests used while developing).
