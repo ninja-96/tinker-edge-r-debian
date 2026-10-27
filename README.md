@@ -43,7 +43,7 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 | USB-A ports (keyboard, mouse) | ✅ yes | 🟡 partly | a keyboard and a mouse work; a flash drive and USB 3 speed not tried |
 | USB-C as host | ❔ not known | 🙋 needs you | plug a device in; USB 3 speed |
 | Boot from an SD card, swap file | ❔ not known | 🙋 needs you | `scripts/flash-sd.sh` |
-| NPU: TensorFlow Lite models from Python 3.13 (open stack: TIM-VX + TFLite VX delegate, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU (about 110 FPS from Python), int8 27 ms, ResNet50 71 ms; the server and the delegate are built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`full` device tree) |
+| NPU: TensorFlow Lite 2.21 models from Python 3.13 and C++ (open stack: TIM-VX + TFLite VX delegate, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU, int8 ResNet18 19 ms (27 times its CPU time), ResNet50 70 ms; several models at once, shared by several programs (`npu-daemon`), float models on the CPU of the NPU die by default, `autotune()` picks NPU / CPU / mixed per model; built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`full` device tree) |
 | Power profiles `tinker-power` (powersave / normal / performance) | ✅ yes | ✅ yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
 | Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
 | Python for the header: libgpiod, smbus2, spidev | ✅ yes | 🟡 partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
@@ -201,7 +201,7 @@ Only open source lives in this repository. The unavoidable closed binaries are
 listed with their origin and licence in [docs/OPEN.md](docs/OPEN.md) and
 [blobs/README.md](blobs/README.md): the Rockchip DRAM initialisation blob and BL31
 (published unmodified under the Rockchip licence, with a link to where they come from),
-and, for the NPU, Rockchip's firmware with the Vivante driver (fetched and checked by the build, not stored here); the software above the driver is open (TIM-VX, VeriSilicon's TFLite delegate, our server and Python module).
+and, for the NPU, Rockchip's firmware with the Vivante driver (fetched and checked by the build, not stored here); the software above the driver is open (TIM-VX, VeriSilicon's TFLite delegate, TensorFlow Lite, our server, daemon, C++ library and Python module).
 The ASUS TinkerOS image and everything taken from it are never published.
 
 ## 🗂️ Repository layout
@@ -215,7 +215,7 @@ The ASUS TinkerOS image and everything taken from it are never published.
 | `kernel-mods/`, `u-boot-mods/` | new kernel and U-Boot files (`mpp_service` port, NPU power driver, board defconfig) |
 | `config/` | kernel configuration fragment |
 | `overlay/` | files copied into the rootfs (services, helper scripts, `npu-info`, `npu-selftest`) |
-| `npu-open/`, `python/`, `tests/npu/` | the NPU stack: server for the NPU die, patches, tools, operator comparison; the Python module `rk3399pro_npu`; self-test models |
+| `npu-open/`, `python/`, `tests/npu/` | the NPU stack: server for the NPU die, the board side (daemon, C++ library, Python binding), patches, tools, operator comparison; the Python package `rk3399pro_npu`; self-test models |
 | `blobs/` | the Rockchip binaries, unmodified, with licence and origin |
 | `third_party/` | `rkdeveloptool` (GPL), copied unmodified |
 | `docs/` | documentation and research notes |
@@ -247,9 +247,17 @@ sources of what ends up in the images are in [NOTICE.md](NOTICE.md) and inside t
 | [rockchip-linux/rkdeveloptool](https://github.com/rockchip-linux/rkdeveloptool) | USB flashing tool; `third_party/rkdeveloptool` is a byte-identical copy of commit `304f0737`, plus our `rs` patch | GPL-2.0+ ([license.txt](https://github.com/rockchip-linux/rkdeveloptool/blob/HEAD/license.txt)) |
 | [rockchip-linux/rkbin](https://github.com/rockchip-linux/rkbin) | DRAM initialisation blob and BL31, copied unmodified to `blobs/rockchip/` (commit `3e288fe8`) | Rockchip binary licence ([LICENSE](https://github.com/rockchip-linux/rkbin/blob/HEAD/LICENSE), also `blobs/rockchip/LICENSE`) |
 | [airockchip/RK3399Pro_npu](https://github.com/airockchip/RK3399Pro_npu) | firmware of the NPU die (Linux 4.4.185, the Vivante driver and libraries), binary only; we change its device tree and ramdisk | Apache-2.0 ([LICENSE](https://github.com/airockchip/RK3399Pro_npu/blob/8858114555f1700e41e185b14ec3d266342f8059/LICENSE)); inside: GPL software, Vivante's closed libraries |
-| [VeriSilicon/TIM-VX](https://github.com/VeriSilicon/TIM-VX) | graph library on top of the Vivante driver, tag `v1.1.32`, built for the NPU die | MIT ([LICENSE](https://github.com/VeriSilicon/TIM-VX/blob/v1.1.32/LICENSE)) |
-| [VeriSilicon/tflite-vx-delegate](https://github.com/VeriSilicon/tflite-vx-delegate) | TensorFlow Lite delegate for TIM-VX, tag `tflite_v2.6.0`, with [our patch](npu-open/patches) | MIT ([LICENSE](https://github.com/VeriSilicon/tflite-vx-delegate/blob/tflite_v2.6.0/LICENSE)) |
-| [tensorflow/tensorflow](https://github.com/tensorflow/tensorflow) | TensorFlow Lite 2.6.0 (with the libraries its build fetches: abseil, flatbuffers, ruy, gemmlowp and others), linked into our server | Apache-2.0 ([LICENSE](https://github.com/tensorflow/tensorflow/blob/v2.6.0/LICENSE)) |
+| [VeriSilicon/TIM-VX](https://github.com/VeriSilicon/TIM-VX) | graph library on top of the Vivante driver, `main` (commit in `sources.lock`) built with the SDK headers of tag `v1.1.32`, for the NPU die | MIT ([LICENSE](https://github.com/VeriSilicon/TIM-VX/blob/main/LICENSE)) |
+| [VeriSilicon/tflite-vx-delegate](https://github.com/VeriSilicon/tflite-vx-delegate) | TensorFlow Lite delegate for TIM-VX, `main` (commit in `sources.lock`), with [our patch](npu-open/patches) | MIT ([LICENSE](https://github.com/VeriSilicon/tflite-vx-delegate/blob/main/LICENSE)) |
+| [tensorflow/tensorflow](https://github.com/tensorflow/tensorflow) | TensorFlow Lite 2.21.0, linked into our server | Apache-2.0 ([LICENSE](https://github.com/tensorflow/tensorflow/blob/v2.21.0/LICENSE)) |
+| [google/XNNPACK](https://github.com/google/XNNPACK) | CPU kernels of TensorFlow Lite on the NPU die | BSD-3-Clause ([LICENSE](https://github.com/google/XNNPACK/blob/master/LICENSE)) |
+| [pytorch/cpuinfo](https://github.com/pytorch/cpuinfo), [google/pthreadpool](https://github.com/google/pthreadpool) | used by XNNPACK | BSD-2-Clause ([cpuinfo](https://github.com/pytorch/cpuinfo/blob/main/LICENSE), [pthreadpool](https://github.com/google/pthreadpool/blob/main/LICENSE)) |
+| [Maratyszcza/FP16](https://github.com/Maratyszcza/FP16), [Maratyszcza/FXdiv](https://github.com/Maratyszcza/FXdiv), [google/farmhash](https://github.com/google/farmhash) | headers and code used by TensorFlow Lite and XNNPACK | MIT ([FP16](https://github.com/Maratyszcza/FP16/blob/master/LICENSE), [FXdiv](https://github.com/Maratyszcza/FXdiv/blob/master/LICENSE), [farmhash](https://github.com/google/farmhash/blob/master/COPYING)) |
+| [abseil/abseil-cpp](https://github.com/abseil/abseil-cpp), [google/flatbuffers](https://github.com/google/flatbuffers), [google/gemmlowp](https://github.com/google/gemmlowp), [google/ruy](https://github.com/google/ruy), [jax-ml/ml_dtypes](https://github.com/jax-ml/ml_dtypes) | libraries of TensorFlow Lite | Apache-2.0 ([abseil](https://github.com/abseil/abseil-cpp/blob/master/LICENSE), [flatbuffers](https://github.com/google/flatbuffers/blob/master/LICENSE), [gemmlowp](https://github.com/google/gemmlowp/blob/master/LICENSE), [ruy](https://github.com/google/ruy/blob/master/LICENSE), [ml_dtypes](https://github.com/jax-ml/ml_dtypes/blob/main/LICENSE)) |
+| [libeigen/eigen](https://gitlab.com/libeigen/eigen) | linear algebra of TensorFlow Lite | MPL-2.0 ([COPYING.MPL2](https://gitlab.com/libeigen/eigen/-/blob/master/COPYING.MPL2)) |
+| [OouraFFT](https://github.com/petewarden/OouraFFT) (fft2d) | FFT of TensorFlow Lite (mirror of Takuya Ooura's code) | Ooura's licence: use, copy, modify, distribute ([readme2d.txt](https://github.com/petewarden/OouraFFT/blob/master/readme2d.txt), [home](http://www.kurims.kyoto-u.ac.jp/~ooura/fft.html)) |
+| [protocolbuffers/protobuf](https://github.com/protocolbuffers/protobuf) | fetched by the TensorFlow Lite build (its tools), not linked into our binaries | BSD-3-Clause ([LICENSE](https://github.com/protocolbuffers/protobuf/blob/main/LICENSE)) |
+| [pybind11](https://github.com/pybind/pybind11) (Debian package `pybind11-dev`) | the Python binding of our C++ library (headers compiled into `rk3399pro_npu._core`) | BSD-3-Clause ([LICENSE](https://github.com/pybind/pybind11/blob/master/LICENSE)) |
 | [deb.debian.org](https://deb.debian.org) | Debian 13 packages, including the `non-free-firmware` ones (Wi-Fi, Bluetooth) | per package: `/usr/share/doc/<package>/copyright`, see the [Debian licence overview](https://www.debian.org/legal/licenses/) |
 
 **Read for reference, not used by the build:**

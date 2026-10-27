@@ -39,11 +39,33 @@ GST_ROCKCHIP_REPO=https://github.com/JeffyCN/mirrors.git
 GST_ROCKCHIP_BRANCH=gstreamer-rockchip
 GST_ROCKCHIP_REV=ebc758a13d425d34858a98dbcdb4a4bd702daa0f
 
-# The open NPU stack (release 0.4): built by scripts/build-npu-open.sh for the NPU die. TIM-VX v1.1.32 matches the Vivante SDK 6.4.6 of Rockchip's
-# firmware (v1.1.57 crashes on that driver); the delegate is the tag for TensorFlow Lite 2.6.0, which also needs its NBG patch applied to TensorFlow.
+# The open NPU stack (release 0.4.1): built by scripts/build-npu-open.sh for the NPU die. TIM-VX and the TFLite VX delegate are taken from their
+# main branches; TIM-VX is built with the SDK headers of v1.1.32 (Vivante 6.4.6 = the driver in Rockchip's firmware): the headers of newer
+# SDKs enlarge vx_hardware_caps_params_ext_t, which the 6.4.6 driver refuses (-10). TensorFlow Lite 2.21.0 with XNNPACK (ARMv8.0 kernels).
 TIMVX_REPO=https://github.com/VeriSilicon/TIM-VX.git
-TIMVX_REV=47119a569dcdc1cae7720c126222c6c0991d1519          # tag v1.1.32
+TIMVX_REV=702715d714277376d7ff466b7b72833ff57564c1          # main, 2026-03-30 (after v1.2.22)
+TIMVX_SDK_HEADERS_REV=47119a569dcdc1cae7720c126222c6c0991d1519   # tag v1.1.32: prebuilt-sdk/x86_64_linux/include = SDK 6.4.6 headers
 TFLITE_VX_DELEGATE_REPO=https://github.com/VeriSilicon/tflite-vx-delegate.git
-TFLITE_VX_DELEGATE_REV=404a0a5f8a2be793be72719a01a20ec97f96f8ec   # tag tflite_v2.6.0
-TENSORFLOW_URL=https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.6.0.tar.gz
-TENSORFLOW_SHA256=41b32eeaddcbc02b0583660bcf508469550e4cd0f86b22d2abe72dfebeacde0f
+TFLITE_VX_DELEGATE_REV=b76047d46acdac62cb30874590fb91999e631687   # main, 2026-03-12
+TENSORFLOW_VERSION=2.21.0
+TENSORFLOW_URL=https://github.com/tensorflow/tensorflow/archive/refs/tags/v2.21.0.tar.gz
+TENSORFLOW_SHA256=ef3568bb4865d6c1b2564fb5689c19b6b9a5311572cd1f2ff9198636a8520921
+# what the TensorFlow Lite CMake build fetches (the revisions of tensorflow/lite/tools/cmake/modules and of XNNPACK's cmake/Download*.cmake
+# of 2.21.0), fetched by the build script so that CMake runs disconnected: <directory> <repository> <revision>
+TFLITE_DEPS="
+abseil-cpp  https://github.com/abseil/abseil-cpp          d38452e1ee03523a208362186fd42248ff2609f6
+eigen       https://gitlab.com/libeigen/eigen.git         dcbaf2d608f306450f1e74949eb87e9a22a7ef4b
+farmhash    https://github.com/google/farmhash            0d859a811870d10f53a594927d0d0b97573ad06d
+flatbuffers https://github.com/google/flatbuffers         187240970746d00bbd26b0f5873ed54d2477f9f3
+gemmlowp    https://github.com/google/gemmlowp            16e8662c34917be0065110bfcd9cc27d30f52fdf
+ml_dtypes   https://github.com/jax-ml/ml_dtypes           00d98cd92ade342fef589c0470379abb27baebe9
+ruy         https://github.com/google/ruy                 3286a34cc8de6149ac6844107dfdffac91531e72
+cpuinfo     https://github.com/pytorch/cpuinfo            8a9210069b5a37dd89ed118a783945502a30a4ae
+fp16        https://github.com/Maratyszcza/FP16           0a92994d729ff76a58f692d3028ca1b64b145d91
+protobuf    https://github.com/protocolbuffers/protobuf   90b73ac3f0b10320315c2ca0d03a5a9b095d2f66
+xnnpack     https://github.com/google/XNNPACK             25b42dfddb0ee22170d73ff0d4b333ea1e6edfeb
+pthreadpool https://github.com/google/pthreadpool         0e6ca13779b57d397a5ba6bfdcaa8a275bc8ea2e
+FXdiv       https://github.com/Maratyszcza/FXdiv          b408327ac2a15ec3e43352421954f5b1967701d1
+"
+FFT2D_URL=https://storage.googleapis.com/mirror.tensorflow.org/github.com/petewarden/OouraFFT/archive/v1.0.tar.gz
+FFT2D_SHA256=5f4dabc2ae21e1f537425d58a49cdca1c49ea11db0d6271e2a4b27e9697548eb

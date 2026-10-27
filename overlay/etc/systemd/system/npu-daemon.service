@@ -1,0 +1,21 @@
+[Unit]
+Description=Share the RK3399Pro NPU between programs (npu-daemon, socket /run/npu/npu.sock)
+After=npu-firmware.service
+Wants=npu-firmware.service
+ConditionPathExists=/proc/device-tree/npu-power
+
+[Service]
+ExecStart=/usr/sbin/npu-daemon
+DynamicUser=yes
+SupplementaryGroups=plugdev
+RuntimeDirectory=npu
+RuntimeDirectoryMode=0755
+Restart=always
+RestartSec=2
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

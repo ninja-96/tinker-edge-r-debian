@@ -2,63 +2,60 @@
 # Copyright (c) 2026 the tinker-edge-r project contributors
 """TensorFlow Lite on the NPU of the RK3399Pro (ASUS Tinker Edge R).
 
-Loads one TFLite model onto the NPU and runs it. The model stays on the board's side only as a file: the NPU die runs our small server
-(`npu_server`) with the open TIM-VX / TFLite VX delegate stack; this module talks to it over its own USB bulk channel. System Python 3.10+,
+The NPU die runs our small server (`npu_server`) with the open TIM-VX / TFLite VX delegate stack and TensorFlow Lite 2.21. This package is a thin
+layer over the C++ library librk3399pro_npu (module `_core`, pybind11). Several models can be loaded at once and used by several programs: a model
+stays on the NPU until it is stopped, and opening the same .tflite file again attaches to the loaded model (no second load). System Python 3.13,
 numpy and nothing else.
 
     import numpy as np
     import rk3399pro_npu as npu
 
-    with npu.Model("mobilenet_v2_quant.tflite") as net:     # seconds the first time, a fraction of a second after (compiled graph is cached)
-        print(net.inputs[0])                                # Tensor('input' (1, 224, 224, 3) uint8 scale=0.0078 zp=128)
-        (scores,) = net.exec(x)                             # x: a numpy array in the model's dtype; floats are quantised for you
-        print(net.last_invoke_us, "us on the NPU")
-        probs = net.outputs[0].dequantize(scores)           # back to float32
+    net = npu.Model("mobilenet_v2_quant.tflite")   # loads it (seconds the first time, a fraction of a second from the cache) or attaches to it
+    print(net.inputs[0])                           # Tensor('input' (1, 224, 224, 3) uint8 scale=0.0078 zp=128)
+    (scores,) = net.exec(x)                        # x: a numpy array in the model's dtype; floats are quantised for you
+    probs = net.outputs[0].dequantize(scores)      # back to float32
+    net.close()                                    # this program lets go of it; the model stays loaded for the next one
 
-One model per NPU. A model the NPU cannot run is refused with `NpuError` (and the NPU stays usable: the model runs in a child process
-of the server). Integer models (uint8, int8) run on the NPU's fast path; float32 and float16-weight models work but are slow (about 480 ms
-for MobileNet V2); dynamic-range (hybrid) models are not supported. See /usr/share/doc/tinker-edge-r/NPU.md.
+    report = net.autotune(x)                       # once: the fastest of NPU / CPU / mixed with the same results; later loads use it
+    for m in npu.models():                         # what is loaded: id, name, plan, memory, runs ...
+        print(m)
+    npu.stop("mobilenet_v2_quant.tflite")          # unload by name, id, Model, or "all"
+
+Programs reach the NPU through the daemon `npu-daemon` (socket /run/npu/npu.sock, group plugdev); without it (NPU_DIRECT=1, or the daemon does
+not run) one program at a time talks to the NPU over USB itself.
+
+Where a model runs (its plan): integer models (uint8, int8) on the NPU, float models on the CPU of the NPU die (TensorFlow Lite with XNNPACK on its two
+Cortex-A35): this NPU runs float16 on 2 of its 10 cores only and is slower than that CPU for them. Operators the NPU cannot do run on that CPU too.
+Model.autotune() measures the alternatives and keeps the fastest one whose results match. A model the NPU cannot run is refused with `NpuError`, and
+the NPU stays usable: every model runs in a child process of the server. See /usr/share/doc/tinker-edge-r/NPU.md.
 """
-import ctypes
-import hashlib
 import os
-import struct
-import threading
-import time
 
 import numpy as np
 
-from ._usb import NpuError, _Usb, find_devices
+from . import _core
+from ._core import NpuError
 
-__version__ = "0.2.0"
-__all__ = ["Model", "NpuModel", "NpuError", "Tensor", "find_devices", "info", "__version__"]
-
-MAGIC = 0x3155504E
-T_HELLO, T_LOAD, T_RUN, T_UNLOAD, T_PING, T_LOAD_NBG = 1, 2, 3, 4, 5, 6
-HDR = struct.Struct("<IHHII")
-TENSOR = struct.Struct("<BBH6ifiI32s")   # struct npu_tensor
-# TfLiteType -> numpy
-_DT = {1: np.float32, 2: np.int32, 3: np.uint8, 4: np.int64, 6: np.bool_, 7: np.int16, 9: np.int8, 10: np.float16, 11: np.float64}
+__version__ = "0.3.0"
+__all__ = ["Model", "NpuModel", "NpuError", "Tensor", "ModelInfo", "OpStat", "models", "stop", "find_devices", "info", "is_quantized", "__version__"]
 
 
 class Tensor:
-    """A model input or output: name, shape, dtype and the quantisation (scale, zero_point; scale 0 for float tensors)."""
+    """A model input or output.
 
-    def __init__(self, raw):
-        t, nd, _r, *dims, scale, zp, nbytes, name = TENSOR.unpack(raw)
-        self.dtype = np.dtype(_DT.get(t, np.uint8))
-        self.type_code = t
-        self.shape = tuple(dims[:nd])
-        self.scale, self.zero_point, self.nbytes = scale, zp, nbytes
-        self.name = name.split(b"\0")[0].decode(errors="replace")
+    name, shape (tuple), dtype (numpy dtype), scale and zero_point (the quantisation; scale is 0 for a float tensor), nbytes, type_code (the TfLiteType)."""
+
+    def __init__(self, ti):
+        self.name, self.shape, self.dtype = ti.name, tuple(ti.shape), np.dtype(ti.dtype)
+        self.scale, self.zero_point, self.nbytes, self.type_code = ti.scale, ti.zero_point, ti.bytes, ti.type
 
     def dequantize(self, a):
-        """A quantised array of this tensor as float32 (a float tensor is returned as it is)."""
+        """A quantised array of this tensor as float32: (a - zero_point) * scale (a float tensor is returned as float32 unchanged)."""
         a = np.asarray(a)
         return ((a.astype(np.float32) - self.zero_point) * self.scale) if self.scale else a.astype(np.float32)
 
     def quantize(self, a):
-        """A float array as the integer dtype of this tensor (a float tensor is only converted)."""
+        """A float array as the integer dtype of this tensor: round(a / scale) + zero_point, clipped (a float tensor is only converted)."""
         a = np.asarray(a)
         if not (self.scale and self.dtype in (np.uint8, np.int8, np.int16)):
             return a.astype(self.dtype)
@@ -70,163 +67,120 @@ class Tensor:
         return "Tensor(%r %s %s%s)" % (self.name, self.shape, self.dtype, q)
 
 
-class NpuLink:
-    """The transport: messages over the bulk channel, a reader thread that matches replies to requests by tag."""
+class OpStat:
+    """An operator type of a model (Model.ops()): code (TfLiteBuiltinOperator), name ("CONV_2D", ...), total, on_npu (the rest runs on the CPU of the NPU die)."""
 
-    def __init__(self, max_inflight=2):
-        self._usb = _Usb()
-        # at most this many RUN requests are on their way: the server reads only a few, and an OUT transfer that waits on the bus for the NPU is
-        # what the xHCI of this SoC was seen to choke on; async_exec waits (back-pressure) when the limit is reached
-        self._slots = threading.BoundedSemaphore(max(1, max_inflight))
-        self._lock = threading.Lock()
-        self._tag_lock = threading.Lock()
-        self._tag = 0
-        self._pending = {}
-        self._closed = False
-        self._rx = bytearray()
-        self._reader = threading.Thread(target=self._read_loop, daemon=True)
-        self._reader.start()
+    def __init__(self, o):
+        self.code, self.name, self.total, self.on_npu = o.code, o.name, o.total, o.on_npu
 
-    # ---- transport ----
-    def close_link(self):
-        """Stop the reader and release the USB interface."""
-        self._closed = True
-        try:
-            self._send(T_PING, b"bye", self._next_tag())   # the answer wakes the reader, which then ends
-        except Exception:
-            pass
-        self._reader.join(5)
-        self._usb.close()
-
-    def _next_tag(self):
-        with self._tag_lock:   # two threads must never get the same tag: the second waiter would replace the first, which then waits for ever
-            self._tag = (self._tag + 1) & 0xFFFFFFFF
-            return self._tag
-
-    def _send(self, typ, payload, tag):
-        payload = bytes(payload)
-        pad = (HDR.size + len(payload)) % 1024 == 0   # see NPU_FLAG_PAD: never end a stream on a multiple of the packet size
-        self._usb.write(HDR.pack(MAGIC, typ, 2 if pad else 0, tag, len(payload)) + payload + (b"\0" if pad else b""))
-
-    def _read_loop(self):
-        buf = ctypes.create_string_buffer(64 * 1024)
-        rx = bytearray()
-        while not self._closed:
-            try:
-                n = self._usb.read_some(buf, 0)   # no timeout: a cancelled transfer is a 'stop endpoint' command and the xHCI of this SoC can hang on a storm of them
-            except NpuError as e:
-                self._fail_all(str(e))
-                return
-            if n:
-                rx += buf.raw[:n]
-            if self._closed and not n:
-                return
-            while len(rx) >= HDR.size:
-                magic, typ, flags, tag, ln = HDR.unpack_from(rx)
-                if magic != MAGIC:
-                    # stray bytes (the rest of a message whose start went to a dead transfer of an earlier process): skip to the next header
-                    k = rx.find(struct.pack("<I", MAGIC), 1)
-                    del rx[:k if k > 0 else len(rx) - 3]
-                    self.resync_bytes = getattr(self, "resync_bytes", 0) + (k if k > 0 else len(rx))
-                    continue
-                if len(rx) < HDR.size + ln:
-                    break
-                total = HDR.size + ln + (1 if flags & 2 else 0)
-                if len(rx) < total:
-                    break
-                payload = bytes(rx[HDR.size:HDR.size + ln])
-                del rx[:total]
-                with self._lock:
-                    waiter = self._pending.pop(tag, None)
-                if waiter:
-                    waiter(None if flags & 1 else payload, payload.decode(errors="replace") if flags & 1 else None)
-            if self._closed:
-                return
-
-    def _fail_all(self, msg):
-        with self._lock:
-            waiters, self._pending = list(self._pending.values()), {}
-        for w in waiters:
-            try:
-                w(None, msg)
-            except Exception:
-                pass
-
-    def _call(self, typ, payload=b"", timeout=30):
-        done = threading.Event()
-        box = {}
-
-        def cb(data, err):
-            box["data"], box["err"] = data, err
-            done.set()
-        tag = self._next_tag()
-        with self._lock:
-            self._pending[tag] = cb
-        self._send(typ, payload, tag)
-        if not done.wait(timeout):
-            with self._lock:
-                self._pending.pop(tag, None)
-            raise NpuError("the NPU did not answer in %s s" % timeout)
-        if box["err"]:
-            raise NpuError(box["err"])
-        return box["data"]
-
-    def _hello(self):
-        for attempt in range(4):
-            try:
-                d = self._call(T_HELLO, timeout=3)
-                break
-            except NpuError as e:
-                if attempt == 3 or "did not answer" not in str(e):
-                    raise
-        proto, model, rev, prod, ok, total, avail, loaded = struct.unpack_from("<8I", d, 0)
-        return dict(proto=proto, chip=(model, rev, prod), chip_ok=ok, mem_total_kb=total, mem_avail_kb=avail, model_loaded=loaded,
-                    driver=d[32:64].split(b"\0")[0].decode())
+    def __repr__(self):
+        return "OpStat(%s: %d, %d on the NPU)" % (self.name, self.total, self.on_npu)
 
 
-class Model(NpuLink):
-    def __init__(self, model, load_timeout=240, cache_dir=None, max_inflight=2, async_gap_us=300):
-        """model: path to a .tflite file or its bytes. The first load of a model builds the graph on the NPU (13 s for MobileNet V2 uint8, about a minute
-        for an int8 model with per-channel weights); the compiled graph is kept in cache_dir (default ~/.cache/npu-models, environment NPU_CACHE;
-        cache_dir=\"\" switches the cache off) and the next loads take a fraction of a second."""
-        data = bytes(model) if isinstance(model, (bytes, bytearray, memoryview)) else open(model, "rb").read()
-        NpuLink.__init__(self, max_inflight)
-        self._async_gap = async_gap_us / 1e6   # see async_exec
-        try:
-            self.hello = self._hello()
-            if not self.hello["chip_ok"]:
-                raise NpuError("unexpected NPU chip %x/%x/%x: this software is made for 8000/7100/45080001 only" % self.hello["chip"])
-            self.from_cache = False
-            cache = cache_dir if cache_dir is not None else os.environ.get("NPU_CACHE", os.path.expanduser("~/.cache/npu-models"))
-            key = hashlib.sha256(data).hexdigest() + "." + self.hello["driver"].replace("/", "_") + "." + "%x_%x_%x" % self.hello["chip"]
-            path = os.path.join(cache, key + ".nbg") if cache else None
-            reply = None
-            if path and os.path.exists(path):
-                try:
-                    reply = self._call(T_LOAD_NBG, open(path, "rb").read(), timeout=load_timeout)
-                    self.from_cache = True
-                except NpuError as e:
-                    print("the cached graph was refused (%s): building it again" % e)
-            if reply is None:
-                reply = self._call(T_LOAD, data, timeout=load_timeout)
-        except Exception:
-            self.close()
-            raise
-        n_in, n_out, self.load_ms, self.mem_used_kb = struct.unpack_from("<IIII", reply, 0)
-        t = [Tensor(reply[16 + i * TENSOR.size:16 + (i + 1) * TENSOR.size]) for i in range(n_in + n_out)]
-        tail = 16 + (n_in + n_out) * TENSOR.size
-        nbg_len = struct.unpack_from("<I", reply, tail)[0]
-        if nbg_len and path and not self.from_cache:
-            os.makedirs(cache, exist_ok=True)
-            tmp = path + ".tmp%d" % os.getpid()
-            with open(tmp, "wb") as f:
-                f.write(struct.pack("<II", n_in, n_out) + reply[16:tail] + reply[tail + 4:tail + 4 + nbg_len])
-            os.replace(tmp, path)
-        self.inputs, self.outputs = t[:n_in], t[n_in:]
+class ModelInfo:
+    """A model loaded on the NPU, as models() lists it.
 
-    # ---- running ----
-    def _pack(self, x):
-        if isinstance(x, np.ndarray):
+    id: the number the server gave it; name: the name it was loaded with (the file name by default); key: sha256 of the .tflite file;
+    plan: where it runs ("npu", "npu-nosplit", "cpu", "mixed:<operator codes on the CPU>");
+    inputs / outputs: the tensor counts; mem_used_mb: memory it takes on the NPU die; load_ms: duration of its load on the NPU;
+    runs: requests served; age_s: seconds since the load; from_cache: loaded from a compiled graph."""
+
+    def __init__(self, mi):
+        self.id, self.name, self.key = mi.id, mi.name, mi.key
+        self.inputs, self.outputs, self.load_ms = mi.inputs, mi.outputs, mi.load_ms
+        self.mem_used_mb = mi.mem_used_kb / 1024
+        self.runs, self.age_s, self.from_cache, self.plan = mi.runs, mi.age_s, mi.from_cache, mi.plan
+
+    def __repr__(self):
+        return "ModelInfo(id=%d %r, %s, %d in / %d out, %.0f MB, %d runs, loaded %d s ago%s)" % (
+            self.id, self.name, self.plan, self.inputs, self.outputs, self.mem_used_mb, self.runs, self.age_s, ", from the cache" if self.from_cache else "")
+
+
+class Model:
+    """A TFLite model on the NPU.
+
+    Model(model, name=None, device="auto", load_timeout=600, cache_dir=None, max_inflight=2, async_gap_us=300, split=True, cpu_ops=())
+
+    model: path to a .tflite file, or its bytes. The model is identified by the sha256 of these bytes:
+      * if it is loaded on the NPU already (by this or another program), the object is attached to it: nothing is loaded and nothing is
+        checked; `attached` is True;
+      * otherwise it is loaded. Before that, the free memory of the NPU die is compared with what the model needs (the memory measured at an
+        earlier load of the same model, kept next to the compiled-graph cache, or an estimate from the file size); a model that does not fit is
+        refused with NpuError naming the loaded models, before anything is sent. The first load builds the graph on the NPU (13 s for
+        MobileNet V2 uint8, a minute or more for an int8 model with per-channel weights); the compiled graph is kept in cache_dir (default
+        ~/.cache/npu-models, environment NPU_CACHE; cache_dir="" switches the cache off) and the next loads take a fraction of a second.
+    name: the name in models() (default: the file name).
+    device: where it runs.
+        "auto" (default): NPU and CPU together - the plan autotune() found for this model if there is one, else integer models on the NPU (with what the
+            NPU cannot do on the CPU) and float models on the CPU of the NPU die (faster for them than the float16 path of this NPU). Comparisons, logical
+            operators and CAST never go to the NPU (they crash its graph library on this driver).
+        "npu": strictly the whole model on the NPU; if an operator would stay on the CPU the load fails with NpuError naming it (use "auto" then).
+        "cpu": strictly the whole model on the CPU of the NPU die (TensorFlow Lite with XNNPACK on its two Cortex-A35).
+    split: for "npu", split per-channel int8 layers into per-tensor groups (the fast path of the NPU; normally not changed).
+    cpu_ops: internal (the mixed plans of autotune()).
+    load_timeout: seconds to wait for the load.
+    max_inflight, async_gap_us: see async_exec.
+
+    Attributes: id, name, key, plan, attached, from_cache, inputs and outputs (lists of Tensor), load_ms, mem_used_kb, last_invoke_us.
+
+    close() lets go of the model (it stays loaded and other programs may use it); stop() unloads it from the NPU. As a context manager the object
+    is closed at the end of the block, not stopped. Several threads may use one Model; the runs of a model are served one after another.
+    """
+
+    def __init__(self, model, name=None, device="auto", load_timeout=600, cache_dir=None, max_inflight=2, async_gap_us=300, split=True, cpu_ops=()):
+        if isinstance(model, (bytes, bytearray, memoryview)):
+            src = bytes(model)
+        else:
+            src = os.fspath(model)
+            if not os.path.isfile(src):
+                raise NpuError("cannot read %s" % src)
+        use_cache = cache_dir != ""
+        if device not in ("auto", "npu", "cpu"):
+            raise NpuError('device must be "auto", "npu" or "cpu", not %r' % (device,))
+        self._m = _core.Model(src, name or "", int(load_timeout), use_cache, cache_dir or "", int(max_inflight), int(async_gap_us),
+                              str(device), bool(split), [int(c) for c in cpu_ops])
+        self.inputs = [Tensor(t) for t in self._m.inputs]
+        self.outputs = [Tensor(t) for t in self._m.outputs]
+        self.id, self.name, self.key = self._m.id, self._m.name, self._m.key
+        self.attached, self.from_cache = self._m.attached, self._m.from_cache
+        self.load_ms, self.mem_used_kb = self._m.load_ms, self._m.mem_used_kb
+
+    @property
+    def plan(self):
+        """Where the model runs: "npu", "npu-nosplit", "cpu" or "mixed:<operator codes on the CPU>[:nosplit]" ("" when attached to an older load)."""
+        return self._m.plan
+
+    def ops(self):
+        """The operator types of the model and where they run: a list of OpStat (empty for a model loaded from its compiled graph: all on the NPU)."""
+        return [OpStat(o) for o in self._m.ops()]
+
+    def autotune(self, sample=None, tolerance=0.99, runs=5, max_trials=8):
+        """Find the fastest way to run this model with the same results, keep it, and switch to it.
+
+        Candidates: the whole model on the CPU of the NPU die (the reference: TensorFlow Lite with XNNPACK), the whole model on the NPU, the same without
+        the split of per-channel int8 layers, and mixed plans in which operator types move from the NPU to the CPU one by one (kept when that is faster or
+        makes the result right; at most max_trials of them). Each candidate runs the sample (an input array, or a list for several inputs; None: random
+        data, but real data is better) and is compared with the reference: the lowest cosine similarity of the outputs must be at least `tolerance`.
+        Every candidate is loaded and compiled once: for a big model this takes minutes, once.
+
+        The fastest candidate that passes is kept next to the compiled-graph cache (later loads with device "auto" use it, a whole-NPU plan from its cached
+        graph) and this object is reloaded with it (programs attached to the old load lose it). Returns the candidates as dicts
+        {plan, ms, cosine, ok, error}, the chosen one first; ms is one exec() with the USB transfer."""
+        x = None if sample is None else self._prepare(sample)
+        r = self._m.autotune(x, float(tolerance), int(runs), int(max_trials))
+        self.inputs = [Tensor(t) for t in self._m.inputs]
+        self.outputs = [Tensor(t) for t in self._m.outputs]
+        self.id, self.attached, self.from_cache = self._m.id, self._m.attached, self._m.from_cache
+        self.load_ms, self.mem_used_kb = self._m.load_ms, self._m.mem_used_kb
+        return r
+
+    @property
+    def last_invoke_us(self):
+        """Microseconds the last run took on the NPU die (without the USB transfer)."""
+        return self._m.last_invoke_us
+
+    def _prepare(self, x):
+        if isinstance(x, np.ndarray) or not isinstance(x, (list, tuple)):
             x = [x]
         if len(x) != len(self.inputs):
             raise NpuError("the model has %d input(s), %d given" % (len(self.inputs), len(x)))
@@ -235,63 +189,43 @@ class Model(NpuLink):
             a = np.asarray(a)
             if a.dtype != t.dtype:
                 if np.issubdtype(a.dtype, np.floating) and t.scale and t.dtype in (np.uint8, np.int8, np.int16):
-                    info = np.iinfo(t.dtype)
-                    a = np.clip(np.round(a / t.scale) + t.zero_point, info.min, info.max).astype(t.dtype)   # quantise a float input
+                    a = t.quantize(a)
                 else:
                     a = a.astype(t.dtype)
-            if a.nbytes != t.nbytes:
-                raise NpuError("input %s: %d bytes, the model wants %d (shape %s)" % (t.name, a.nbytes, t.nbytes, t.shape))
-            out.append(np.ascontiguousarray(a).tobytes())
-        return b"".join(out)
-
-    def _unpack(self, d):
-        self.last_invoke_us = struct.unpack_from("<I", d, 0)[0]
-        off, res = 4, []
-        for t in self.outputs:
-            res.append(np.frombuffer(d, t.dtype, t.nbytes // t.dtype.itemsize, off).reshape(t.shape).copy())
-            off += t.nbytes
-        return res
+            out.append(np.ascontiguousarray(a))
+        return out
 
     def exec(self, x, timeout=30):
-        """Run once and return the outputs: a list of numpy arrays in the dtype of the model (`self.outputs[i].dequantize(a)` gives float32).
-        x is an array (or a list of arrays for several inputs); a float array for an integer input is quantised with the scale of the input."""
-        payload = self._pack(x)
-        self._slots.acquire()
-        try:
-            return self._unpack(self._call(T_RUN, payload, timeout))
-        finally:
-            self._slots.release()
+        """Run once and return the outputs: a list of numpy arrays in the dtypes and shapes of the model (outputs[i].dequantize(a) gives float32).
+
+        x: an array, or a list of arrays for a model with several inputs. A float array for an integer input is quantised with the scale of the
+        input; another dtype is converted. last_invoke_us is the time on the NPU die afterwards. Raises NpuError (for example when another
+        program stopped the model)."""
+        return self._m.exec(self._prepare(x), int(timeout))
 
     def async_exec(self, x, callback):
-        """EXPERIMENTAL. Queue a run and return at once; callback(outputs, error) is called from a helper thread when the result is there.
-        A request sent right after a reply (as pipelining does) was seen to hang the USB transfer, and with it the xHCI of the board, in about
-        every other run: a pause of async_gap_us (default 300 us) before each request avoids it (3000 frames in a row, 135 FPS against
-        about 105 FPS of exec). Without the pause it can reach 159 FPS, at the risk of a stuck bus. exec() is not affected."""
-        payload = self._pack(x)
-        self._slots.acquire()
-        if self._async_gap:
-            time.sleep(self._async_gap)
+        """EXPERIMENTAL. Queue a run and return at once; callback(outputs, error) is called from a helper thread when the result is there
+        (outputs as exec() returns them and error None, or None and the error text). At most max_inflight runs of this model are on their way
+        (the call waits for a free slot).
 
-        def cb(data, err):
-            self._slots.release()
-            try:
-                callback(None if err else self._unpack(data), err)
-            except Exception as e:   # a failing callback must not stop the reader
-                print("callback raised", e)
-        tag = self._next_tag()
-        with self._lock:
-            self._pending[tag] = cb
-        self._send(T_RUN, payload, tag)
+        A request sent right after a reply while others are in flight (as pipelining does) was seen to hang the USB transfer, and with it the xHCI of
+        the board: a pause of async_gap_us (default 300 us) before each request avoids it. exec() is not affected."""
+        self._m.async_exec(self._prepare(x), callback)
 
     def close(self):
-        """Unload the model: the NPU is free for the next one."""
-        if getattr(self, "_closed", True):
-            return
-        try:
-            self._call(T_UNLOAD, timeout=10)
-        except Exception:
-            pass
-        self.close_link()
+        """Let go of the model: this object cannot run it any more; the model stays loaded on the NPU (for this or other programs)."""
+        self._m.close()
+
+    def stop(self):
+        """Unload the model from the NPU (for every program that uses it) and close this object. Its memory on the NPU die is free again."""
+        self._m.stop()
+
+    unload = stop
+
+    @property
+    def closed(self):
+        """True after close() or stop()."""
+        return self._m.closed
 
     def __enter__(self):
         return self
@@ -299,21 +233,44 @@ class Model(NpuLink):
     def __exit__(self, *a):
         self.close()
 
-    def __del__(self):
-        try:
-            self.close()
-        except Exception:
-            pass
+    def __repr__(self):
+        return "Model(id=%d %r, %s, %d in / %d out%s%s)" % (self.id, self.name, self.plan or "?", len(self.inputs), len(self.outputs),
+                                                            ", attached" if self.attached else "", ", closed" if self.closed else "")
 
 
 NpuModel = Model   # the name of the research prototype
 
 
 def info():
-    """Ask the server on the NPU die for its state without loading a model: {chip, chip_ok, driver, mem_total_kb, mem_avail_kb, model_loaded}.
-    Fails with NpuError if another process holds the NPU (a loaded model owns the USB channel)."""
-    link = NpuLink()
-    try:
-        return link._hello()
-    finally:
-        link.close_link()
+    """The state of the NPU without loading anything: dict(chip, chip_ok, driver, mem_total_kb, mem_avail_kb, models, proto, via).
+
+    models: the number of loaded models (models() lists them); via: "daemon" or "usb"."""
+    return _core.info()
+
+
+def models():
+    """The models loaded on the NPU (by any program): a list of ModelInfo, in the order of their ids."""
+    return [ModelInfo(m) for m in _core.models()]
+
+
+def stop(which):
+    """Unload models from the NPU.
+
+    which: a model id (int), a name or a sha256 key (str), a Model or ModelInfo, or "all". Returns the number of models unloaded (0 if nothing
+    matched). Programs that still use a stopped model get NpuError on their next run."""
+    if isinstance(which, (Model, ModelInfo)):
+        return _core.stop_id(which.id)
+    if isinstance(which, int):
+        return _core.stop_id(which)
+    return _core.stop_name(str(which))
+
+
+def find_devices():
+    """The NPU dies on the USB bus: a list of dicts {bus, dev, serial, sysfs}. Empty if the NPU firmware is not loaded."""
+    return _core.find_devices()
+
+
+def is_quantized(model):
+    """True if most of the constant data of the model (a path or the .tflite bytes) is int8 / uint8: device "auto" puts such a model on the NPU."""
+    data = bytes(model) if isinstance(model, (bytes, bytearray, memoryview)) else open(model, "rb").read()
+    return _core.is_quantized(data)

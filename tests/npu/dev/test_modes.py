@@ -17,4 +17,4 @@ else:
     done.wait(40)
 dt = (time.time() - t) / n
 print("inflight %d %s x%d: %.2f ms per frame, %.0f FPS" % (inflight, mode, n, dt * 1000, 1 / dt))
-npu.close()
+npu.stop()

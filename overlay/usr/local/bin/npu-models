@@ -1,0 +1,25 @@
+#!/usr/bin/python3
+"""The models loaded on the NPU.
+    npu-models                 list them (id, name, memory, runs, age)
+    npu-models stop ID|NAME    unload one (a number is an id, anything else a name or sha256 key)
+    npu-models stop all        unload every model"""
+import sys
+import rk3399pro_npu as npu
+
+try:
+    a = sys.argv[1:]
+    if not a or a[0] == "list":
+        i, ms = npu.info(), npu.models()
+        print("%d model(s) on the NPU, %d MB free of %d MB" % (len(ms), i["mem_avail_kb"] // 1024, i["mem_total_kb"] // 1024))
+        for m in ms:
+            print("  %3d  %-36s %-14s %5.0f MB  %3d in %3d out  %8d runs  loaded %6d s ago%s" % (
+                m.id, m.name, m.plan, m.mem_used_mb, m.inputs, m.outputs, m.runs, m.age_s, "  (from the cache)" if m.from_cache else ""))
+    elif a[0] == "stop" and len(a) == 2:
+        which = int(a[1]) if a[1].isdigit() else a[1]
+        n = npu.stop(which)
+        print("%d model(s) unloaded" % n)
+        sys.exit(0 if n else 1)
+    else:
+        print(__doc__.strip()); sys.exit(2)
+except npu.NpuError as e:
+    print("NPU: %s" % e); sys.exit(1)

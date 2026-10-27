@@ -28,4 +28,4 @@ for path in names:
               % (os.path.basename(path), i.dtype, o.dtype, lt, m.mem_used_kb // 1024, m.last_invoke_us / 1000, ms, top, cos), flush=True)
     except Exception as e:
         print("%-34s RUN FAILED: %s" % (os.path.basename(path), str(e)[:150]))
-    m.close()
+    m.stop()

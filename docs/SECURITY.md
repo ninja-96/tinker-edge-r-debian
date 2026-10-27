@@ -26,7 +26,7 @@ without it (for automated tests) with `FORCE_PW_CHANGE=0 ./run.sh scripts/build-
 
 ## The NPU
 
-The NPU die is behind an on-board USB hub and is not reachable from the network. The group `plugdev` (the default user) may open its USB device (`60-tinker-npu.rules`) and run a model, which executes on the NPU die; the server there has no authentication and the NPU's Linux has an ADB root shell on the same link. Do not add untrusted users to `plugdev`.
+The NPU die is behind an on-board USB hub and is not reachable from the network. The group `plugdev` (the default user) may open its USB device (`60-tinker-npu.rules`) and the socket of `npu-daemon` (`/run/npu/npu.sock`, mode 0660), load, run and **stop the models of every program**, and run code on the NPU die through a model; the server there has no authentication and the NPU's Linux has an ADB root shell on the same link. Do not add untrusted users to `plugdev`. `npu-daemon` runs as a dynamic system user (systemd `DynamicUser`, in `plugdev` only, no new privileges, read-only file system).
 
 ## Not done on purpose
 

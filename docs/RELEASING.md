@@ -1,6 +1,6 @@
 # How a release is made
 
-The order is fixed. Steps 1-2 are done automatically at the start of every release (standing rule of the maintainer, 2026-10-27); publishing (step 8) only when the maintainer says so.
+The order is fixed. Steps 1-2 are done automatically at the start of every major or minor release, x.0.0 or x.y.0 (standing rule of the maintainer, 2026-10-27); a patch release x.y.z (z > 0) keeps the kernel and Debian of its x.y.0; publishing (step 8) only when the maintainer says so.
 
 | # | Step | How |
 |---|---|---|

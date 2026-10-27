@@ -13,6 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libtool ccache sudo less vim-tiny \
     && rm -rf /var/lib/apt/lists/*
 
+# the Python module of the NPU library (scripts/build-npu-host.sh): the headers of the board's Python 3.13 and pybind11, from Debian
+RUN dpkg --add-architecture arm64 && apt-get update && apt-get install -y --no-install-recommends \
+        libpython3.13-dev:arm64 pybind11-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Cortex-M0 toolchain: TF-A builds the RK3399 PMU firmware with it
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gcc-arm-none-eabi libnewlib-arm-none-eabi \

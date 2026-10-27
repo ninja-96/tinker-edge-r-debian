@@ -1,5 +1,5 @@
 # the NPU server, built inside the tree of the TFLite VX delegate (it uses its TensorFlow Lite): add_subdirectory(/w/server ...)
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 20)
 add_executable(npu_server npu_server.cc ${TFLITE_SOURCE_DIR}/delegates/external/external_delegate.cc)
 target_include_directories(npu_server PRIVATE ${TFLITE_SOURCE_DIR}/delegates/external ${TIM_VX_INSTALL}/include)
 target_link_libraries(npu_server tensorflow-lite ${TIM_VX_INSTALL}/lib/libtim-vx.so ${CMAKE_DL_LIBS} pthread)

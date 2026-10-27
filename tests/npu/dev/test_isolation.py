@@ -13,5 +13,5 @@ for path in order:
     m.exec(x); n = 100; t2 = time.time()
     for _ in range(n): m.exec(x)
     print("%-32s -> loaded in %.1f s, NPU %.1f ms, exec %.1f ms" % (os.path.basename(path), time.time() - t, m.last_invoke_us / 1000, (time.time() - t2) / n * 1000), flush=True)
-    m.close()
+    m.stop()
 print("session over, the NPU is still there")

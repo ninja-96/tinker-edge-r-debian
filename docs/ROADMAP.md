@@ -107,6 +107,41 @@ the CPU load by itself); (2) install `chromium` on the board and test A and B wi
 browser and its configuration (flags in `/etc/chromium.d/`) into the image, with a test in `scripts/test-board.sh` (a clip
 that must be played with hardware decoding). Image size grows by about 300 MB (`ROOTFS_MIB`).
 
+### Release 0.4.1: TensorFlow Lite 2.21, several models, autotune
+
+Decision (2026-10-27): a patch release of 0.4 (the kernel and Debian of 0.4 stay: patch releases do not update them, see [RELEASING.md](RELEASING.md)).
+
+| Item | Status |
+|---|---|
+| TensorFlow Lite 2.21.0 on the NPU die | done: the TFLite VX delegate of the `main` branch with our patch, TIM-VX `main` (2026-03-30) built with the SDK 6.4.6 headers of v1.1.32 (newer headers enlarge `vx_hardware_caps_params_ext_t`, which the 6.4.6 driver refuses: that, not the driver, made v1.1.57 crash in 0.4). XNNPACK (ARMv8.0 kernels) runs what stays on the CPU of the NPU die |
+| Keras tails (`SHAPE -> STRIDED_SLICE -> PACK -> RESHAPE`) | done: the server makes the shape a constant (`npu-open/server/fix_dynamic_reshape.h`) |
+| Several models at once | done: protocol 2, one engine process per model, a load does not stop the loaded models, `LIST` / `DESCRIBE` / `UNLOAD` by id. Models stay loaded until they are stopped; `Model(path)` attaches to a loaded model (sha256 of the file), also from another program; the free memory is checked before a load (measured at earlier loads, or estimated) |
+| Sharing between programs | done: `npu-daemon` (C++, systemd, socket `/run/npu/npu.sock`, group `plugdev`) |
+| C++ library | done: `librk3399pro_npu` (`rk3399pro_npu.hpp`); the Python module is a binding of it (pybind11, Debian packages only) |
+| Where a model runs | done: `device="auto"`: integer models on the NPU, float models on the CPU of the NPU die (TFLite + XNNPACK is 2-2.5 times faster for them than the float16 path of this NPU, which uses 2 of its 10 cores); `Model.autotune()` measures NPU / CPU / mixed plans against the CPU result and keeps the fastest right one |
+| Tests | done: `npu-selftest` (17 checks: also two models, attaching, another process, stopping); LiteRT community vision models measured (docs/NPU.md) |
+
+### Release 0.5: LiteRT and LiteRT-LM on the NPU die and on the board (the main goal)
+
+Decision of the maintainer (2026-10-27): the most ambitious goal of 0.5. Every build works out of the box and is optimised for this board (`-mcpu=cortex-a35` on the NPU die,
+`-mcpu=cortex-a72.cortex-a53` and the Mali-T860 on the board, `-O3`).
+
+| Item | Notes |
+|---|---|
+| **LiteRT on the NPU die** instead of TensorFlow Lite 2.21 | [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT): the successor of TensorFlow Lite. The VX delegate keeps working with its classic interpreter API; its new `CompiledModel` / accelerator API needs a LiteRT accelerator (dispatch / compiler plugin) for TIM-VX, written by us. CPU (XNNPACK on the A35), NPU or both, as now |
+| **LiteRT-LM on the NPU die** | [google-ai-edge/LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM): language models; on the NPU die, CPU, NPU or both. To find out: which LM graphs the 6.4.6 driver and the 2 GB of the NPU die can hold (int8 weights, KV cache), and what the NPU can take of them |
+| **LiteRT and LiteRT-LM on the board** | on the four Cortex-A72/A53 (XNNPACK) and the Mali-T860 GPU (LiteRT GPU accelerator: OpenGL ES 3.1 / OpenCL through Panfrost and Rusticl), with the same Python and C++ API as the NPU (`rk3399pro_npu` grows into one library for the board: device `npu`, `cpu-npu-die`, `cpu`, `gpu`, mixed) |
+| **Autotune, improved** | over all executors (NPU, CPU of the NPU die, CPU and GPU of the board) and parts of the graph instead of whole operator types (see "Release 0.5: NPU" below), the copies between them counted; the best plan kept and used at the next load |
+| Relation to "inference engines on the CPU and the GPU" | LiteRT takes the place of the TFLite row there; Arm NN, MNN and TVM stay in that list unless the maintainer decides otherwise |
+
+### Release 0.5: NPU
+
+| Item | Notes |
+|---|---|
+| Autotune aware of the order of the layers | 0.4.1 moves whole operator types to the CPU and measures each candidate (so the copies between NPU and CPU parts are counted). Better: move parts of the graph (a tail from node N, a head up to node M, one bad node: deny by node index, the same mechanism as by type), estimate the number of cuts before compiling and skip candidates that cannot win (every candidate costs a compilation of seconds to minutes) |
+| Float models on the CPU of the board | the four Cortex-A72/A53 of the RK3399 are much faster than the two A35 of the NPU die: with the TFLite engine of "inference engines on the CPU and the GPU" (below), `device="auto"` and autotune can choose the board's CPU for float models and float parts |
+| Vivante driver 6.4.8 | research in `rnd/verisilicon` (2026-10-27): the open galcore 6.4.8.415784 of Khadas with an RK1808 platform part and an entry for this chip, and the matching user space of the Khadas package `aml-npu` (its `libGAL` lacks the entry; a binary change applied on the user's machine). Gain unknown |
+
 ### Release 0.5: kernel update
 
 | Item | Notes |
@@ -158,8 +193,8 @@ Only the driver and Rockchip's firmware stay closed. The memory controller work 
 | Data types | done: uint8 (6-7 ms for MobileNet V2), int8 with per-channel weights (27 ms: layers split by scale, exact), float32 and float16 weights (480 ms, slow path). Not supported: dynamic-range models, an all-float16 graph |
 | Tests | done: `npu-selftest` (two small models against TFLite on the CPU, speed, cache, a broken model, one model per NPU), the NPU phase of `scripts/test-board.sh`, run as the ordinary user |
 | Operators | compared with RKNN-Toolkit 1.7.5 in [OPERATORS.md](../npu-open/OPERATORS.md). Open: `GATHER_ND` and `RESIZE_NEAREST_NEIGHBOR` give wrong results, float `FULLY_CONNECTED` and `TRANSPOSE_CONV` crash TIM-VX, `SUM` / `TILE` / `UNPACK` / `SLICE` / `FLOOR` / `LOG_SOFTMAX` / `MIRROR_PAD` / comparisons / `LSTM` / `SVDF` are left to the CPU of the NPU die |
-| Known problems | `async_exec` can hang the USB bus (cause not found; a pause of 300 us avoids it; use `exec`); Keras MobileNet V1 (dynamic reshape) is refused by the delegate |
-| Not in 0.4 | a converter in Docker for ONNX/PyTorch to TFLite (the documentation says how to make an integer model); newer TIM-VX (v1.1.57 crashes on this driver); an own kernel for the NPU die |
+| Known problems | `async_exec` can hang the USB bus (cause not found; a pause of 300 us avoids it; use `exec`); Keras MobileNet V1 (dynamic reshape) is refused by the delegate (fixed in 0.4.1) |
+| Not in 0.4 | a converter in Docker for ONNX/PyTorch to TFLite (the documentation says how to make an integer model); newer TIM-VX (v1.1.57 crashes on this driver: done in 0.4.1); an own kernel for the NPU die |
 
 ### Later
 

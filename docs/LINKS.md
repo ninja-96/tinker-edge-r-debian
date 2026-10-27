@@ -39,6 +39,7 @@ depend on any of these at build time except the open upstream sources listed und
 | U-Boot v2026.10 | https://github.com/u-boot/u-boot | `sources.lock` |
 | TF-A v2.15.0 (only for the open BL31) | https://github.com/ARM-software/arm-trusted-firmware | `sources.lock` |
 | Debian 13 "trixie" packages | https://deb.debian.org/debian | `scripts/build-rootfs.sh` |
+| NPU stack: TIM-VX, tflite-vx-delegate (`main` branches), TensorFlow 2.21.0 and what TensorFlow Lite builds with (abseil, Eigen, farmhash, fft2d, flatbuffers, gemmlowp, ml_dtypes, ruy, cpuinfo, FP16, protobuf, XNNPACK, pthreadpool, FXdiv) | the repositories in `TFLITE_DEPS` | `sources.lock` (commits; tarballs with sha256), licences in [../README.md](../README.md) |
 
 ## Other references used in the research
 
@@ -62,6 +63,10 @@ The licence of what the project builds or copies is in [../README.md](../README.
 | [nxp-imx/linux-imx](https://github.com/nxp-imx/linux-imx) | GPL-2.0 (Linux kernel); read only |
 | [coreboot/coreboot](https://github.com/coreboot/coreboot) | GPL-2.0; read only |
 | [rockchip-linux/rknn-toolkit2](https://github.com/rockchip-linux/rknn-toolkit2), [rknpu2](https://github.com/rockchip-linux/rknpu2) | BSD-3-Clause (repositories); for newer chips, not used |
+| [khadas/linux](https://github.com/khadas/linux) (`drivers/amlogic/npu`: open galcore 6.4.6.2 and 6.4.8 of Amlogic), [khadas/common_drivers](https://github.com/khadas/common_drivers) | GPL-2.0 / MIT (the galcore files are dual-licensed); read only: the layout of the feature table used to decode the chip of this NPU |
+| [Freescale/kernel-module-imx-gpu-viv](https://github.com/Freescale/kernel-module-imx-gpu-viv) | GPL-2.0; read only (galcore 6.4.11 of NXP) |
+| [54shady/qop_kernel](https://github.com/54shady/qop_kernel), [rockchip-linux/kernel](https://github.com/rockchip-linux/kernel) (`develop-4.4`) | GPL-2.0; read only: the Rockchip 4.4 kernel with RK1808 / `rk3399pro_npu_defconfig` (the kernel of the NPU die) |
+| [huggingface.co/litert-community](https://huggingface.co/collections/litert-community/vision-models) | per model (Apache-2.0, MIT, BSD-3-Clause; some without a stated licence); models downloaded for the measurements in NPU.md, not distributed |
 
 Rule for this file: a link to code or data that the project uses gets its licence (SPDX id and a link to the licence text) here or in the README.
 

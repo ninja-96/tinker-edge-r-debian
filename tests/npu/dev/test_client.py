@@ -26,4 +26,4 @@ try:
     NpuModel(sys.argv[1] if len(sys.argv) > 1 else "/tmp/mobilenet_v2_1.0_224_quant.tflite")
 except Exception as e:
     print("second model while the first is loaded ->", type(e).__name__, e)
-npu.close(); print("closed")
+npu.stop(); print("closed")

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Show the state of the NPU: the chip, the driver of the NPU die, its memory, and whether a model is loaded."""
+"""Show the state of the NPU: the chip, the driver of the NPU die, its memory, and the loaded models (npu-models lists them)."""
 import sys
 try:
     import rk3399pro_npu as npu
@@ -8,4 +8,4 @@ except npu.NpuError as e:
     print("NPU: %s" % e)
     sys.exit(1)
 print("NPU  chip %x/%x/%x (%s)  driver %s" % (*info["chip"], "supported" if info["chip_ok"] else "NOT supported", info["driver"]))
-print("     memory %d MB free of %d MB  |  model loaded: %s" % (info["mem_avail_kb"] // 1024, info["mem_total_kb"] // 1024, "yes" if info["model_loaded"] else "no"))
+print("     memory %d MB free of %d MB  |  models loaded: %d" % (info["mem_avail_kb"] // 1024, info["mem_total_kb"] // 1024, info["models"]))

@@ -1,5 +1,9 @@
 # TensorFlow Lite operators: RKNN-Toolkit 1.7.5 against the open stack (TIM-VX + tflite-vx-delegate, TensorFlow Lite 2.6.0)
 
+> Release 0.4.1 runs TensorFlow Lite 2.21 with the delegate and TIM-VX of their `main` branches; this table was measured with the 0.4 stack (TIM-VX v1.1.32, delegate tag
+> `tflite_v2.6.0`) and is not measured again yet. What the NPU does not take now runs on the CPU of the NPU die with XNNPACK; `Model.autotune()` moves operators that are slow or
+> wrong on the NPU to the CPU per model.
+
 Measured on 2026-10-26 on one Tinker Edge R (RK3399Pro, Vivante driver 6.4.6). The question: **which operators of a TFLite model work with the open NPU stack and which with RKNN**,
 so that the RKNN path can be dropped when the open stack has parity.
 

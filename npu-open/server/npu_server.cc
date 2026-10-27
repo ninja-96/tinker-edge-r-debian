@@ -1,6 +1,7 @@
-/* Thin server on the NPU die (research, rnd/verisilicon): takes over the FunctionFS function "ntb" (see transport/npu_echo.c),
- * loads one TFLite model, runs it on the NPU through the TFLite VX delegate (TIM-VX), frees it on request or when the host goes away.
- * Protocol: protocol.h. One model at a time. A reader thread takes requests from the USB endpoint while the worker runs the previous one. */
+/* Thin server on the NPU die: takes over the FunctionFS function "ntb", loads TFLite models (several at once, each in its own engine process),
+ * runs them on the NPU through the TFLite VX delegate (TIM-VX) and frees them on request. The models stay loaded when the host goes away
+ * (a program on the board can attach to a model that another one loaded). Protocol: protocol.h. A reader thread takes requests from the USB
+ * endpoint while the worker runs the previous one; a LOAD runs in a thread of its own, so that the loaded models keep running meanwhile. */
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -22,7 +23,9 @@
 #include <unistd.h>
 
 #include <condition_variable>
+#include <cstddef>
 #include <deque>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -30,6 +33,7 @@
 #include <vector>
 
 #include "protocol.h"
+#include "fix_dynamic_reshape.h"
 #include "split_per_channel.h"
 #include "tensorflow/lite/delegates/external/external_delegate.h"
 #include "tim/vx/context.h"
@@ -46,6 +50,7 @@
 #define RDCHUNK (64 * 1024)
 #define WRCHUNK (256 * 1024)
 #define MAX_MSG (96u << 20)
+#define RUN_TIMEOUT_S 300   /* a float model on the slow float16 path of the NPU takes seconds per run; a hung engine is killed after this */
 #ifndef REPLY_GAP_US
 #define REPLY_GAP_US 0   /* a pause before the reply did not help (see README of rnd/verisilicon) */
 #endif
@@ -105,6 +110,7 @@ struct Model {
 	std::unique_ptr<tflite::Interpreter> interp;
 	TfLiteDelegate *delegate = nullptr;
 	std::vector<npu_tensor> info;   /* inputs, then outputs */
+	std::vector<npu_op_stat> ops;   /* the operators and where they run (NPU_OPS) */
 	/* NBG mode: the compiled graph is loaded with TIM-VX directly, TFLite is not used */
 	bool nbg_mode = false;
 	size_t n_in = 0, n_out = 0;
@@ -147,10 +153,15 @@ static void describe(Model &m)
 }
 
 /* returns an error text, or "" and fills `reply` */
-static std::string do_load(std::vector<uint8_t> &&bytes, std::vector<uint8_t> &reply)
+static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &reply)
 {
+	if (req.size() < sizeof(npu_load_req)) return "short request";
+	npu_load_req lq; memcpy(&lq, req.data(), sizeof lq);
+	std::vector<uint8_t> bytes(req.begin() + sizeof lq, req.end());
+	req.clear(); req.shrink_to_fit();
+	const bool cpu_only = lq.flags & NPU_LOAD_CPU_ONLY, no_split = lq.flags & NPU_LOAD_NO_SPLIT;
 	std::lock_guard<std::mutex> lk(g_model_mu);
-	if (g_model) return "a model is already loaded (one model at a time): unload it first";
+	if (g_model) return "this engine has a model already";
 	uint32_t mo, re, pr; char drv[32]; chip_identity(&mo, &re, &pr, drv);
 	if (mo != 0x8000 || re != 0x7100 || pr != 0x45080001) {
 		char b[160]; snprintf(b, sizeof b, "unknown NPU chip %x/%x/%x: this build is made for 8000/7100/45080001 only", mo, re, pr); return b;
@@ -158,28 +169,59 @@ static std::string do_load(std::vector<uint8_t> &&bytes, std::vector<uint8_t> &r
 	uint32_t avail = meminfo_kb("MemAvailable:");
 	/* the model is kept in memory, TFLite makes a copy of the weights for the NPU and the graph takes more: 4x is a first guess */
 	if ((uint64_t)bytes.size() / 1024 * 4 + 64 * 1024 > avail) {
-		char b[160]; snprintf(b, sizeof b, "not enough memory: the model needs about %zu MB, %u MB are free", bytes.size() / 1024 / 1024 * 4 + 64, avail / 1024); return b;
+		char b[200]; snprintf(b, sizeof b, "not enough memory on the NPU: the model needs about %zu MB, %u MB are free (stop a loaded model first)", bytes.size() / 1024 / 1024 * 4 + 64, avail / 1024); return b;
 	}
 	auto m = std::make_unique<Model>();
 	m->bytes = std::move(bytes);
 	uint64_t t0 = now_us();
-	if (!getenv("NPU_SPLIT") || getenv("NPU_SPLIT")[0] != '0') {   /* per-channel int8 layers -> per-tensor groups (fast path of the NPU, exact), see split_per_channel.h */
+	{   /* Keras tails (SHAPE -> STRIDED_SLICE -> PACK -> RESHAPE) -> a constant shape, see fix_dynamic_reshape.h */
+		npu_reshape::Stats st; std::string e = npu_reshape::run(m->bytes, &st);
+		if (!e.empty()) return e;
+		if (st.fixed) logf_("graph-computed reshape shapes made constant: %d (%d operators removed)", st.fixed, st.removed);
+	}
+	if (!cpu_only && !no_split && (!getenv("NPU_SPLIT") || getenv("NPU_SPLIT")[0] != '0')) {   /* per-channel int8 layers -> per-tensor groups (fast path of the NPU, exact), see split_per_channel.h */
 		npu_split::Stats st; std::string e = npu_split::run(m->bytes, 4.0, &st);
 		if (!e.empty()) return e;
 		if (st.layers) logf_("per-channel layers: %d, split into groups: %d (+%d convolutions, +%d additions)", st.layers, st.split, st.convs_added, st.adds);
 	}
 	m->fb = tflite::FlatBufferModel::BuildFromBuffer((const char *)m->bytes.data(), m->bytes.size());
-	if (!m->fb) return "not a TFLite model (or a version TFLite 2.6 cannot read)";
+	if (!m->fb) return "not a TFLite model (or a version this TFLite cannot read)";
 	tflite::ops::builtin::BuiltinOpResolver resolver;
 	tflite::InterpreterBuilder(*m->fb, resolver)(&m->interp);
 	if (!m->interp) return "cannot build the TFLite interpreter";
-	setenv("VX_NBG_EXPORT", "/tmp/npu_model.nbg", 1);   /* the delegate writes the compiled graph here */
-	unlink("/tmp/npu_model.nbg");
-	auto opt = TfLiteExternalDelegateOptionsDefault(DELEGATE_SO);
-	m->delegate = TfLiteExternalDelegateCreate(&opt);
-	if (!m->delegate) return "cannot load the VX delegate " DELEGATE_SO;
-	if (m->interp->ModifyGraphWithDelegate(m->delegate) != kTfLiteOk) return "the VX delegate refused the model";
-	if (getenv("NPU_STRICT") && getenv("NPU_STRICT")[0] == '1') {   /* a test mode: refuse a model with an operator that the delegate left to the CPU, and name the operators */
+	m->interp->SetNumThreads(2);   /* both Cortex-A35 for what stays on the CPU (XNNPACK, applied by TFLite after the VX delegate) */
+	std::map<int, npu_op_stat> stat;   /* the operators before the delegate takes its part */
+	for (int idx : m->interp->execution_plan()) {
+		const auto *nr = m->interp->node_and_registration(idx);
+		int c = nr->second.custom_name ? 0xffff : nr->second.builtin_code;
+		auto &st = stat[c]; st.code = c; st.total++; st.on_npu++;
+	}
+	char nbg_file[64]; snprintf(nbg_file, sizeof nbg_file, "/tmp/npu_model.%d.nbg", (int)getpid());   /* engines of several models load at once */
+	bool whole = false;
+	if (!cpu_only) {
+		std::string deny;
+		for (int i = 0; i < NPU_MAX_DENY && lq.deny_ops[i]; i++) deny += (deny.empty() ? "" : ",") + std::to_string(lq.deny_ops[i]);
+		if (!deny.empty()) setenv("VX_DENY_OPS", deny.c_str(), 1);
+		setenv("VX_NBG_EXPORT", nbg_file, 1);   /* the delegate writes the compiled graph here */
+		unlink(nbg_file);
+		auto opt = TfLiteExternalDelegateOptionsDefault(DELEGATE_SO);
+		m->delegate = TfLiteExternalDelegateCreate(&opt);
+		if (!m->delegate) return "cannot load the VX delegate " DELEGATE_SO;
+		if (m->interp->ModifyGraphWithDelegate(m->delegate) != kTfLiteOk) return "the VX delegate refused the model";
+		int parts = 0, left = 0;
+		for (int idx : m->interp->execution_plan()) {
+			const auto *nr = m->interp->node_and_registration(idx);
+			if (nr->first.delegate) { parts++; continue; }
+			left++;
+			int c = nr->second.custom_name ? 0xffff : nr->second.builtin_code;
+			if (stat.count(c) && stat[c].on_npu) stat[c].on_npu--;
+		}
+		whole = parts == 1 && left == 0;   /* only then is the exported graph the whole model */
+	} else {
+		for (auto &kv : stat) kv.second.on_npu = 0;
+	}
+	for (auto &kv : stat) m->ops.push_back(kv.second);
+	if (!cpu_only && ((lq.flags & NPU_LOAD_STRICT) || (getenv("NPU_STRICT") && getenv("NPU_STRICT")[0] == '1'))) {   /* the whole model on the NPU or an error naming what stays on the CPU */
 		std::string cpu;
 		for (int idx : m->interp->execution_plan()) {
 			const auto *nr = m->interp->node_and_registration(idx);
@@ -187,16 +229,16 @@ static std::string do_load(std::vector<uint8_t> &&bytes, std::vector<uint8_t> &r
 			const char *nm = nr->second.custom_name ? nr->second.custom_name : tflite::EnumNameBuiltinOperator((tflite::BuiltinOperator)nr->second.builtin_code);
 			if (cpu.find(nm) == std::string::npos) cpu += std::string(cpu.empty() ? "" : ",") + nm;
 		}
-		if (!cpu.empty()) return "not on the NPU: " + cpu;
+		if (!cpu.empty()) return "not the whole model runs on the NPU: " + cpu + " would run on the CPU of the NPU die; use device=\"auto\" (NPU and CPU together) or device=\"cpu\"";
 	}
 	if (m->interp->AllocateTensors() != kTfLiteOk) return "cannot allocate the tensors";
 	if (m->interp->Invoke() != kTfLiteOk) return "the first run failed";   /* the Vivante compiler builds the graph here (seconds) */
 	describe(*m);
 	npu_load_reply lr = { (uint32_t)m->interp->inputs().size(), (uint32_t)m->interp->outputs().size(), (uint32_t)((now_us() - t0) / 1000),
-			      avail > meminfo_kb("MemAvailable:") ? avail - meminfo_kb("MemAvailable:") : 0 };
+			      avail > meminfo_kb("MemAvailable:") ? avail - meminfo_kb("MemAvailable:") : 0, 0 };
 	unsetenv("VX_NBG_EXPORT");
-	std::string nbg = read_file("/tmp/npu_model.nbg");
-	unlink("/tmp/npu_model.nbg");
+	std::string nbg = whole ? read_file(nbg_file) : std::string();
+	unlink(nbg_file);
 	/* a float input/output is converted by the delegate (the graph itself is float16): the cached graph would not match the tensor description */
 	for (auto &d : m->info) if (d.type == 1) nbg.clear();
 	uint32_t nbg_len = nbg.size();
@@ -220,10 +262,13 @@ static tim::vx::DataType vx_type(int t)
 }
 
 /* a model from its compiled graph: tensors as in the LOAD reply, then the NBG */
-static std::string do_load_nbg(std::vector<uint8_t> &&p, std::vector<uint8_t> &reply)
+static std::string do_load_nbg(std::vector<uint8_t> &&req, std::vector<uint8_t> &reply)
 {
+	if (req.size() < sizeof(npu_load_req)) return "short request";
+	std::vector<uint8_t> p(req.begin() + sizeof(npu_load_req), req.end());
+	req.clear(); req.shrink_to_fit();
 	std::lock_guard<std::mutex> lk(g_model_mu);
-	if (g_model) return "a model is already loaded (one model at a time): unload it first";
+	if (g_model) return "this engine has a model already";
 	uint32_t mo, re, pr; char drv[32]; chip_identity(&mo, &re, &pr, drv);
 	if (mo != 0x8000 || re != 0x7100 || pr != 0x45080001) { char b[160]; snprintf(b, sizeof b, "unknown NPU chip %x/%x/%x", mo, re, pr); return b; }
 	if (p.size() < 8) return "short request";
@@ -232,7 +277,7 @@ static std::string do_load_nbg(std::vector<uint8_t> &&p, std::vector<uint8_t> &r
 	if (n_in == 0 || n_out == 0 || n_in > 16 || n_out > 16 || p.size() <= 8 + tl) return "bad tensor description";
 	uint32_t avail = meminfo_kb("MemAvailable:");
 	size_t nbg_len = p.size() - 8 - tl;
-	if (nbg_len / 1024 * 2 + 32 * 1024 > avail) return "not enough memory for the compiled graph";
+	if (nbg_len / 1024 * 2 + 32 * 1024 > avail) { char b[200]; snprintf(b, sizeof b, "not enough memory on the NPU: the compiled graph needs about %zu MB, %u MB are free (stop a loaded model first)", nbg_len / 1024 / 1024 * 2 + 32, avail / 1024); return b; }
 	auto m = std::make_unique<Model>();
 	m->nbg_mode = true; m->n_in = n_in; m->n_out = n_out;
 	m->info.resize(n_in + n_out);
@@ -255,7 +300,7 @@ static std::string do_load_nbg(std::vector<uint8_t> &&p, std::vector<uint8_t> &r
 	auto op = m->graph->CreateOperation<tim::vx::ops::NBG>(m->nbg.data(), n_in, n_out);
 	op->BindInputs(m->tin).BindOutputs(m->tout);
 	if (!m->graph->Compile()) return "the NPU did not accept the compiled graph (made by another driver version or chip?)";
-	npu_load_reply lr = { n_in, n_out, (uint32_t)((now_us() - t0) / 1000), avail > meminfo_kb("MemAvailable:") ? avail - meminfo_kb("MemAvailable:") : 0 };
+	npu_load_reply lr = { n_in, n_out, (uint32_t)((now_us() - t0) / 1000), avail > meminfo_kb("MemAvailable:") ? avail - meminfo_kb("MemAvailable:") : 0, 0 };
 	uint32_t zero = 0;
 	reply.resize(sizeof lr + tl + 4);
 	memcpy(reply.data(), &lr, sizeof lr);
@@ -330,7 +375,7 @@ static bool send_msg(int fd, const npu_hdr &req, bool err, const void *p, size_t
 {
 	static std::mutex wmu; std::lock_guard<std::mutex> lk(wmu);
 	bool pad = usb && ((sizeof(npu_hdr) + n) % 1024) == 0;
-	npu_hdr h = { NPU_MAGIC, req.type, (uint16_t)((err ? NPU_FLAG_ERROR : 0) | (pad ? NPU_FLAG_PAD : 0)), req.tag, (uint32_t)n };
+	npu_hdr h = { NPU_MAGIC, req.type, (uint16_t)((err ? NPU_FLAG_ERROR : 0) | (pad ? NPU_FLAG_PAD : 0)), req.tag, req.model, (uint32_t)n };
 	static std::vector<uint8_t> buf; buf.resize(sizeof h + n + (pad ? 1 : 0));
 	memcpy(buf.data(), &h, sizeof h);
 	if (n) memcpy(buf.data() + sizeof h, p, n);
@@ -367,6 +412,12 @@ static int engine_main(int fd)
 		case NPU_LOAD: e = do_load(std::move(payload), out); break;
 		case NPU_LOAD_NBG: e = do_load_nbg(std::move(payload), out); break;
 		case NPU_RUN: e = do_run(payload, out); break;
+		case NPU_OPS: {
+			std::lock_guard<std::mutex> lk(g_model_mu);
+			if (!g_model) { e = "no model loaded"; break; }
+			uint32_t n = g_model->ops.size(); out.resize(4 + n * sizeof(npu_op_stat)); memcpy(out.data(), &n, 4);
+			if (n) memcpy(out.data() + 4, g_model->ops.data(), n * sizeof(npu_op_stat));
+			break; }
 		default: e = "the engine does not know this request";
 		}
 		if ((h.type == NPU_LOAD || h.type == NPU_LOAD_NBG) && e.empty()) { if (!freopen("/dev/null", "w", stderr)) {} }   /* the delegate prints on every run: only the load is logged */
@@ -375,21 +426,38 @@ static int engine_main(int fd)
 	}
 }
 
-struct Engine { pid_t pid = -1; int fd = -1; bool loaded = false; };
-static Engine g_eng;
-#define ENGINE_LOG "/tmp/npu_engine.log"
+/* one engine per model; the table is guarded by g_eng_mu, every engine by its own mutex (one request at a time on its socket) */
+struct Engine {
+	uint32_t id = 0;
+	pid_t pid = -1;
+	int fd = -1;
+	std::mutex mu;
+	std::string key, name, plan;
+	std::vector<uint8_t> desc;   /* the LOAD reply without the compiled graph: npu_load_reply + tensors + u32 0 (for DESCRIBE and attaching) */
+	npu_load_reply lr {};
+	bool from_nbg = false;
+	uint64_t loaded_us = 0;
+	uint32_t runs = 0;
+	std::string log;
+};
+static std::map<uint32_t, std::shared_ptr<Engine>> g_engines;
+static std::mutex g_eng_mu, g_load_mu;
+static uint32_t g_next_id = 1;
 
-static void engine_kill()
+static std::shared_ptr<Engine> engine_get(uint32_t id) { std::lock_guard<std::mutex> lk(g_eng_mu); auto it = g_engines.find(id); return it == g_engines.end() ? nullptr : it->second; }
+static size_t engine_count() { std::lock_guard<std::mutex> lk(g_eng_mu); return g_engines.size(); }
+
+static void engine_kill(Engine &e)
 {
-	if (g_eng.pid > 0) { kill(g_eng.pid, SIGKILL); int st; waitpid(g_eng.pid, &st, 0); logf_("engine %d stopped", (int)g_eng.pid); }
-	if (g_eng.fd >= 0) close(g_eng.fd);
-	g_eng = Engine();
+	if (e.pid > 0) { kill(e.pid, SIGKILL); int st; waitpid(e.pid, &st, 0); logf_("engine %d of model %u stopped", (int)e.pid, e.id); }
+	if (e.fd >= 0) close(e.fd);
+	e.pid = -1; e.fd = -1;
 }
-static bool engine_spawn()
+static bool engine_spawn(Engine &e)
 {
 	int sv[2];
 	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) < 0) return false;
-	int lg = open(ENGINE_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+	int lg = open(e.log.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
 	pid_t pid = fork();
 	if (pid < 0) { close(sv[0]); close(sv[1]); if (lg >= 0) close(lg); return false; }
 	if (pid == 0) {
@@ -403,45 +471,44 @@ static bool engine_spawn()
 	}
 	close(sv[1]); if (lg >= 0) close(lg);
 	fcntl(sv[0], F_SETFD, FD_CLOEXEC);
-	g_eng.pid = pid; g_eng.fd = sv[0]; g_eng.loaded = false;
+	e.pid = pid; e.fd = sv[0];
 	return true;
 }
-static std::string engine_log_tail()
+static std::string engine_log_tail(const Engine &e)
 {
-	std::string s = read_file(ENGINE_LOG), keep;
+	std::string s = read_file(e.log.c_str()), keep;
 	size_t pos = 0; int lines = 0;
 	std::vector<std::string> v;
-	while (pos < s.size()) { size_t e = s.find('\n', pos); if (e == std::string::npos) e = s.size(); v.push_back(s.substr(pos, e - pos)); pos = e + 1; }
+	while (pos < s.size()) { size_t q = s.find('\n', pos); if (q == std::string::npos) q = s.size(); v.push_back(s.substr(pos, q - pos)); pos = q + 1; }
 	for (size_t i = v.size(); i > 0 && lines < 4; i--) { if (v[i - 1].empty() || v[i - 1].find("Tensor has not beed inserted") != std::string::npos) continue; keep = v[i - 1] + (keep.empty() ? "" : " | ") + keep; lines++; }
 	return keep.size() > 400 ? keep.substr(keep.size() - 400) : keep;
 }
-/* forward a request to the engine and wait for the reply; false = the engine is gone or silent (err_text says why) */
-static bool engine_call(const Msg &req, int timeout_s, npu_hdr &rh, std::vector<uint8_t> &rp, std::string &err_text)
+/* forward a request to an engine (its mutex held) and wait for the reply; false = the engine is gone or silent (err_text says why, the engine is stopped) */
+static bool engine_call(Engine &g, const npu_hdr &h0, const uint8_t *p, size_t n, int timeout_s, npu_hdr &rh, std::vector<uint8_t> &rp, std::string &err_text)
 {
-	bool wrote;
-	{ npu_hdr h = req.h; h.flags = 0; npu_hdr hh = h; hh.len = req.payload.size();
-	  wrote = write_all(g_eng.fd, &hh, sizeof hh) && (req.payload.empty() || write_all(g_eng.fd, req.payload.data(), req.payload.size())); }
+	npu_hdr hh = h0; hh.flags = 0; hh.len = n;
+	bool wrote = write_all(g.fd, &hh, sizeof hh) && (!n || write_all(g.fd, p, n));
 	auto dead = [&](const char *what) {
-		int st = 0; pid_t r = waitpid(g_eng.pid, &st, WNOHANG);
+		int st = 0; pid_t r = waitpid(g.pid, &st, WNOHANG);
 		char b[160];
-		if (r == g_eng.pid && WIFSIGNALED(st)) snprintf(b, sizeof b, "the engine process %s: killed by signal %d (%s)", what, WTERMSIG(st), strsignal(WTERMSIG(st)));
-		else if (r == g_eng.pid) snprintf(b, sizeof b, "the engine process %s: exit status %d", what, WEXITSTATUS(st));
+		if (r == g.pid && WIFSIGNALED(st)) snprintf(b, sizeof b, "the engine process %s: killed by signal %d (%s)", what, WTERMSIG(st), strsignal(WTERMSIG(st)));
+		else if (r == g.pid) snprintf(b, sizeof b, "the engine process %s: exit status %d", what, WEXITSTATUS(st));
 		else snprintf(b, sizeof b, "the engine process %s", what);
-		err_text = b; std::string t = engine_log_tail(); if (!t.empty()) err_text += ". Last lines of its log: " + t;
-		g_eng.pid = r == g_eng.pid ? -1 : g_eng.pid;   /* already reaped */
-		engine_kill();
+		err_text = b; std::string t = engine_log_tail(g); if (!t.empty()) err_text += ". Last lines of its log: " + t;
+		if (r == g.pid) g.pid = -1;   /* already reaped */
+		engine_kill(g);
 	};
 	if (!wrote) { dead("went away"); return false; }
-	auto wait_read = [&](void *b, size_t n) {
-		uint8_t *p = (uint8_t *)b;
-		while (n) {
-			struct pollfd pf = { g_eng.fd, POLLIN, 0 };
+	auto wait_read = [&](void *b, size_t len) {
+		uint8_t *q = (uint8_t *)b;
+		while (len) {
+			struct pollfd pf = { g.fd, POLLIN, 0 };
 			int pr = poll(&pf, 1, timeout_s * 1000);
 			if (pr == 0) return 2;
 			if (pr < 0) { if (errno == EINTR) continue; return 1; }
-			ssize_t r = read(g_eng.fd, p, n);
+			ssize_t r = read(g.fd, q, len);
 			if (r <= 0) { if (r < 0 && errno == EINTR) continue; return 1; }
-			p += r; n -= r;
+			q += r; len -= r;
 		}
 		return 0;
 	};
@@ -451,6 +518,15 @@ static bool engine_call(const Msg &req, int timeout_s, npu_hdr &rh, std::vector<
 	if (rc == 2) { char b[40]; snprintf(b, sizeof b, "did not answer in %d s (killed)", timeout_s); dead(b); return false; }
 	if (rc != 0) { dead("crashed"); return false; }
 	return true;
+}
+static void engine_remove(uint32_t id)
+{
+	std::shared_ptr<Engine> e;
+	{ std::lock_guard<std::mutex> lk(g_eng_mu); auto it = g_engines.find(id); if (it == g_engines.end()) return; e = it->second; g_engines.erase(it); }
+	std::lock_guard<std::mutex> lk(e->mu);   /* waits for a RUN in progress */
+	engine_kill(*e);
+	unlink(e->log.c_str());
+	logf_("model %u (%s) unloaded", id, e->name.c_str());
 }
 
 static void handle(int in_fd, Msg &m)
@@ -463,23 +539,91 @@ static void handle(int in_fd, Msg &m)
 		chip_identity(&hl.chip_model, &hl.chip_revision, &hl.chip_product, hl.driver);
 		hl.chip_ok = hl.chip_model == 0x8000 && hl.chip_revision == 0x7100 && hl.chip_product == 0x45080001;
 		hl.mem_total_kb = meminfo_kb("MemTotal:"); hl.mem_avail_kb = meminfo_kb("MemAvailable:");
-		hl.model_loaded = g_eng.loaded;
+		hl.models = engine_count();
 		reply(in_fd, m.h, false, &hl, sizeof hl); break; }
 	case NPU_LOAD: case NPU_LOAD_NBG: {
-		if (g_eng.pid > 0) { reply_err(in_fd, m.h, "a model is already loaded (one model at a time): unload it first"); break; }
-		if (!engine_spawn()) { reply_err(in_fd, m.h, "cannot start the engine process"); break; }
+		if (m.payload.size() < sizeof(npu_load_req)) { reply_err(in_fd, m.h, "short request (an older host library?)"); break; }
+		npu_load_req lq; memcpy(&lq, m.payload.data(), sizeof lq);
+		lq.key[sizeof lq.key - 1] = 0; lq.name[sizeof lq.name - 1] = 0;
+		{   /* the same model is loaded already (another program on the board loaded it, or two loaded it at once): attach */
+			std::lock_guard<std::mutex> lk(g_eng_mu);
+			for (auto &kv : g_engines) if (lq.key[0] && kv.second->key == lq.key) {
+				npu_hdr rh = m.h; rh.model = kv.first;
+				std::vector<uint8_t> d = kv.second->desc; uint32_t one = 1; memcpy(d.data() + offsetof(npu_load_reply, attached), &one, 4);
+				reply(in_fd, rh, false, d.data(), d.size());
+				return;
+			}
+		}
+		auto e = std::make_shared<Engine>();
+		{ std::lock_guard<std::mutex> lk(g_eng_mu); e->id = g_next_id++; }
+		e->key = lq.key; e->name = lq.name; e->from_nbg = m.h.type == NPU_LOAD_NBG;
+		if (e->from_nbg) e->plan = "npu";
+		else if (lq.flags & NPU_LOAD_CPU_ONLY) e->plan = "cpu";
+		else {
+			std::string d; for (int i = 0; i < NPU_MAX_DENY && lq.deny_ops[i]; i++) d += (d.empty() ? "" : ",") + std::to_string(lq.deny_ops[i]);
+			e->plan = d.empty() ? ((lq.flags & NPU_LOAD_NO_SPLIT) ? "npu-nosplit" : "npu") : "mixed:" + d + ((lq.flags & NPU_LOAD_NO_SPLIT) ? ":nosplit" : "");
+		}
+		e->log = "/tmp/npu_engine." + std::to_string(e->id) + ".log";
+		if (!engine_spawn(*e)) { reply_err(in_fd, m.h, "cannot start the engine process"); break; }
 		npu_hdr rh; std::string et;
-		if (!engine_call(m, 180, rh, out, et)) { reply_err(in_fd, m.h, et); break; }
-		if (rh.flags & NPU_FLAG_ERROR) { std::string t = engine_log_tail(); std::string msg((const char *)out.data(), out.size()); engine_kill(); reply_err(in_fd, m.h, msg); break; }
-		g_eng.loaded = true;
-		reply(in_fd, m.h, false, out.data(), out.size()); break; }
+		std::lock_guard<std::mutex> elk(e->mu);
+		if (!engine_call(*e, m.h, m.payload.data(), m.payload.size(), 600, rh, out, et)) { unlink(e->log.c_str()); reply_err(in_fd, m.h, et); break; }
+		if (rh.flags & NPU_FLAG_ERROR) { std::string msg((const char *)out.data(), out.size()); engine_kill(*e); unlink(e->log.c_str()); reply_err(in_fd, m.h, msg); break; }
+		if (out.size() < sizeof(npu_load_reply)) { engine_kill(*e); reply_err(in_fd, m.h, "short reply of the engine"); break; }
+		memcpy(&e->lr, out.data(), sizeof e->lr);
+		size_t tl = (size_t)(e->lr.n_inputs + e->lr.n_outputs) * sizeof(npu_tensor);
+		e->desc.assign(out.begin(), out.begin() + sizeof(npu_load_reply) + tl);
+		e->desc.insert(e->desc.end(), 4, 0);
+		e->loaded_us = now_us();
+		{ std::lock_guard<std::mutex> lk(g_eng_mu); g_engines[e->id] = e; }
+		logf_("model %u (%s) loaded: %u ms, %u MB; %zu model(s) now", e->id, e->name.c_str(), e->lr.load_ms, e->lr.mem_used_kb / 1024, engine_count());
+		npu_hdr oh = m.h; oh.model = e->id;
+		reply(in_fd, oh, false, out.data(), out.size()); break; }
 	case NPU_RUN: {
-		if (!g_eng.loaded) { reply_err(in_fd, m.h, "no model loaded"); break; }
-		npu_hdr rh; std::string et;
-		if (!engine_call(m, 30, rh, out, et)) { reply_err(in_fd, m.h, et); break; }
+		auto e = engine_get(m.h.model);
+		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU (stopped by another program?)"); break; }
+		npu_hdr rh; std::string et; bool ok;
+		{ std::lock_guard<std::mutex> lk(e->mu);
+		  if (e->pid <= 0) { reply_err(in_fd, m.h, "the model was stopped"); break; }
+		  ok = engine_call(*e, m.h, m.payload.data(), m.payload.size(), RUN_TIMEOUT_S, rh, out, et); if (ok) e->runs++; }
+		if (!ok) { engine_remove(m.h.model); reply_err(in_fd, m.h, et + " (the model is unloaded)"); break; }
 		if (rh.flags & NPU_FLAG_ERROR) reply_err(in_fd, m.h, std::string((const char *)out.data(), out.size())); else reply(in_fd, m.h, false, out.data(), out.size());
 		break; }
-	case NPU_UNLOAD: engine_kill(); reply(in_fd, m.h, false, nullptr, 0); break;
+	case NPU_OPS: {
+		auto e = engine_get(m.h.model);
+		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU"); break; }
+		npu_hdr rh; std::string et; bool ok;
+		{ std::lock_guard<std::mutex> lk(e->mu); if (e->pid <= 0) { reply_err(in_fd, m.h, "the model was stopped"); break; }
+		  ok = engine_call(*e, m.h, nullptr, 0, 30, rh, out, et); }
+		if (!ok) { engine_remove(m.h.model); reply_err(in_fd, m.h, et); break; }
+		if (rh.flags & NPU_FLAG_ERROR) reply_err(in_fd, m.h, std::string((const char *)out.data(), out.size())); else reply(in_fd, m.h, false, out.data(), out.size());
+		break; }
+	case NPU_UNLOAD: {
+		if (m.h.model == NPU_ALL_MODELS) {
+			std::vector<uint32_t> ids; { std::lock_guard<std::mutex> lk(g_eng_mu); for (auto &kv : g_engines) ids.push_back(kv.first); }
+			for (uint32_t id : ids) engine_remove(id);
+		} else if (!engine_get(m.h.model)) { reply_err(in_fd, m.h, "no such model on the NPU"); break; }
+		else engine_remove(m.h.model);
+		reply(in_fd, m.h, false, nullptr, 0); break; }
+	case NPU_LIST: {
+		std::lock_guard<std::mutex> lk(g_eng_mu);
+		uint32_t n = g_engines.size();
+		out.resize(4 + n * sizeof(npu_model_entry)); memcpy(out.data(), &n, 4);
+		size_t off = 4;
+		for (auto &kv : g_engines) {
+			const Engine &e = *kv.second;
+			npu_model_entry me; memset(&me, 0, sizeof me);
+			me.id = e.id; me.n_inputs = e.lr.n_inputs; me.n_outputs = e.lr.n_outputs; me.load_ms = e.lr.load_ms; me.mem_used_kb = e.lr.mem_used_kb;
+			me.runs = e.runs; me.age_s = (uint32_t)((now_us() - e.loaded_us) / 1000000); me.from_nbg = e.from_nbg;
+			snprintf(me.key, sizeof me.key, "%s", e.key.c_str()); snprintf(me.name, sizeof me.name, "%s", e.name.c_str()); snprintf(me.plan, sizeof me.plan, "%s", e.plan.c_str());
+			memcpy(out.data() + off, &me, sizeof me); off += sizeof me;
+		}
+		reply(in_fd, m.h, false, out.data(), out.size()); break; }
+	case NPU_DESCRIBE: {
+		auto e = engine_get(m.h.model);
+		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU"); break; }
+		std::vector<uint8_t> d = e->desc; uint32_t one = 1; memcpy(d.data() + offsetof(npu_load_reply, attached), &one, 4);
+		reply(in_fd, m.h, false, d.data(), d.size()); break; }
 	case NPU_PING: reply(in_fd, m.h, false, m.payload.data(), m.payload.size()); break;
 	default: reply_err(in_fd, m.h, "unknown request type");
 	}
@@ -492,6 +636,10 @@ static void worker(int in_fd)
 		g_wstate = "waiting for a request";
 		{ std::unique_lock<std::mutex> lk(q_mu); q_cv.wait(lk, [] { return !q.empty() || q_closed; }); if (q.empty()) return; m = std::move(q.front()); q.pop_front(); q_cv.notify_all(); }
 		g_wstate = "handling a request";
+		if (m.h.type == NPU_LOAD || m.h.type == NPU_LOAD_NBG) {   /* minutes for a big model: the loaded models keep running meanwhile */
+			std::thread([in_fd](Msg mm) { std::lock_guard<std::mutex> lk(g_load_mu); handle(in_fd, mm); g_tx++; }, std::move(m)).detach();
+			continue;
+		}
 		handle(in_fd, m);
 		g_tx++;
 	}
@@ -619,11 +767,10 @@ int main(int argc, char **argv)
 		}
 lost:
 		if (actx) sys_io_destroy(actx);
-		logf_("host disconnected (errno %d): the model is freed", errno);
+		logf_("host disconnected (errno %d): the models stay loaded", errno);
 		{ std::lock_guard<std::mutex> lk(q_mu); q_closed = true; q_cv.notify_all(); }
 		close(out); close(in);
 		w.join();
-		engine_kill();
 		/* ep0: wait for the UNBIND event (the function is rebuilt from the descriptors again), but not for ever */
 		for (int i = 0; i < 30 && !g_rebind; i++) usleep(100000);
 		g_ev_stop = true;

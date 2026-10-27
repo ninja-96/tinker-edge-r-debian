@@ -1,40 +1,19 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 4af0ff9..32588a9 100644
+index 3fb4d6e..2bd4ef0 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -67,3 +67,6 @@ add_library(vx_delegate SHARED ${VX_DELEGATES_SRCS})
- target_link_libraries(vx_delegate ${VX_DELEGATE_DEPENDENCIES})
- 
- add_subdirectory(examples/minimal)
+@@ -99,3 +99,6 @@ add_subdirectory(examples/minimal)
+ if(TFLITE_ENABLE_MULTI_DEVICE)
+   add_subdirectory(examples/multi_device)
+ endif()
 +if(EXISTS /w/server/CMakeLists.txt)
 +  add_subdirectory(/w/server ${CMAKE_BINARY_DIR}/npu_server)
 +endif()
-diff --git a/cmake/tflite.cmake b/cmake/tflite.cmake
-index cdf2b7d..71bf357 100644
---- a/cmake/tflite.cmake
-+++ b/cmake/tflite.cmake
-@@ -447,14 +447,14 @@ list(APPEND TFLITE_BENCHMARK_SRCS
-     ${TFLITE_SOURCE_DIR}/tools/delegates/external_delegate_provider.cc
-     ${TFLITE_SOURCE_DIR}/delegates/external/external_delegate.cc
-   )
--add_subdirectory(${TFLITE_SOURCE_DIR}/tools/benchmark)
-+add_subdirectory(${TFLITE_SOURCE_DIR}/tools/benchmark ${CMAKE_BINARY_DIR}/benchmark)
- 
- # The label_image example.
- list(APPEND TFLITE_LABEL_IMAGE_SRCS
-     ${TFLITE_SOURCE_DIR}/tools/delegates/external_delegate_provider.cc
-     ${TFLITE_SOURCE_DIR}/delegates/external/external_delegate.cc
-   )
--add_subdirectory(${TFLITE_SOURCE_DIR}/examples/label_image)
-+add_subdirectory(${TFLITE_SOURCE_DIR}/examples/label_image ${CMAKE_BINARY_DIR}/label_image)
- 
- # Python interpreter wrapper.
- add_library(_pywrap_tensorflow_interpreter_wrapper SHARED EXCLUDE_FROM_ALL
 diff --git a/delegate_main.cc b/delegate_main.cc
-index 29eac51..b83074c 100644
+index 1f6e8e9..8264473 100644
 --- a/delegate_main.cc
 +++ b/delegate_main.cc
-@@ -16,6 +16,10 @@ limitations under the License.
+@@ -25,6 +25,10 @@
  #include "delegate_main.h"
  
  #include <algorithm>
@@ -45,7 +24,7 @@ index 29eac51..b83074c 100644
  #include <cstring>
  #include <iostream>
  #include <limits>
-@@ -125,10 +129,24 @@ std::vector<uint32_t> TfLiteTensorDims(const TfLiteTensor* tensor) {
+@@ -140,10 +144,24 @@ std::vector<uint32_t> TfLiteTensorDims(const TfLiteTensor* tensor) {
    return dims;
  }
  
@@ -71,7 +50,7 @@ index 29eac51..b83074c 100644
      case kTfLiteInt32:
        return tim::vx::DataType::INT32;
      case kTfLiteUInt8:
-@@ -159,11 +177,29 @@ bool IsVariableTensor(const TfLiteTensor* tensor) {
+@@ -172,11 +190,29 @@ bool IsVariableTensor(const TfLiteTensor* tensor) {
    return tensor->is_variable;
  }
  
@@ -101,7 +80,7 @@ index 29eac51..b83074c 100644
    std::vector<uint32_t> dims(TfLiteTensorDims(tensor));
    tim::vx::ShapeType whcn_shape(dims.size());
  
-@@ -202,7 +238,7 @@ tim::vx::TensorSpec CreateTensorSpec(
+@@ -215,7 +251,7 @@ tim::vx::TensorSpec CreateTensorSpec(
        quantization =
            tim::vx::Quantization(qtype, vx_channel_dim, scales, zero_points);
      } else {
@@ -110,7 +89,7 @@ index 29eac51..b83074c 100644
      }
  
      return tim::vx::TensorSpec(datatype, whcn_shape, attr, quantization);
-@@ -272,6 +308,54 @@ bool TransposeTensorData(const TfLiteTensor* tensor,
+@@ -285,6 +321,54 @@ bool TransposeTensorData(const TfLiteTensor* tensor,
    return true;
  }
  
@@ -165,7 +144,7 @@ index 29eac51..b83074c 100644
  std::shared_ptr<tim::vx::Tensor> CreateTensor(
      std::shared_ptr<tim::vx::Graph>& graph,
      const TfLiteTensor* tensor,
-@@ -286,11 +370,48 @@ std::shared_ptr<tim::vx::Tensor> CreateTensor(
+@@ -299,11 +383,48 @@ std::shared_ptr<tim::vx::Tensor> CreateTensor(
        break;
      case tim::vx::TensorAttribute::CONSTANT:
        tensor_data = reinterpret_cast<const uint8_t*>(tensor->data.raw_const);
@@ -216,14 +195,33 @@ index 29eac51..b83074c 100644
          }
        }
        break;
-@@ -500,6 +621,49 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
-       auto& states = op_info.states;
-       auto& builtin_data = op_info.builtin_data;
+@@ -364,6 +485,18 @@ bool Delegate::SupportedOp(TfLiteContext* context,
+     }
+   }
  
++  // rnd/verisilicon: VX_DENY_OPS="22,14" (builtin codes) leaves these operators to the CPU (TensorFlow Lite / XNNPACK): the npu_server sets it
++  // for a plan made by autotune (an operator that is slower on the NPU, or wrong there)
++  static const std::vector<int> deny = [] {
++    // never on this NPU (driver 6.4.6 with TIM-VX main): comparisons, logical operators and CAST (bool tensors) crash the engine in layout inference
++    std::vector<int> v = {53 /* CAST */, 58 /* LESS */, 61 /* GREATER */, 62 /* GREATER_EQUAL */, 63 /* LESS_EQUAL */, 71 /* EQUAL */, 72 /* NOT_EQUAL */,
++                          84 /* LOGICAL_OR */, 86 /* LOGICAL_AND */, 87 /* LOGICAL_NOT */};
++    if (const char* e = getenv("VX_DENY_OPS"))
++      for (const char* p = e; *p;) { char* q; long c = strtol(p, &q, 10); if (q == p) { p++; continue; } v.push_back((int)c); p = q; }
++    return v;
++  }();
++  if (std::find(deny.begin(), deny.end(), registration->builtin_code) != deny.end()) return false;
++
+   const auto& supported_builtins = vx::op_map::SupportedBuiltinOps();
+   const auto& it = supported_builtins.find(
+       static_cast<TfLiteBuiltinOperator>(registration->builtin_code));
+@@ -611,6 +744,48 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+       std::vector<std::shared_ptr<tim::vx::Operation>> before_op_vector;
+       std::vector<std::shared_ptr<tim::vx::Operation>> after_op_vector;
+ #endif
 +      // rnd/verisilicon: Dequantize over a constant (float16 or int8/uint8 weights) is folded here on the CPU into a float32 constant, so
 +      // float16-weight models run and the NPU never sees the conversion op.
 +      if (builtin_code == kTfLiteBuiltinDequantize && custom_name.empty() && inputs.size() == 1 && outputs.size() == 1 &&
-+          tensors_[outputs[0]].get() == nullptr) {
++          tensors_.find(outputs[0]) == tensors_.end()) {   // find, not []: tensors_ is a map, [] would insert an empty entry
 +        const TfLiteTensor* src = &(context->tensors[inputs[0]]);
 +        const TfLiteTensor* dst = &(context->tensors[outputs[0]]);
 +        if (IsConstTensor(src) && dst->type == kTfLiteFloat32 &&
@@ -262,34 +260,33 @@ index 29eac51..b83074c 100644
 +          continue;
 +        }
 +      }
-+
+ 
        std::vector<int> inputs_outputs;
        std::copy(
-           inputs.begin(), inputs.end(), std::back_inserter(inputs_outputs));
-@@ -561,6 +725,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
-     TFLITE_LOG(INFO) << "Verifying graph";
-     // Do layout inference and get a new graph(first) and a tensor map(second).
-     layout_infered_ = tim::transform::LayoutInference(graph_, context_);
-+    // rnd/verisilicon: VX_NBG_EXPORT=<file> writes the compiled graph (NBG) of this subgraph to the file (to be loaded later without the compiler)
-+    if (const char* nbg_path = getenv("VX_NBG_EXPORT")) {
-+      size_t nbg_size = 0;
-+      if (layout_infered_.first->CompileToBinary(nullptr, &nbg_size) && nbg_size) {
-+        std::vector<char> nbg(nbg_size);
-+        if (layout_infered_.first->CompileToBinary(nbg.data(), &nbg_size)) {
-+          FILE* f = fopen(nbg_path, "wb");
-+          if (f) { fwrite(nbg.data(), 1, nbg_size, f); fclose(f); TFLITE_LOG(INFO) << "NBG written: " << nbg_size << " bytes"; }
+@@ -768,6 +943,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+         compiled_ = true;
+       }
+ #else
++      // rnd/verisilicon: VX_NBG_EXPORT=<file> writes the compiled graph (NBG) of this subgraph to the file (to be loaded later without the compiler)
++      if (const char* nbg_path = getenv("VX_NBG_EXPORT")) {
++        size_t nbg_size = 0;
++        if (layout_infered_.first->CompileToBinary(nullptr, &nbg_size) && nbg_size) {
++          std::vector<char> nbg(nbg_size);
++          if (layout_infered_.first->CompileToBinary(nbg.data(), &nbg_size)) {
++            FILE* f = fopen(nbg_path, "wb");
++            if (f) { fwrite(nbg.data(), 1, nbg_size, f); fclose(f); TFLITE_LOG(TFLITE_LOG_INFO, "NBG written: %zu bytes", nbg_size); }
++          }
++        } else {
++          TFLITE_LOG_PROD(TFLITE_LOG_WARNING, "NBG export failed");
 +        }
-+      } else {
-+        TFLITE_LOG(WARN) << "NBG export failed";
 +      }
-+    }
-     compiled_ = layout_infered_.first->Compile();
-     if (!compiled_) {
-       TFLITE_LOG(FATAL) << "Failed to verify graph";
-@@ -583,7 +760,18 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
-         reinterpret_cast<const void*>(tf_tensor.data.raw_const);
-     // TODO(derekjchow): Check result
-     auto infered_input_tensor = layout_infered_.second[src_input_tensor];
+       compiled_ = layout_infered_.first->Compile();
+ #endif
+       if (!compiled_) {
+@@ -801,7 +989,18 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+     tensor_handles_[tensor_idx]->CopyDataToTensor(tensor_data,
+                                             input_spec.GetByteSize());
+ #else
 -    infered_input_tensor->CopyDataToTensor(const_cast<void*>(tensor_data));
 +    if (ShiftInt8(&tf_tensor)) {
 +      std::vector<uint8_t> x(reinterpret_cast<const uint8_t*>(tensor_data), reinterpret_cast<const uint8_t*>(tensor_data) + tf_tensor.bytes);
@@ -303,26 +300,24 @@ index 29eac51..b83074c 100644
 +    } else {
 +      infered_input_tensor->CopyDataToTensor(const_cast<void*>(tensor_data));
 +    }
-   }
+ #endif
+     } else {
+       TFLITE_LOG_PROD(TFLITE_LOG_WARNING,
+@@ -852,7 +1051,16 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+       }
  
-   TFLITE_LOG(INFO) << "Invoking graph";
-@@ -602,7 +790,18 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
-     void* tensor_data = reinterpret_cast<void*>(tf_tensor.data.raw);
-     // TODO(derekjchow): Check result
-     auto infered_output_tesnor = layout_infered_.second[src_output_tensor];
--    infered_output_tesnor->CopyDataFromTensor(tensor_data);
-+    if (ShiftInt8(&tf_tensor)) {
-+      infered_output_tesnor->CopyDataFromTensor(tensor_data);
-+      uint8_t* o = reinterpret_cast<uint8_t*>(tensor_data);
-+      for (size_t k = 0; k < tf_tensor.bytes; k++) o[k] ^= 0x80;
-+    } else if (tf_tensor.type == kTfLiteFloat32 && Fp16Mode()) {
-+      size_t n = tf_tensor.bytes / 4;
-+      std::vector<uint16_t> h(n);
-+      infered_output_tesnor->CopyDataFromTensor(h.data());
-+      HalfToFloat(h.data(), reinterpret_cast<float*>(tensor_data), n);
-+    } else {
-+      infered_output_tesnor->CopyDataFromTensor(tensor_data);
-+    }
-   }
- 
-   // Copy output states to input states
+       auto infered_output_tesnor = layout_infered_.second[src_output_tensor];
+-      if (infered_output_tesnor) {
++      if (infered_output_tesnor && ShiftInt8(&tf_tensor)) {
++        infered_output_tesnor->CopyDataFromTensor(tensor_data);
++        uint8_t* o = reinterpret_cast<uint8_t*>(tensor_data);
++        for (size_t k = 0; k < tf_tensor.bytes; k++) o[k] ^= 0x80;
++      } else if (infered_output_tesnor && tf_tensor.type == kTfLiteFloat32 && Fp16Mode()) {
++        size_t n = tf_tensor.bytes / 4;
++        std::vector<uint16_t> h(n);
++        infered_output_tesnor->CopyDataFromTensor(h.data());
++        HalfToFloat(h.data(), reinterpret_cast<float*>(tensor_data), n);
++      } else if (infered_output_tesnor) {
+         infered_output_tesnor->CopyDataFromTensor(tensor_data);
+       } else {
+         TFLITE_LOG(TFLITE_LOG_ERROR,

@@ -1,26 +1,52 @@
 # RK3399Pro NPU on the Tinker Edge R: TensorFlow Lite
 
-> **Status (release 0.4): TensorFlow Lite models run on the NPU through an open software stack; RKNN is gone.** The NPU die runs Linux 4.4.185 and the
-> Vivante driver from Rockchip's firmware (closed, Apache-2.0 repository `airockchip/RK3399Pro_npu`, used as it is except for one device tree
-> change). Everything above the driver is open: [TIM-VX](https://github.com/VeriSilicon/TIM-VX), VeriSilicon's TFLite delegate for TensorFlow Lite 2.6.0,
-> our small server on the NPU die, our USB channel and the Python module `rk3399pro_npu` on the board. The numbers below were measured on a board
-> (release 0.4 image); details of the research behind them are in [NPU-RESEARCH.md](NPU-RESEARCH.md) and `npu-open/`.
+> **Status (release 0.4.1): TensorFlow Lite 2.21 models run on the NPU through an open software stack**, several at once and from several programs.
+> The NPU die runs Linux 4.4.185 and the Vivante driver from Rockchip's firmware (closed, Apache-2.0 repository `airockchip/RK3399Pro_npu`, used as it is except for
+> one device tree change). Everything above the driver is open: [TIM-VX](https://github.com/VeriSilicon/TIM-VX), VeriSilicon's TFLite VX delegate, TensorFlow Lite 2.21
+> with XNNPACK, our server on the NPU die, our USB channel, the daemon `npu-daemon`, the C++ library `librk3399pro_npu` and its Python module `rk3399pro_npu`.
+> The numbers below were measured on a board; the research behind them is in [NPU-RESEARCH.md](NPU-RESEARCH.md) and `npu-open/`.
 
 ## How it works
 
 ```
- board (RK3399Pro host, Debian 13)                         NPU die (2 x Cortex-A35, 2 GB, Linux 4.4.185 from RAM)
- Python 3: rk3399pro_npu.Model("net.tflite")  -- USB 3 -->  npu_server (our)  -->  child process "engine":
-   own bulk channel (FunctionFS "ntb"),                       TensorFlow Lite 2.6 + VX delegate (VeriSilicon) -> TIM-VX -> libVSC/galcore (Rockchip)
-   38-52 MB/s, 0.3-0.5 ms for a small message
+ board (RK3399Pro host, Debian 13)                                  NPU die (2 x Cortex-A35, 2 GB, Linux 4.4.185 from RAM)
+ program A: rk3399pro_npu.Model("a.tflite") --+                        npu_server (our): one child process ("engine") per model:
+ program B: rk3399pro_npu.Model("b.tflite") --+-- npu-daemon -- USB 3 -->  TensorFlow Lite 2.21 + VX delegate (VeriSilicon) -> TIM-VX -> libVSC/galcore
+ (C++: librk3399pro_npu, the same)              /run/npu/npu.sock          + XNNPACK on the A35 for what stays on the CPU
+                                                own bulk channel ("ntb"), 38-52 MB/s
 ```
 
-* The model file stays on the board. `Model(path)` sends it to the server, which builds the graph for the NPU (**the first time takes seconds to a minute**,
-  see below); the compiled graph is cached on the board (`~/.cache/npu-models`) and the next load takes **0.1-0.3 s**.
-* `exec(x)` sends the input, the NPU runs, the output comes back. The model runs in a **child process** of the server: a model that crashes the
-  delegate or the driver is answered with the reason (`NpuError`), and the NPU and the USB link stay up.
-* **One model per NPU**; `close()` (or leaving the `with` block) unloads it. The server checks the chip identity (model 0x8000, revision 0x7100, product
-  0x45080001 - every Tinker Edge R has it) and refuses to run on anything else, and checks that the NPU die has enough free memory.
+* The model file stays on the board. A model is identified by the **sha256 of its file**. `Model(path)` looks at the NPU first: if the model is loaded (by this or
+  another program) it **attaches** to it (a few milliseconds, nothing is loaded). Otherwise it checks that the model **fits into the free memory** of the NPU die
+  (the memory measured at an earlier load of the same model, or an estimate) and loads it: the server builds the graph for the NPU (**the first time takes seconds
+  to minutes**), the compiled graph is cached on the board (`~/.cache/npu-models`) and the next load takes **0.04-0.3 s**.
+* **Several models** can be loaded at once, each in its own child process ("engine") of the server: a model that crashes the delegate or the driver is answered with
+  the reason (`NpuError`) and the other models, the NPU and the USB link stay up. A long load does not stop the loaded models.
+* A model **stays loaded until it is stopped**: `close()` only lets go of it (other programs may use it), `stop()` (or `npu.stop(id or name)`, `npu-models stop`) unloads it.
+* **Several programs** use the NPU through the daemon `npu-daemon` (systemd, socket `/run/npu/npu.sock`, group `plugdev`). Without it (or with `NPU_DIRECT=1`) one program
+  talks to the NPU over USB itself. The runs of one model are served one after another; the runs of different models interleave.
+* **Where a model runs** (its *plan*), `Model(path, device=...)`:
+  * `"auto"` (default): NPU and CPU together. The plan `autotune()` found for this model if there is one; else integer models (int8, uint8) on the NPU with what the NPU
+    cannot do on the CPU of the NPU die, and float models on that CPU (TensorFlow Lite with XNNPACK on its two Cortex-A35): this NPU runs float16 on 2 of its 10 cores
+    and is 2-2.5 times slower than that CPU for float models, and gave wrong results for some of them.
+  * `"npu"`: strictly the whole model on the NPU. If an operator would stay on the CPU, the load fails with `NpuError` naming it and recommending `"auto"`.
+  * `"cpu"`: strictly the whole model on the CPU of the NPU die.
+  Comparisons, logical operators and `CAST` (bool tensors) are never given to the NPU: they crash TIM-VX on this driver. `Model.autotune()` measures the plans of one model (whole NPU, NPU without the per-channel split, mixed: operator types moved to the CPU, CPU only)
+  against the CPU result and keeps the fastest one with the same result (cosine similarity of the outputs at least 0.99); later loads use it.
+* The server checks the chip identity (model 0x8000, revision 0x7100, product 0x45080001 - every Tinker Edge R has it, see "The chip" below) and refuses to run on anything else.
+
+## The chip
+
+Read from the NPU die (sysfs of `galcore`) and from the feature table inside Rockchip's driver (6.4.6.5), decoded with the layout of the open galcore 6.4.6.2 of Amlogic/Khadas:
+
+| | |
+|---|---|
+| IP | VeriSilicon (Vivante) VIP8000 family, the "VIPNano-Q" class; the closest relative is the NPU of the Amlogic A311D (`vipnano-qi`, revision 0x7120): their feature tables differ in 17 of 733 fields |
+| Identity | model 0x8000, revision 0x7100, product 0x45080001, customer 0x82 (Rockchip); not in mainline etnaviv |
+| Compute | 10 NN cores x 64 MAC with 3-way dot products = 1920 int8 MAC per cycle, about 3.0 TOPS at 792 MHz (the clock of the firmware); int16 and float16 on 2 of the 10 cores; 6 tensor processors; one small shader core |
+| Memory | 512 KiB VIP SRAM, 1984 KiB AXI SRAM; the NPU die has its own 2 GiB of DRAM |
+| Not in the hardware | per-channel quantisation (`NN_PER_CHANNEL_QUANT = 0`: why per-channel int8 is slow and the server splits such layers), native depthwise convolution, element-wise add in the NN engine, bfloat16 |
+| Measured | signed int8 tensors give wrong numbers (the same values as uint8 are right: the delegate shifts them) |
 
 ## Transport: USB
 
@@ -65,10 +91,11 @@ Two details that cost a day to find, both fixed in the driver and the device tre
 | File | Origin |
 |---|---|
 | firmware `MiniLoaderAll.bin`, `uboot.img`, `trust.img`, `boot.img` in `/usr/share/npu_fw` | Rockchip, https://github.com/airockchip/RK3399Pro_npu at the commit in `sources.lock`, fetched and sha256-checked by `scripts/fetch-npu.sh`, binary only. **Closed**: Linux 4.4.185 with the `galcore` driver, the Vivante user libraries (SDK 6.4.6), BusyBox. `scripts/build-npu-boot.sh` changes two things in `boot.img`: the device tree (below) and the ramdisk (our files, below) |
-| `npu_server`, `libvx_delegate.so`, `libtim-vx.so` (inside `boot.img`, run on the NPU die) | built from source by `scripts/build-npu-open.sh` (TIM-VX v1.1.32, tflite-vx-delegate tag `tflite_v2.6.0` with [our patch](../npu-open/patches), TensorFlow 2.6.0, our `npu-open/server/`), `-O3 -mcpu=cortex-a35`, in a Debian 11 container |
+| `npu_server`, `libvx_delegate.so`, `libtim-vx.so` (inside `boot.img`, run on the NPU die) | built from source by `scripts/build-npu-open.sh` (TIM-VX `main` with the SDK 6.4.6 headers of v1.1.32, tflite-vx-delegate `main` with [our patch](../npu-open/patches), TensorFlow Lite 2.21.0 with XNNPACK and its dependencies, our `npu-open/server/`; all pinned in `sources.lock`), `-O3 -mcpu=cortex-a35`, in a Debian 11 container |
+| `npu-daemon` (`/usr/sbin`), `librk3399pro_npu.so.0`, `rk3399pro_npu.hpp`, the Python module's `_core` | built from `npu-open/host/` by `scripts/build-npu-host.sh` (C++17, pybind11 from Debian, `-O3 -mcpu=cortex-a72.cortex-a53`) |
 | `rkdeveloptool` with the `rs` command | `third_party/rkdeveloptool` plus `patches/rkdeveloptool/` (GPL-2.0+), built for arm64 by `scripts/build-rkdeveloptool-arm64.sh` |
-| `npu-load`, `npu-firmware.service`, `60-tinker-npu.rules` | this repository, `overlay/` |
-| `rk3399pro_npu` (Python module), `npu-info`, `npu-selftest` | this repository, `python/` and `overlay/` (MIT) |
+| `npu-load`, `npu-firmware.service`, `npu-daemon.service`, `60-tinker-npu.rules` | this repository, `overlay/` |
+| `rk3399pro_npu` (Python module), `npu-info`, `npu-models`, `npu-selftest` | this repository, `python/` and `overlay/` (MIT) |
 
 **Loading the firmware needs no closed tool.** The loader sequence of the stock `upgrade_tool`
 (`db`, `td`, `wl` x3, `rs`) is done by `rkdeveloptool`; the missing `rs` ("run system") was added after
@@ -87,49 +114,79 @@ watching its USB traffic, see the patch.
 Services (active only with an `-npu` or `-full` DTB, via `ConditionPathExists=/proc/device-tree/npu-power`): `npu-firmware.service` runs `npu-load` (reset, `rkdeveloptool db/td/wl/rs`).
 Enable on the board: `sudo tinker-boot-select npu` (or `full`, the default), reboot.
 
-Access: the NPU appears on USB as `2207:0019`; the udev rule `60-tinker-npu.rules` gives it to the group `plugdev`, so the default user needs no root.
+Access: the NPU appears on USB as `2207:0019`; the udev rule `60-tinker-npu.rules` gives it to the group `plugdev`; the daemon (a dynamic system user in `plugdev`) holds it
+and its socket `/run/npu/npu.sock` belongs to `plugdev` too, so the default user needs no root.
 
 ## Run your own model
 
 1. **Make a `.tflite` file on the PC** with any converter of TensorFlow (or another tool that writes TFLite). Rules that matter:
-   * **Use an integer model** - full 8-bit quantisation (int8 or uint8, inputs and outputs too). `tf.lite.Optimize.DEFAULT` with a representative dataset (a few dozen real inputs),
-     `target_spec.supported_ops = [TFLITE_BUILTINS_INT8]`, `inference_input_type = inference_output_type = tf.int8` (or `tf.uint8`). TensorFlow 2.x makes the weights per channel: that is
-     fine, the server rearranges such layers so that they use the fast path of the NPU and stay exact (see below).
-   * Float32 models run (the NPU does it in float, **about 480 ms for MobileNet V2**), and so do models with float16 weights (the same speed). **Dynamic-range** models (int8 weights,
-     float activations) are not supported.
-   * The operators the NPU runs are listed in [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`). An unsupported operator makes the delegate leave it
-     to the CPU of the NPU die (two Cortex-A35, slow, and the data leave the NPU); some models are refused. Operators that gave wrong results or crashes: `GATHER_ND`,
-     `RESIZE_NEAREST_NEIGHBOR`, float `FULLY_CONNECTED` and `TRANSPOSE_CONV`.
-   * TensorFlow Lite 2.6.0 reads the models: newer converters may write operator versions it does not know. Models made with TensorFlow up to 2.13 were loaded.
-   * ONNX or PyTorch models: convert to TensorFlow/TFLite first (for example with `onnx2tf` or `ai-edge-torch`) and quantise as above. (Not part of the image.)
+   * **Use an integer model for the NPU** - full 8-bit quantisation (int8 or uint8). `tf.lite.Optimize.DEFAULT` with a representative dataset (a few dozen real inputs),
+     `target_spec.supported_ops = [TFLITE_BUILTINS_INT8]`; float inputs and outputs (a `QUANTIZE` / `DEQUANTIZE` at the ends) are fine. TensorFlow 2.x makes the weights
+     per channel: the server rearranges such layers so that they use the fast path of the NPU and stay exact (see below).
+   * Float32 and float16 models run, by default on the CPU of the NPU die (see "How it works"); `device="npu"` puts them on the NPU (slower, some give wrong results).
+   * `device="npu"` is strict: a model with an operator the NPU does not take is refused with its name (in our operator models: `SLICE`, `TILE`, `CEIL`, `ROUND`, `COS`,
+     `LOG_SOFTMAX`, `TOPK_V2`, comparisons, logical operators, `CAST`); `"auto"` runs it.
+     **Dynamic-range** models (int8 weights, float activations) are not supported on the NPU.
+   * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`). What the NPU cannot do runs on the CPU of the NPU die
+     (TensorFlow Lite with XNNPACK).
+   * TensorFlow Lite 2.21 reads the models (LiteRT is the new name of TensorFlow Lite; its `.tflite` files and the classic interpreter API are what is used here).
+   * ONNX or PyTorch models: convert to TFLite first (for example with `ai-edge-torch` or `onnx2tf`) and quantise as above. (Not part of the image.)
 2. **Copy the file to the board and run it** with the system Python:
    ```python
    import numpy as np
    import rk3399pro_npu as npu
 
-   with npu.Model("mobilenet_v2_quant.tflite") as net:      # first time: seconds to a minute; then 0.1-0.3 s (cache)
-       print(net.inputs[0], net.outputs[0])                  # name, shape, dtype, scale, zero point
-       x = np.zeros(net.inputs[0].shape, net.inputs[0].dtype)  # or a float array: it is quantised for you
-       (scores,) = net.exec(x)                               # a list of numpy arrays, one per output
-       print(net.outputs[0].dequantize(scores).argmax(), net.last_invoke_us, "us on the NPU")
-   ```
-   `npu-info` shows the state of the NPU (chip, driver, memory, whether a model is loaded); `npu-selftest` checks everything with two small models.
+   net = npu.Model("mobilenet_v2_quant.tflite")          # first time: seconds to minutes; then 0.04-0.3 s (cache); attached if loaded already
+   print(net.plan, net.inputs[0], net.outputs[0])        # where it runs; name, shape, dtype, scale, zero point
+   x = np.zeros(net.inputs[0].shape, net.inputs[0].dtype)  # or a float array: it is quantised for you
+   (scores,) = net.exec(x)                               # a list of numpy arrays, one per output
+   print(net.outputs[0].dequantize(scores).argmax(), net.last_invoke_us, "us on the NPU die")
+   net.close()                                           # this program lets go; the model stays loaded (net.stop() unloads it)
 
-## Numbers (release 0.4, one Tinker Edge R)
+   report = npu.Model("other.tflite").autotune(sample)   # once per model: the fastest plan with the same result is kept
+   npu.Model("net.tflite", device="npu")                # strictly on the NPU (NpuError if not possible); device="cpu": strictly on the CPU
+   print(npu.models())                                   # the loaded models: id, name, plan, memory, runs
+   npu.stop("all")
+   ```
+   Command line: `npu-info` (chip, driver, memory, number of models), `npu-models` (list), `npu-models stop ID|NAME|all`, `npu-selftest` (checks everything with two small models).
+3. **From C++**: `#include <rk3399pro_npu.hpp>`, link with `-lrk3399pro_npu`; the same functions (`rk3399pro_npu::Model`, `exec`, `autotune`, `models()`, `stop()`).
+
+## Numbers (one Tinker Edge R)
+
+Our own models (release 0.4 numbers, the same on 0.4.1):
 
 | Model (224x224 unless noted) | Type | On the NPU | `exec` from Python |
 |---|---|---|---|
 | MobileNet V2 | uint8 (TF Hub) | 6-7 ms | 9-11 ms (about 110 FPS) |
 | MobileNet V2 | int8, per-channel (TensorFlow 2.x) | 27 ms | 38 ms |
-| ResNet50 | int8, per-channel | 71 ms | |
-| Inception V3 (299) | int8, per-channel | 52 ms | |
-| MobileNet V2 | float32 / float16 weights | 480 ms | |
+| ResNet50 | int8, per-channel | 70 ms | 81 ms |
+| Inception V3 (299) | int8, per-channel | 52 ms | 69 ms |
+| a small test model (`npu-selftest`) | uint8 | 0.45 ms | 1.5 ms through the daemon (0.4: 1.8 ms) |
 
-Hand over integer arrays when speed matters: quantising a float input in numpy costs about 8 ms for a 224x224x3 frame on this CPU (uint8 MobileNet V2: 9-11 ms per `exec` with a uint8 input, 18 ms with a float one).
+[LiteRT community vision models](https://huggingface.co/collections/litert-community/vision-models) (2026-10-27, random input of the model's shape; the reference is the
+same model on the CPU of the NPU die, TensorFlow Lite 2.21 with XNNPACK on two Cortex-A35; "cos" is the lowest cosine similarity of the outputs to it; `exec` times with the USB transfer):
 
-The first load of a model builds its graph on the NPU: 13 s for MobileNet V2 uint8, about a minute for an int8 model with per-channel weights; the cached graph loads in 0.1-0.3 s.
-Accuracy: the same top-1 class as TensorFlow Lite on the CPU; cosine similarity of the outputs 0.999-1.000 (per-channel int8) to the float model.
-The power profile (`tinker-power`) changes the host, not the NPU.
+| Task | Model | Type | NPU (`device="npu"`) | CPU of the NPU die | cos on the NPU | `device="auto"` / `autotune()` |
+|---|---|---|---|---|---|---|
+| classification | ResNet18 | int8 | **19 ms** | 532 ms | 0.993 | NPU / NPU |
+| classification | SqueezeNet 1.1 | int8 | **9.7 ms** | 112 ms | 0.999 | NPU / NPU |
+| classification | MobileNet V3 large | int8 | 70 ms | 98 ms | 0.974 | NPU / CPU (the NPU result is below 0.99) |
+| classification | EfficientNet-B0 | int8 | 742 ms | 364 ms | 0.973 | NPU / CPU |
+| detection | YOLOX-nano | float32 | 996 ms | 887 ms | 1.000 | CPU / CPU |
+| detection | EfficientDet-Lite0 | float32 | 216 ms | 427 ms | 0.40 | CPU |
+| face detection | YuNet | float16 | 1.6 s | 0.75 s | 1.000 | CPU |
+| segmentation | LR-ASPP MobileNet V3 | float32 | 4.9 s | 2.0 s | 1.000 | CPU |
+| segmentation | MediaPipe selfie (multiclass) | float32 | 5.4 s | 3.0 s | 0.997 | CPU |
+| segmentation | PIDNet-S | float32 | 36 s | 15 s | 0.00 | CPU |
+| depth | MiDaS small | float16 | 7.8 s | 3.8 s | 1.000 | CPU / CPU |
+| OCR (text detection) | PP-OCRv5 det | float16 | 14.5 s | 5.9 s | 0.38 | CPU |
+| enhancement (x4) | Real-ESRGAN x4v3 | float32 | 33 s | 16 s | 0.00 | CPU |
+
+What this says: **integer models belong on the NPU** (ResNet18 27 times faster than the CPU of the NPU die); float models run faster and right on that CPU. Some int8 models lose
+accuracy on the NPU (MobileNet V3 and EfficientNet use hard-swish / sigmoid gates); `autotune()` notices it. Hand over integer arrays when speed matters: quantising a float input
+in numpy costs about 8 ms for a 224x224x3 frame on this CPU. Compiling a model for the NPU takes seconds (SqueezeNet 4.5 s) to minutes (MobileNet V3 int8 106 s, EfficientNet 147 s);
+a whole-NPU graph with integer inputs and outputs is cached and loads in 0.04-0.3 s (models whose inputs or outputs are float, as `ai-edge-torch` writes them, are compiled at
+every load). The power profile (`tinker-power`) changes the host, not the NPU.
 
 ### Why integer models, and what the server does to per-channel ones
 
@@ -146,10 +203,17 @@ The stock NPU firmware enables ADB next to the RKNN link (`/etc/init.d/.usb_conf
 
 ## Known problems
 
-- **`async_exec` is experimental.** Sending a request right after a reply (pipelining) was seen to hang the USB transfer and, after the time-out, the xHCI of the board (`HC died`, the NPU
-  gone until it is reloaded). A pause of 300 us before each request avoids it in all tests (thousands of frames), `exec` never hung. The real cause is not found. Use `exec`. Recovery after a
-  hang: `echo fe900000.usb > /sys/bus/platform/drivers/dwc3/unbind`, then `bind`, then `sudo systemctl restart npu-firmware`.
-- One model at a time; the first load of a big model can take minutes; a model that does not fit in the 2 GB of the NPU die is refused.
-- Not working: dynamic-range models, a graph that is all float16 (TIM-VX crashes), models with dynamic shapes (Keras `Reshape` with a computed shape) are refused by the delegate.
-- Killing a Python program that holds a model: the server notices the closed link on its own after the USB reset; if the NPU stays unresponsive, `sudo systemctl restart npu-firmware`.
-- Anyone who can open `/dev/bus/usb` of the NPU (group `plugdev`) can run code on the NPU die through the model; the NPU is not reachable from the network.
+- **`async_exec` is experimental.** Sending a request right after a reply while others are in flight (pipelining) was seen to hang the USB transfer and, after the time-out, the
+  xHCI of the board (`HC died`, the NPU gone until it is reloaded). A pause of 300 us before such a request avoids it in all tests (thousands of frames; the daemon makes the same
+  pause when requests overlap), `exec` never hung. The real cause is not found. Recovery after a hang: `echo fe900000.usb > /sys/bus/platform/drivers/dwc3/unbind`, then `bind`,
+  then `sudo systemctl restart npu-firmware`.
+- The first load of a big model can take minutes (the graph is compiled on the two A35 of the NPU die); `autotune()` compiles every candidate once. A model that does not fit
+  into the free memory of the NPU die is refused before it is sent.
+- Float models on the NPU (`device="npu"`) are slow and some give wrong results (measured: PIDNet-S, Real-ESRGAN, PP-OCRv5 detection, EfficientDet-Lite0); the default puts float
+  models on the CPU of the NPU die. Some int8 models are less accurate on the NPU (MobileNet V3, EfficientNet: cosine 0.97 to the CPU); `autotune()` finds that and picks another plan.
+- Not working on the NPU: dynamic-range models, a graph that is all float16.
+- The compiled graph of a model with float inputs or outputs (an int8 model with `QUANTIZE` / `DEQUANTIZE` at its ends, as `ai-edge-torch` writes them) is not cached: such a model is
+  compiled at every load (seconds to minutes). Attaching to it while it is loaded is instant. Making the input and output integer avoids it.
+- Models stay loaded until they are stopped (also when the program ends). Reloading the NPU firmware (`systemctl restart npu-firmware`, a reboot) unloads all of them.
+- Anyone who can reach the daemon socket or open `/dev/bus/usb` of the NPU (group `plugdev`) can load and stop models of everyone and run code on the NPU die through a model; the NPU is not
+  reachable from the network.

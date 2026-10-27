@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 """Self-test of the NPU with TensorFlow Lite: chip, two small models against the results of TFLite on the CPU, speed, the compiled-graph cache,
-a broken model (the NPU must stay usable) and the rule of one model per NPU.   npu-selftest [-n RUNS]
-Prints one line per check and ends with 'OK ...' (exit 0) or 'FAIL ...' (exit 1)."""
-import os, sys, tempfile, time
+two models at once, attaching to a loaded model (also from another process), stopping models, a broken model (the NPU must stay usable).
+    npu-selftest [-n RUNS]
+Prints one line per check and ends with 'OK ...' (exit 0) or 'FAIL ...' (exit 1). The test models are stopped at the end."""
+import hashlib, os, subprocess, sys, tempfile, time
 import numpy as np
 import rk3399pro_npu as npu
 
@@ -20,14 +21,18 @@ try:
     i = npu.info()
 except npu.NpuError as e:
     print("FAIL: %s" % e); sys.exit(1)
-check("chip 8000/7100/45080001", i["chip_ok"], "driver %s, memory %d MB free" % (i["driver"], i["mem_avail_kb"] // 1024))
+check("chip 8000/7100/45080001", i["chip_ok"], "driver %s, memory %d MB free, %d model(s) loaded" % (i["driver"], i["mem_avail_kb"] // 1024, i["models"]))
 exp = np.load(os.path.join(DATA, "expected.npz"))
 cache = tempfile.mkdtemp(prefix="npu-selftest-")
-for name, kind in (("net_int8", "int8"), ("net_uint8", "uint8")):
-    path = os.path.join(DATA, name + ".tflite")
+paths = {k: os.path.join(DATA, "net_%s.tflite" % k) for k in ("int8", "uint8")}
+keys = {k: hashlib.sha256(open(p, "rb").read()).hexdigest() for k, p in paths.items()}
+for k in keys.values():                      # left over from an earlier run: start clean
+    npu.stop(k)
+loaded = {}
+for kind in ("int8", "uint8"):
     x, ref = exp["in_" + kind], exp["out_" + kind]
     try:
-        t0 = time.time(); m = npu.Model(path, cache_dir=cache); cold = time.time() - t0
+        t0 = time.time(); m = npu.Model(paths[kind], cache_dir=cache); cold = time.time() - t0
         out = m.exec(x)[0]
         diff = int(np.abs(out.astype(np.int32) - ref.astype(np.int32)).max())
         check("%s: result as TFLite on the CPU" % kind, diff <= 3, "max difference %d (of 255)" % diff)
@@ -36,28 +41,51 @@ for name, kind in (("net_int8", "int8"), ("net_uint8", "uint8")):
             m.exec(x)
         dt = (time.time() - t0) / RUNS
         check("%s: %d runs" % (kind, RUNS), True, "%.2f ms per run, %d FPS (%.2f ms on the NPU)" % (dt * 1e3, 1 / dt, m.last_invoke_us / 1000))
-        xf = m.inputs[0].dequantize(x)                       # a float input is quantised by the module
-        out2 = m.exec(xf)[0]
+        out2 = m.exec(m.inputs[0].dequantize(x))[0]           # a float input is quantised by the module
         check("%s: float input" % kind, int(np.abs(out2.astype(np.int32) - out.astype(np.int32)).max()) <= 1)
-        if kind == "int8":
-            try:
-                npu.Model(path, cache_dir=cache); check("one model per NPU", False, "a second model was accepted")
-            except npu.NpuError:
-                check("one model per NPU", True, "the second model is refused")
-        m.close()
-        t0 = time.time(); m = npu.Model(path, cache_dir=cache); warm = time.time() - t0
+        m.stop()                                              # unloaded: the next load comes from the compiled graph
+        t0 = time.time(); m = npu.Model(paths[kind], cache_dir=cache); warm = time.time() - t0
         check("%s: cached graph" % kind, m.from_cache and warm < cold, "load %.2f s, then %.2f s" % (cold, warm))
-        m.close()
+        loaded[kind] = m
     except Exception as e:
         check("%s" % kind, False, str(e)[:200])
+if len(loaded) == 2:
+    try:
+        ids = {m.key: m.id for m in npu.models()}
+        check("two models at once", keys["int8"] in ids and keys["uint8"] in ids, "ids %s" % sorted(ids.values()))
+        a = loaded["int8"].exec(exp["in_int8"])[0]; b = loaded["uint8"].exec(exp["in_uint8"])[0]
+        check("both run, results unchanged", int(np.abs(a.astype(np.int32) - exp["out_int8"].astype(np.int32)).max()) <= 3
+              and int(np.abs(b.astype(np.int32) - exp["out_uint8"].astype(np.int32)).max()) <= 3)
+        loaded["int8"].close()                                # closed, not stopped: still on the NPU
+        t0 = time.time(); m = npu.Model(paths["int8"], cache_dir=cache); t = time.time() - t0
+        check("attach to a loaded model", m.attached and m.id == ids[keys["int8"]], "%.3f s, id %d" % (t, m.id))
+        loaded["int8"] = m
+        code = ("import numpy as np, rk3399pro_npu as npu; m = npu.Model(%r); x = np.load(%r)['in_int8']; "
+                "o = m.exec(x)[0]; print(int(m.attached), m.id, int(np.abs(o.astype(int) - np.load(%r)['out_int8'].astype(int)).max()))"
+                % (paths["int8"], os.path.join(DATA, "expected.npz"), os.path.join(DATA, "expected.npz")))
+        r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120)
+        att, mid, d = (r.stdout.split() + ["0", "0", "999"])[:3]
+        check("another process uses the same model", r.returncode == 0 and att == "1" and int(mid) == m.id and int(d) <= 3,
+              r.stderr.strip()[-160:] if r.returncode else "attached to id %s" % mid)
+        n = npu.stop(loaded["uint8"].id)
+        left = [x.key for x in npu.models()]
+        check("stop one model", n == 1 and keys["uint8"] not in left and keys["int8"] in left)
+        try:
+            loaded["uint8"].exec(exp["in_uint8"]); check("a stopped model refuses to run", False, "it ran")
+        except npu.NpuError as e:
+            check("a stopped model refuses to run", True, str(e)[:60])
+    except Exception as e:
+        check("several models", False, str(e)[:200])
 try:
     npu.Model(b"this is not a TFLite model", cache_dir=cache); check("broken model refused", False, "accepted")
 except npu.NpuError as e:
     check("broken model refused", True, str(e)[:80])
 try:
-    m = npu.Model(os.path.join(DATA, "net_uint8.tflite"), cache_dir=cache); m.close()
+    m = npu.Model(paths["uint8"], cache_dir=cache); m.exec(exp["in_uint8"]); m.stop()
     check("NPU usable after the broken model", True)
 except Exception as e:
     check("NPU usable after the broken model", False, str(e)[:120])
+for k in keys.values():
+    npu.stop(k)
 print("OK: %d checks passed" % total[0] if not fails else "FAIL: %s" % ", ".join(fails))
 sys.exit(1 if fails else 0)

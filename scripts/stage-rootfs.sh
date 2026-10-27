@@ -71,12 +71,13 @@ cp blobs/README.md "$DOC/blobs-README.md"
 dpkg-query --admindir="$W/var/lib/dpkg" -W -f='${Package}\t${Version}\t${Architecture}\t${Source}\n' | sort > "$DOC/packages.txt"
 cp "$DOC/packages.txt" "$O/packages.txt"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"
-for u in npu-firmware tinker-expand-rootfs ssh-hostkeys tinker-power; do
+for u in npu-firmware npu-daemon tinker-expand-rootfs ssh-hostkeys tinker-power; do
     ln -sf "/etc/systemd/system/$u.service" "$W/etc/systemd/system/multi-user.target.wants/$u.service"
 done
 
-# NPU host side. Open parts: rkdeveloptool with the 'rs' patch (loads the firmware into the NPU die), the Python module rk3399pro_npu
-# (TensorFlow Lite models over our own USB channel), npu-info. The firmware image of the NPU die (out/npu_fw/, scripts/build-npu-boot.sh) is Rockchip's
+# NPU host side. Open parts: rkdeveloptool with the 'rs' patch (loads the firmware into the NPU die), the C++ library librk3399pro_npu with its
+# Python module rk3399pro_npu (TensorFlow Lite models over our own USB channel), the daemon npu-daemon that shares the NPU between programs, npu-info,
+# npu-models (scripts/build-npu-host.sh). The firmware image of the NPU die (out/npu_fw/, scripts/build-npu-boot.sh) is Rockchip's
 # (closed, Apache-2.0 repository airockchip/RK3399Pro_npu, as it is except for the device tree) with our open server added: TIM-VX, the TFLite VX
 # delegate and npu_server (scripts/build-npu-open.sh). Not installed with FREE=1.
 [ -x "$O/rkdeveloptool-arm64/usr/bin/rkdeveloptool" ] && install -D -m 0755 "$O/rkdeveloptool-arm64/usr/bin/rkdeveloptool" "$W/usr/bin/rkdeveloptool"
@@ -85,6 +86,17 @@ if [ -d python/rk3399pro_npu ]; then
     rm -rf "$W/usr/lib/python3/dist-packages/rk3399pro_npu"
     cp -a --no-preserve=ownership python/rk3399pro_npu "$W/usr/lib/python3/dist-packages/"
     find "$W/usr/lib/python3/dist-packages/rk3399pro_npu" -name __pycache__ -prune -exec rm -rf {} +
+fi
+H=$O/npu-host
+if [ -f "$H/npu-daemon" ]; then
+    install -D -m 0755 "$H/npu-daemon" "$W/usr/sbin/npu-daemon"
+    install -D -m 0644 "$H"/_core.cpython-*-aarch64-linux-gnu.so -t "$W/usr/lib/python3/dist-packages/rk3399pro_npu/"
+    install -D -m 0644 "$H/librk3399pro_npu.so.0" "$W/usr/lib/aarch64-linux-gnu/librk3399pro_npu.so.0"
+    ln -sf librk3399pro_npu.so.0 "$W/usr/lib/aarch64-linux-gnu/librk3399pro_npu.so"
+    install -D -m 0644 "$H/rk3399pro_npu.hpp" "$W/usr/include/rk3399pro_npu.hpp"
+    [ -d "$H/licenses" ] && install -D -m 0644 "$H"/licenses/* -t "$DOC/licenses/"
+else
+    echo "WARNING: out/npu-host missing (./run.sh scripts/build-npu-host.sh): the image gets no NPU library and no npu-daemon" >&2
 fi
 cp docs/NPU.md npu-open/OPERATORS.md "$DOC/"
 mkdir -p "$W/usr/share/tinker-edge-r/npu-selftest"
