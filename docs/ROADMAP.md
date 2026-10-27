@@ -107,6 +107,12 @@ the CPU load by itself); (2) install `chromium` on the board and test A and B wi
 browser and its configuration (flags in `/etc/chromium.d/`) into the image, with a test in `scripts/test-board.sh` (a clip
 that must be played with hardware decoding). Image size grows by about 300 MB (`ROOTFS_MIB`).
 
+### Release 0.5: kernel update
+
+| Item | Notes |
+|---|---|
+| Newer Linux 6.18 | decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
+
 ### Release 0.5: memory controller
 
 | Item | Notes |
@@ -164,5 +170,5 @@ Only the driver and Rockchip's firmware stay closed. The memory controller work 
 | Inference engines on the GPU | CPU numbers for MobileNetV2: TFLite 33 FPS, ONNX Runtime 22, Arm NN 20, MNN 18, TVM untuned 1.4. Arm NN GpuAcc does not run on Rusticl (needs OpenCL 2.0). MNN, TVM and TFLite on the GPU need source builds. Expect little: a simple float4 kernel reaches 8 GFLOPS against a peak of about 100 |
 | Open NPU stack | research only, [NPU-RESEARCH.md](NPU-RESEARCH.md): a mainline kernel (6.7 or newer) on the NPU die with the `etnaviv` driver and Mesa's Teflon delegate for TensorFlow Lite. Teflon supports VeriSilicon VIPNano-QI.7120 (Amlogic A311D) and VIPNano-SI+.8002 (NXP i.MX8M Plus); MobileNet V1 takes about 6.6 ms there, about 5.3 ms on this NPU with RKNN. First step done (2026-10-26): the chip of this NPU is model 0x8000, revision 0x7100, product 0x45080001 (sysfs `info` of `galcore`); mainline `etnaviv_hwdb.c` has 0x8000 only with revisions 0x6205, 0x7120 (A311D, product 0x45080009) and 0x8002, so this chip is **not in the table, but next to the A311D one**: an entry would be a small patch if the feature bits can be taken from the table inside Rockchip's `galcore.ko`. NXP's open galcore 6.4.11.p4 does not know it either, and the matching closed Vivante libraries exist only as Rockchip's 6.4.6, see `rnd/verisilicon/README.md`. If it is: the NPU die needs its own mainline device tree (RK1808 is not in mainline), a USB gadget and a server for the tensors, because the NPU sits behind USB and the host cannot drive it directly |
 | Own kernel for the NPU die | a newer kernel is not possible (no RK1808 in mainline, `galcore` is tied to 4.4.185). A rebuild of the same 4.4.185 from Rockchip's `develop-4.4` is: Rockchip's `galcore.ko` (licence `Dual MIT/GPL`, `vermagic=4.4.185 SMP preempt mod_unload aarch64`, no `modversions`) loads into a kernel with that release string and compatible structures. Needs a reconstructed config (no `/proc/config.gz` on the NPU; the firmware kernel was built with Linaro GCC 6.3, build #27 of 2022-08-18); gain: own USB functions (network), trimming, boot time. Worth it only after the server works on the stock kernel. Also: ask Rockchip for the `galcore` sources (the licence says GPL) |
-| Next LTS kernel | bump `sources.lock`, rebase `patches/` and `kernel-mods/`, [KERNEL.md](KERNEL.md) |
+| Next LTS kernel after 6.18 | bump `sources.lock`, rebase `patches/` and `kernel-mods/`, [KERNEL.md](KERNEL.md) |
 | ffmpeg with `mpp` (ffmpeg-rockchip), 1080p numbers | |
