@@ -111,7 +111,7 @@ that must be played with hardware decoding). Image size grows by about 300 MB (`
 
 | Item | Notes |
 |---|---|
-| Newer Linux 6.18 | decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
+| Newer Linux 6.18 | decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26; confirmed by the maintainer as the one to include), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
 
 ### Release 0.5: memory controller
 

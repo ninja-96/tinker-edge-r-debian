@@ -226,7 +226,7 @@ The ASUS TinkerOS image and everything taken from it are never published.
 [KERNEL](docs/KERNEL.md) · [TESTING](docs/TESTING.md) · [VIDEO](docs/VIDEO.md) · [POWER](docs/POWER.md) · [SECURITY](docs/SECURITY.md) ·
 [GPIO](docs/GPIO.md) · [MIPI](docs/MIPI.md) · [BOOT](docs/BOOT.md) ·
 [FLASHING](docs/FLASHING.md) · [UART](docs/UART.md) · [HARDWARE](docs/HARDWARE.md) ·
-[BRINGUP](docs/BRINGUP.md) · [NPU](docs/NPU.md) · [NPU-RESEARCH](docs/NPU-RESEARCH.md) ·
+[BRINGUP](docs/BRINGUP.md) · [RELEASING](docs/RELEASING.md) · [NPU](docs/NPU.md) · [NPU-RESEARCH](docs/NPU-RESEARCH.md) ·
 [OPEN](docs/OPEN.md) · [HISTORY](docs/HISTORY.md) · [ROADMAP](docs/ROADMAP.md) ·
 [LINKS](docs/LINKS.md)
 
