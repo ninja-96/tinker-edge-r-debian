@@ -232,26 +232,35 @@ The ASUS TinkerOS image and everything taken from it are never published.
 
 ## 🔗 Upstream and reference repositories
 
-ASUS:
-- https://github.com/TinkerEdgeR (Debian kernel 4.4 and U-Boot of the stock image:
-  [debian-kernel](https://github.com/TinkerEdgeR/debian-kernel),
-  [debian-u-boot](https://github.com/TinkerEdgeR/debian-u-boot),
-  [ALPR](https://github.com/TinkerEdgeR/ALPR))
-- https://github.com/TinkerBoard/TinkerBoard/wiki/Tinker-Edge-R (wiki)
-- https://tinker-board.asus.com/download-list.html?product=tinker-edge-r (images and documents)
+Everything the project builds, downloads or learned from, with the licence of each (SPDX id, link to the licence text in the upstream tree). The licences and
+sources of what ends up in the images are in [NOTICE.md](NOTICE.md) and inside the image (`/usr/share/doc/tinker-edge-r/`); more links in [docs/LINKS.md](docs/LINKS.md).
 
-Rockchip:
-- https://github.com/rockchip-linux/rkbin (source of `blobs/rockchip/`, commit `3e288fe814e059dd06833495f845cab04ac20a5c`)
-- https://github.com/rockchip-linux/rkdeveloptool (source of `third_party/rkdeveloptool`, commit `304f073752fd25c854e1bcf05d8e7f925b1f4e14`)
-- https://github.com/rockchip-linux/kernel (BSP kernel, donor of the `mpp_service` port)
-- https://github.com/rockchip-linux/u-boot
-- https://github.com/rockchip-linux/mpp (downloaded and built, Apache-2.0)
-- https://github.com/JeffyCN/mirrors/tree/gstreamer-rockchip (GStreamer plugins, downloaded and built, LGPL-2.1)
-- https://github.com/airockchip/RK3399Pro_npu , https://github.com/rockchip-linux/rknpu , https://github.com/rockchip-linux/rknn-toolkit (NPU)
+**Built or downloaded by the build** (versions and commits are pinned in `sources.lock`):
 
-Open upstreams the build downloads: https://www.kernel.org (Linux),
-https://github.com/u-boot/u-boot, https://deb.debian.org (Debian). More references
-in [docs/LINKS.md](docs/LINKS.md).
+| Source | Role | Licence |
+|---|---|---|
+| [kernel.org](https://www.kernel.org) / [torvalds/linux](https://github.com/torvalds/linux) | Linux 6.18 LTS, patched and built | GPL-2.0 WITH Linux-syscall-note ([COPYING](https://github.com/torvalds/linux/blob/HEAD/COPYING)) |
+| [u-boot/u-boot](https://github.com/u-boot/u-boot) | the bootloader, built with our board files | GPL-2.0+ ([Licenses/](https://github.com/u-boot/u-boot/tree/HEAD/Licenses)) |
+| [ARM-software/arm-trusted-firmware](https://github.com/ARM-software/arm-trusted-firmware) | open BL31 (`USE_TFA=1`, not yet tested on the board) | BSD-3-Clause ([license.rst](https://github.com/ARM-software/arm-trusted-firmware/blob/HEAD/license.rst)) |
+| [rockchip-linux/mpp](https://github.com/rockchip-linux/mpp) | media library for the video codecs | Apache-2.0 OR MIT, one header GPL-2.0 ([LICENSES/](https://github.com/rockchip-linux/mpp/tree/HEAD/LICENSES)) |
+| [JeffyCN/mirrors, branch gstreamer-rockchip](https://github.com/JeffyCN/mirrors/tree/gstreamer-rockchip) | GStreamer plugins for mpp | LGPL-2.0+ in the file headers ([COPYING](https://github.com/JeffyCN/mirrors/blob/gstreamer-rockchip/COPYING), the LGPL-2.1 text) |
+| [rockchip-linux/rkdeveloptool](https://github.com/rockchip-linux/rkdeveloptool) | USB flashing tool; `third_party/rkdeveloptool` is a byte-identical copy of commit `304f0737`, plus our `rs` patch | GPL-2.0+ ([license.txt](https://github.com/rockchip-linux/rkdeveloptool/blob/HEAD/license.txt)) |
+| [rockchip-linux/rkbin](https://github.com/rockchip-linux/rkbin) | DRAM initialisation blob and BL31, copied unmodified to `blobs/rockchip/` (commit `3e288fe8`) | Rockchip binary licence ([LICENSE](https://github.com/rockchip-linux/rkbin/blob/HEAD/LICENSE), also `blobs/rockchip/LICENSE`) |
+| [airockchip/RK3399Pro_npu](https://github.com/airockchip/RK3399Pro_npu) | firmware of the NPU die (Linux 4.4.185, the Vivante driver and libraries), binary only; we change its device tree and ramdisk | Apache-2.0 ([LICENSE](https://github.com/airockchip/RK3399Pro_npu/blob/8858114555f1700e41e185b14ec3d266342f8059/LICENSE)); inside: GPL software, Vivante's closed libraries |
+| [VeriSilicon/TIM-VX](https://github.com/VeriSilicon/TIM-VX) | graph library on top of the Vivante driver, tag `v1.1.32`, built for the NPU die | MIT ([LICENSE](https://github.com/VeriSilicon/TIM-VX/blob/v1.1.32/LICENSE)) |
+| [VeriSilicon/tflite-vx-delegate](https://github.com/VeriSilicon/tflite-vx-delegate) | TensorFlow Lite delegate for TIM-VX, tag `tflite_v2.6.0`, with [our patch](npu-open/patches) | MIT ([LICENSE](https://github.com/VeriSilicon/tflite-vx-delegate/blob/tflite_v2.6.0/LICENSE)) |
+| [tensorflow/tensorflow](https://github.com/tensorflow/tensorflow) | TensorFlow Lite 2.6.0 (with the libraries its build fetches: abseil, flatbuffers, ruy, gemmlowp and others), linked into our server | Apache-2.0 ([LICENSE](https://github.com/tensorflow/tensorflow/blob/v2.6.0/LICENSE)) |
+| [deb.debian.org](https://deb.debian.org) | Debian 13 packages, including the `non-free-firmware` ones (Wi-Fi, Bluetooth) | per package: `/usr/share/doc/<package>/copyright`, see the [Debian licence overview](https://www.debian.org/legal/licenses/) |
+
+**Read for reference, not used by the build:**
+
+| Source | What we took from it | Licence |
+|---|---|---|
+| [rockchip-linux/kernel](https://github.com/rockchip-linux/kernel) (branch `develop-6.12`) | BSP kernel, the donor of the `mpp_service` port and the device tree of the video blocks | GPL-2.0 ([COPYING](https://github.com/rockchip-linux/kernel/blob/develop-6.12/COPYING)); our port keeps the GPL-2.0+ OR MIT labels of the files |
+| [rockchip-linux/u-boot](https://github.com/rockchip-linux/u-boot) | the vendor U-Boot, compared with mainline | GPL-2.0+ ([Licenses/](https://github.com/rockchip-linux/u-boot/tree/HEAD/Licenses)) |
+| [TinkerEdgeR/debian-kernel](https://github.com/TinkerEdgeR/debian-kernel), [debian-u-boot](https://github.com/TinkerEdgeR/debian-u-boot) | ASUS kernel 4.4 and U-Boot of the stock image: the board's device tree and pin facts | GPL-2.0 ([COPYING](https://github.com/TinkerEdgeR/debian-kernel/blob/HEAD/COPYING)), GPL-2.0+ ([Licenses/](https://github.com/TinkerEdgeR/debian-u-boot/tree/HEAD/Licenses)) |
+| [TinkerEdgeR/ALPR](https://github.com/TinkerEdgeR/ALPR), the [ASUS wiki](https://github.com/TinkerBoard/TinkerBoard/wiki/Tinker-Edge-R), the [ASUS downloads](https://tinker-board.asus.com/download-list.html?product=tinker-edge-r) | facts about the board; the stock image and the documents are **not** distributed | no licence stated, so all rights stay with ASUS: nothing is copied from them |
+| [airockchip/rknpu](https://github.com/airockchip/rknpu), [rockchip-linux/rknn-toolkit](https://github.com/rockchip-linux/rknn-toolkit) | the RKNN stack of release 0.3 (not used since 0.4) | BSD-3-Clause for the repositories ([rknpu](https://github.com/airockchip/rknpu/blob/HEAD/LICENSE), [rknn-toolkit](https://github.com/rockchip-linux/rknn-toolkit/blob/HEAD/LICENSE)); the Toolkit packages themselves are Rockchip's closed binaries |
 
 ## 📜 Licenses
 

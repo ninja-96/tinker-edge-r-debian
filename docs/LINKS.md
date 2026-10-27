@@ -51,3 +51,17 @@ depend on any of these at build time except the open upstream sources listed und
 | RK3399Pro mainline device tree (Rock Pi N10) | https://github.com/torvalds/linux/blob/master/arch/arm64/boot/dts/rockchip/rk3399pro-rock-pi-n10.dts |
 | TIM-VX (VeriSilicon, the NPU graph library of the open stack) | https://github.com/VeriSilicon/TIM-VX |
 | TFLite VX delegate | https://github.com/VeriSilicon/tflite-vx-delegate |
+
+## Licences of the repositories above
+
+The licence of what the project builds or copies is in [../README.md](../README.md) ("Upstream and reference repositories") and [../NOTICE.md](../NOTICE.md). Repositories that only serve as reading material:
+
+| Repository | Licence |
+|---|---|
+| [laanwj/etna_viv](https://github.com/laanwj/etna_viv) (Vivante reverse engineering) | several (the tools and the register database carry their own headers); read only |
+| [nxp-imx/linux-imx](https://github.com/nxp-imx/linux-imx) | GPL-2.0 (Linux kernel); read only |
+| [coreboot/coreboot](https://github.com/coreboot/coreboot) | GPL-2.0; read only |
+| [rockchip-linux/rknn-toolkit2](https://github.com/rockchip-linux/rknn-toolkit2), [rknpu2](https://github.com/rockchip-linux/rknpu2) | BSD-3-Clause (repositories); for newer chips, not used |
+
+Rule for this file: a link to code or data that the project uses gets its licence (SPDX id and a link to the licence text) here or in the README.
+
