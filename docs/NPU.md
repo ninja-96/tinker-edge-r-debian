@@ -163,21 +163,21 @@ Our own models (release 0.4 numbers, the same on 0.4.1):
 | Inception V3 (299) | int8, per-channel | 52 ms | 69 ms |
 | a small test model (`npu-selftest`) | uint8 | 0.45 ms | 1.5 ms through the daemon (0.4: 1.8 ms) |
 
-[LiteRT community vision models](https://huggingface.co/collections/litert-community/vision-models) (2026-10-27, random input of the model's shape; the reference is the
+[LiteRT community vision models](https://huggingface.co/collections/litert-community/vision-models) (2026-10-27, measured again on 2026-10-28 with the operator rewrites of main after 0.4.1: the same; random input of the model's shape; the reference is the
 same model on the CPU of the NPU die, TensorFlow Lite 2.21 with XNNPACK on two Cortex-A35; "cos" is the lowest cosine similarity of the outputs to it; `exec` times with the USB transfer):
 
 | Task | Model | Type | NPU (`device="npu"`) | CPU of the NPU die | cos on the NPU | `device="auto"` / `autotune()` |
 |---|---|---|---|---|---|---|
-| classification | ResNet18 | int8 | **19 ms** | 532 ms | 0.993 | NPU / NPU |
-| classification | SqueezeNet 1.1 | int8 | **9.7 ms** | 112 ms | 0.999 | NPU / NPU |
-| classification | MobileNet V3 large | int8 | 70 ms | 98 ms | 0.974 | NPU / CPU (the NPU result was below the threshold of 0.4.1, 0.99) |
-| classification | EfficientNet-B0 | int8 | 742 ms | 364 ms | 0.973 | NPU / CPU |
-| detection | YOLOX-nano | float32 | 996 ms | 887 ms | 1.000 | CPU / CPU |
-| detection | EfficientDet-Lite0 | float32 | 216 ms | 427 ms | 0.40 | CPU |
+| classification | ResNet18 | int8 | **18.5 ms** | 531 ms | 0.992 | NPU / NPU |
+| classification | SqueezeNet 1.1 | int8 | **9.2 ms** | 108 ms | 0.998 | NPU / NPU |
+| classification | MobileNet V3 large | int8 | 70 ms | 95 ms | 0.972 | NPU / CPU (the NPU result was below the threshold of 0.4.1, 0.99) |
+| classification | EfficientNet-B0 | int8 | 742 ms | 361 ms | 0.976 | NPU / CPU |
+| detection | YOLOX-nano | float32 | 988 ms | 795 ms | 1.000 | CPU / CPU |
+| detection | EfficientDet-Lite0 | float32 | refused (its custom `TFLite_Detection_PostProcess` stays on the CPU); `auto`: 216 ms | 427 ms | 0.40 | NPU + CPU |
 | face detection | YuNet | float16 | 1.6 s | 0.75 s | 1.000 | CPU |
 | segmentation | LR-ASPP MobileNet V3 | float32 | 4.9 s | 2.0 s | 1.000 | CPU |
 | segmentation | MediaPipe selfie (multiclass) | float32 | 5.4 s | 3.0 s | 0.997 | CPU |
-| segmentation | PIDNet-S | float32 | 36 s | 15 s | 0.00 | CPU |
+| segmentation | PIDNet-S | float32 | 34 s | 15 s | 0.00 | CPU |
 | depth | MiDaS small | float16 | 7.8 s | 3.8 s | 1.000 | CPU / CPU |
 | OCR (text detection) | PP-OCRv5 det | float16 | 14.5 s | 5.9 s | 0.38 | CPU |
 | enhancement (x4) | Real-ESRGAN x4v3 | float32 | 33 s | 16 s | 0.00 | CPU |

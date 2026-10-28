@@ -18,6 +18,7 @@
 #include <vector>
 #include "flatbuffers/flatbuffers.h"
 #include "tensorflow/lite/schema/schema_generated.h"
+#include "model_buffers.h"
 
 namespace npu_rewrite {
 
@@ -376,6 +377,7 @@ static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 	if (!VerifyModelBuffer(v)) return "not a TFLite model";
 	std::unique_ptr<ModelT> model = UnPackModel(bytes.data());
 	if (!model || model->subgraphs.empty()) return "empty model";
+	{ std::string e = npu_model::inline_buffers(*model, bytes); if (!e.empty()) return e; }
 	SubGraphT &sg = *model->subgraphs[0];
 	Stats s;
 
