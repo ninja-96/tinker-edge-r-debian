@@ -1,0 +1,56 @@
+tflite-vx-delegate: TOPK_V2 on the NPU (TIM-VX Topk)
+
+The delegate had no mapping for TOPK_V2, so it always ran on the CPU. TIM-VX has the operation
+(values and indices of the k largest entries along the last dimension); k must be a constant int32.
+
+diff --git a/op_map.cc b/op_map.cc
+index 4d29d97..36d7f19 100644
+--- a/op_map.cc
++++ b/op_map.cc
+@@ -3346,6 +3346,38 @@ struct OneHotMapper : public OpMapperBase<TfLiteOneHotParams> {
+   }
+ };
+ 
++struct TopkMapper : public OpMapperBase<EmptyStructPlaceholder> {
++  bool IsOpSupported(TfLiteContext* context,
++                     TfLiteNode* node,
++                     const TfLiteRegistration* registration) const override {
++    const auto& k_tensor = context->tensors[node->inputs->data[1]];
++    if (k_tensor.allocation_type != kTfLiteMmapRo || k_tensor.type != kTfLiteInt32) {
++      TFLITE_LOG_PROD(TFLITE_LOG_ERROR, "TopK: k must be a constant int32");
++      return false;
++    }
++    if (context->tensors[node->inputs->data[0]].dims->size == 0) {
++      TFLITE_LOG_PROD(TFLITE_LOG_ERROR, "TopK: scalar input");
++      return false;
++    }
++    return true;
++  }
++  bool HandleMapOp(vx::delegate::Delegate* delegate,
++                   std::vector<std::shared_ptr<tim::vx::Tensor>>& inputs,
++                   std::vector<std::shared_ptr<tim::vx::Tensor>>& outputs,
++                   const void* params) override {
++    TFLITE_LOG(TFLITE_LOG_INFO, "Creating TopK op");
++    int32_t k = 0;
++    inputs[1]->CopyDataFromTensor(&k);
++    // TFLite sorts along the last dimension, which is dimension 0 in TIM-VX
++    auto op = delegate->GetGraph()->CreateOperation<tim::vx::ops::Topk>(
++        static_cast<uint32_t>(k), 0);
++    (*op).BindInput(inputs[0]);
++    (*op).BindOutputs(outputs);
++    delegate->GetOps().push_back(std::move(op));
++    return true;
++  }
++};
++
+ template <typename T_OperationType>
+ struct ArgOpMapper : public OpMapperBase<EmptyStructPlaceholder> {
+   std::string name_;
+@@ -3676,6 +3708,7 @@ static const std::map<int, createIOpMapItemFunc> reg = {
+     REGISTER_OP_MAPPER(kTfLiteBuiltinMirrorPad, MirrorPadMapper),
+     REGISTER_OP_MAPPER(kTfLiteBuiltinExpandDims, ExpandDimsMapper),
+     REGISTER_OP_MAPPER(kTfLiteBuiltinOneHot, OneHotMapper),
++    REGISTER_OP_MAPPER(kTfLiteBuiltinTopkV2, TopkMapper),
+     REGISTER_OP_MAPPER(
+         kTfLiteBuiltinAbs, SimpleOpMapper<tim::vx::ops::Abs>, "Abs"),
+     REGISTER_OP_MAPPER(

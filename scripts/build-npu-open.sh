@@ -51,8 +51,12 @@ echo "$TFLITE_DEPS" | while read -r name repo rev; do if [ -n "$name" ]; then fe
 fetch_tar "$W/deps/fft2d" "$FFT2D_URL" "$FFT2D_SHA256" downloads/npu-open/OouraFFT-v1.0.tar.gz
 # the headers of SDK 6.4.6 (see sources.lock): they describe what the driver of the firmware can do
 rm -rf "$W/sdk/include"; cp -r "$W/TIM-VX-headers/prebuilt-sdk/x86_64_linux/include" "$W/sdk/include"
-# our changes to the delegate: compiled graph export, int8 as uint8, folded constant Dequantize, the server as a target
+# our changes to the delegate: compiled graph export, int8 as uint8, folded constant Dequantize, the server as a target; TOPK_V2
 git -C "$W/tflite-vx-delegate" apply "$ROOT/npu-open/patches/0001-tflite-vx-delegate-nbg-export-int8-as-uint8-dequantize.patch"
+git -C "$W/tflite-vx-delegate" apply "$ROOT/npu-open/patches/0003-tflite-vx-delegate-topk-v2.patch"
+# and to TensorFlow Lite: saturating NEON int8 / uint8 ADD, SUB and MUL (the tarball stays unpacked between builds: apply once)
+P=$ROOT/npu-open/patches/0002-tensorflow-lite-saturating-neon-int8-uint8-add-mul.patch
+if ! patch -d "$W/$TF" -p1 -R --dry-run -s -f < "$P" >/dev/null 2>&1; then patch -d "$W/$TF" -p1 -s -f < "$P"; fi
 rm -rf "$W/server"; cp -r "$ROOT/npu-open/server" "$W/server"
 
 # 3. the build inside the toolchain container

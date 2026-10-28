@@ -53,7 +53,7 @@ board (Debian 13, Python 3.13)                                                  
 |---|---|
 | `server/` | the server for the NPU die (C++): `protocol.h`, `npu_server.cc`, `fix_dynamic_reshape.h`, `split_per_channel.h`, `CMakeLists.txt` (built inside the delegate tree) |
 | `host/` | the board side (C++): `npu_daemon.cc`, `rk3399pro_npu.hpp`, `rk3399pro_npu.cc`, `python_core.cc`, `sha256.h`, `op_names.h` |
-| `patches/` | the changes to `tflite-vx-delegate` |
+| `patches/` | the changes to `tflite-vx-delegate` (`0001`, `0003`) and to TensorFlow Lite (`0002`) |
 | `ramdisk/modify_init.py` | changes the two init scripts of Rockchip's ramdisk so that our server starts instead of `rknn_server` (with a fallback to it) |
 | `tools/npu_ramdisk.py` | list, extract, add, remove files in the ramdisk of a `boot.img` without root (pure Python cpio) |
 | `OPERATORS.md` | the operators on the NPU, measured: 0.4.1, 0.4 and RKNN-Toolkit 1.7.5 |

@@ -25,7 +25,8 @@ This is the project's own summary, not legal advice.
 | `python/rk3399pro_npu/`, `overlay/usr/local/bin/npu-info`, `npu-models`, `npu-selftest`, `tests/npu/` | MIT | own work: the Python package of the NPU, tools and test models |
 | `npu-open/host/` | MIT | own work: `npu-daemon`, the C++ library `librk3399pro_npu` and its Python binding; `op_names.h` is generated from the operator list of the TensorFlow Lite schema (Apache-2.0) |
 | `npu-open/server/`, `npu-open/ramdisk/`, `npu-open/tools/` | MIT | own work: the server that runs on the NPU die, model rewrites, init-script changes, ramdisk tool |
-| `npu-open/patches/` | MIT (patch of MIT-licensed code) | the compiled-graph export, int8 as uint8, folded constant Dequantize, operators left to the CPU, for VeriSilicon's tflite-vx-delegate |
+| `npu-open/patches/0001`, `0003` | MIT (patches of MIT-licensed code) | the compiled-graph export, int8 as uint8, folded constant Dequantize, operators left to the CPU, `TOPK_V2`, for VeriSilicon's tflite-vx-delegate |
+| `npu-open/patches/0002` | Apache-2.0 (patch of Apache-2.0 code) | saturating NEON int8 / uint8 `ADD` / `SUB` / `MUL` kernels of TensorFlow Lite |
 | `blobs/rockchip/` | Rockchip licence, see below | unmodified Rockchip binaries and one file assembled from them |
 
 ## 2. Binary-only files (Rockchip)

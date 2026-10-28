@@ -10,21 +10,24 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 * **RKNN**: `yes` = RKNN-Toolkit 1.7.5 accepted the model (it has no simulator, so its results were not checked); `no` = refused; `-` = not tested.
 * One tiny float32 model per operator (input 1x8x8x4), 87 models, measured on one board on 2026-10-28 (NPU) and 2026-10-26 (RKNN).
 
-84 of the 87 models run entirely on the NPU, none gives a wrong result. Our server rewrites operators into ones the NPU runs (`npu-open/server/rewrite_ops.h`):
+All 87 models run entirely on the NPU, none gives a wrong result. Our server rewrites operators into ones the NPU runs (`npu-open/server/rewrite_ops.h`):
 
 | Operator | Rewritten as |
 |---|---|
 | `SLICE` | `STRIDED_SLICE` |
 | `TILE` | `CONCATENATION` of copies |
 | `LOG_SOFTMAX` | `SOFTMAX` + `LOG` |
-| `CEIL` (float) | `NEG(FLOOR(NEG(x)))` |
+| `CEIL` | `NEG(FLOOR(NEG(x)))` |
+| `COS` | `SIN(x + pi / 2)` |
+| `ROUND` (half to even) | `FLOOR(x + 0.5)`, minus 1 where x + 0.5 is a whole odd number |
+| `CEIL`, `COS`, `ROUND` of int8 / uint8 | `DEQUANTIZE`, the float form, `QUANTIZE` |
 | `CAST` float -> int32 -> float (truncation) | `MAXIMUM(FLOOR(x), 0) + MINIMUM(CEIL(x), 0)` |
 | comparisons (`GREATER`, `LESS`, `EQUAL`, ...) | bool becomes 0 / 1 of the input type: `SUB` + `MUL` (float: + `MAXIMUM` / `MINIMUM` to [0, 1]; int8 / uint8: the requantisation saturates to 0 / 1) |
 | `LOGICAL_AND` / `OR` / `NOT` | `MUL` / `MAXIMUM` / 1 - x |
 | `SELECT` | b + c * (a - b) |
 | `CAST` of bool | `RESHAPE` (float) or `DEQUANTIZE` (int8 / uint8) |
 
-TIM-VX crashes on bool tensors with this driver; a bool tensor that cannot be rewritten (a model output, or used by an operator not in this table) stays on the CPU.
+`TOPK_V2` is not rewritten: our delegate patch maps it to TIM-VX `Topk` (`npu-open/patches/0003`). TIM-VX crashes on bool tensors with this driver; a bool tensor that cannot be rewritten (a model output, or used by an operator not in this table) stays on the CPU.
 Int8 and uint8 comparisons were also checked with quantised models (`rnd/verisilicon/models/q8/`): the NPU gives the exact result of the dequantised values; TensorFlow Lite on
 the CPU differs at values closer than about 1/256 (its comparison of two different scales is that coarse).
 
@@ -42,7 +45,7 @@ the CPU differs at values closer than about 1/256 (its comparison of two differe
 | `CEIL` | yes | yes |
 | `CONCATENATION` | yes | yes |
 | `CONV_2D` | yes | yes |
-| `COS` | CPU | yes |
+| `COS` | yes | yes |
 | `DEPTHWISE_CONV_2D` | yes | yes |
 | `DEPTH_TO_SPACE` | yes | yes |
 | `DEQUANTIZE` | - | - |
@@ -99,7 +102,7 @@ the CPU differs at values closer than about 1/256 (its comparison of two differe
 | `RESIZE_BILINEAR` | yes | yes |
 | `RESIZE_NEAREST_NEIGHBOR` | yes | yes |
 | `REVERSE_V2` | yes | no |
-| `ROUND` | CPU | yes |
+| `ROUND` | yes | yes |
 | `RSQRT` | yes | yes |
 | `SELECT` | yes | yes |
 | `SELECT_V2` | - | - |
@@ -121,7 +124,7 @@ the CPU differs at values closer than about 1/256 (its comparison of two differe
 | `SVDF` | - | - |
 | `TANH` | yes | yes |
 | `TILE` | yes | yes |
-| `TOPK_V2` | CPU | no |
+| `TOPK_V2` | yes | no |
 | `TRANSPOSE` | yes | yes |
 | `TRANSPOSE_CONV` | yes | yes |
 | `UNIDIRECTIONAL_SEQUENCE_LSTM` | - | - |
@@ -129,3 +132,7 @@ the CPU differs at values closer than about 1/256 (its comparison of two differe
 | `ZEROS_LIKE` | yes | - |
 
 Scripts and raw results (private notes): `rnd/verisilicon/models/gen_op_models.py`, `test_ops_041.py`, `rknn_check.py`, `ops/*.tsv`.
+
+Found on the way: the NEON int8 / uint8 `ADD`, `SUB` and `MUL` kernels of TensorFlow Lite 2.21 (used on the CPU of the NPU die when XNNPACK does not take an operator)
+add the output zero point in 16 bits without saturation: a large result wraps around to the opposite extreme (an int8 `MUL` with a requantisation multiplier of 4 gave 127
+instead of -128). Our build saturates there (`npu-open/patches/0002`), as the reference kernels do.

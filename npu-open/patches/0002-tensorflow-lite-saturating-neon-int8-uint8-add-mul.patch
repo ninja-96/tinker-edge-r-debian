@@ -1,0 +1,117 @@
+TensorFlow Lite 2.21.0: saturate the int16 steps of the NEON int8 / uint8 ADD, SUB and MUL kernels
+
+The optimised NEON kernels narrow the rescaled 32-bit result to 16 bits and then add the output
+zero point in 16 bits. ADD / SUB narrow without saturation (vmovn_s32) and all of them add without
+saturation (vaddq_s16), so a result beyond the int16 range wraps around and the output takes the
+opposite extreme: an int8 MUL with a requantisation multiplier of about 4 gives 127 where it must
+give -128 (checked on the NPU die with the built-in kernels, XNNPACK off; the reference kernels and
+XNNPACK are right). Saturating narrowing (vqmovn_s32) and saturating addition (vqaddq_s16) give the
+result of the reference kernels.
+
+--- a/tensorflow/lite/kernels/internal/optimized/integer_ops/add.h	2026-10-28 11:14:05.303573393 +0300
++++ b/tensorflow/lite/kernels/internal/optimized/integer_ops/add.h	2026-10-28 11:14:05.326964036 +0300
+@@ -124,13 +124,13 @@
+     s12 = RoundingDivideByPOT(s12, -params.output_shift);
+     s21 = RoundingDivideByPOT(s21, -params.output_shift);
+     s22 = RoundingDivideByPOT(s22, -params.output_shift);
+-    const int16x4_t s11_narrowed = vmovn_s32(s11);
+-    const int16x4_t s12_narrowed = vmovn_s32(s12);
+-    const int16x4_t s21_narrowed = vmovn_s32(s21);
+-    const int16x4_t s22_narrowed = vmovn_s32(s22);
+-    const int16x8_t s1 = vaddq_s16(vcombine_s16(s11_narrowed, s12_narrowed),
++    const int16x4_t s11_narrowed = vqmovn_s32(s11);
++    const int16x4_t s12_narrowed = vqmovn_s32(s12);
++    const int16x4_t s21_narrowed = vqmovn_s32(s21);
++    const int16x4_t s22_narrowed = vqmovn_s32(s22);
++    const int16x8_t s1 = vqaddq_s16(vcombine_s16(s11_narrowed, s12_narrowed),
+                                    vdupq_n_s16(params.output_offset));
+-    const int16x8_t s2 = vaddq_s16(vcombine_s16(s21_narrowed, s22_narrowed),
++    const int16x8_t s2 = vqaddq_s16(vcombine_s16(s21_narrowed, s22_narrowed),
+                                    vdupq_n_s16(params.output_offset));
+     const int8x16_t s = vcombine_s8(vqmovn_s16(s1), vqmovn_s16(s2));
+ 
+@@ -416,9 +416,9 @@
+     s2 = vqrdmulhq_n_s32(s2, params.output_multiplier);
+     s1 = RoundingDivideByPOT(s1, -params.output_shift);
+     s2 = RoundingDivideByPOT(s2, -params.output_shift);
+-    const int16x4_t s1_narrowed = vmovn_s32(s1);
+-    const int16x4_t s2_narrowed = vmovn_s32(s2);
+-    const int16x8_t s = vaddq_s16(vcombine_s16(s1_narrowed, s2_narrowed),
++    const int16x4_t s1_narrowed = vqmovn_s32(s1);
++    const int16x4_t s2_narrowed = vqmovn_s32(s2);
++    const int16x8_t s = vqaddq_s16(vcombine_s16(s1_narrowed, s2_narrowed),
+                                   vdupq_n_s16(params.output_offset));
+     const int8x8_t clamped =
+         vmax_s8(output_activation_min_vector,
+--- a/tensorflow/lite/kernels/internal/optimized/integer_ops/mul.h	2026-10-28 11:14:05.313941243 +0300
++++ b/tensorflow/lite/kernels/internal/optimized/integer_ops/mul.h	2026-10-28 11:14:05.328441895 +0300
+@@ -111,9 +111,9 @@
+     const auto p4_narrowed = vqmovn_s32(p4);
+ 
+     const int16x8_t p_part1 =
+-        vaddq_s16(vcombine_s16(p2_narrowed, p1_narrowed), output_offset_vector);
++        vqaddq_s16(vcombine_s16(p2_narrowed, p1_narrowed), output_offset_vector);
+     const int16x8_t p_part2 =
+-        vaddq_s16(vcombine_s16(p4_narrowed, p3_narrowed), output_offset_vector);
++        vqaddq_s16(vcombine_s16(p4_narrowed, p3_narrowed), output_offset_vector);
+     const int8x16_t p = vcombine_s8(vqmovn_s16(p_part2), vqmovn_s16(p_part1));
+ 
+     const auto clamped = vmaxq_s8(output_activation_min_vector,
+@@ -204,9 +204,9 @@
+     const auto p4_narrowed = vqmovn_s32(p4);
+ 
+     const int16x8_t p_part1 =
+-        vaddq_s16(vcombine_s16(p2_narrowed, p1_narrowed), output_offset_vector);
++        vqaddq_s16(vcombine_s16(p2_narrowed, p1_narrowed), output_offset_vector);
+     const int16x8_t p_part2 =
+-        vaddq_s16(vcombine_s16(p4_narrowed, p3_narrowed), output_offset_vector);
++        vqaddq_s16(vcombine_s16(p4_narrowed, p3_narrowed), output_offset_vector);
+     const int8x16_t p = vcombine_s8(vqmovn_s16(p_part2), vqmovn_s16(p_part1));
+ 
+     const auto clamped = vmaxq_s8(output_activation_min_vector,
+--- a/tensorflow/lite/kernels/internal/optimized/optimized_ops.h	2026-10-28 11:14:05.324412016 +0300
++++ b/tensorflow/lite/kernels/internal/optimized/optimized_ops.h	2026-10-28 11:14:05.330664922 +0300
+@@ -1591,9 +1591,9 @@
+     using gemmlowp::RoundingDivideByPOT;
+     s1 = RoundingDivideByPOT(s1, -params.output_shift);
+     s2 = RoundingDivideByPOT(s2, -params.output_shift);
+-    const int16x4_t s1_narrowed = vmovn_s32(s1);
+-    const int16x4_t s2_narrowed = vmovn_s32(s2);
+-    const int16x8_t s = vaddq_s16(vcombine_s16(s1_narrowed, s2_narrowed),
++    const int16x4_t s1_narrowed = vqmovn_s32(s1);
++    const int16x4_t s2_narrowed = vqmovn_s32(s2);
++    const int16x8_t s = vqaddq_s16(vcombine_s16(s1_narrowed, s2_narrowed),
+                                   vdupq_n_s16(params.output_offset));
+     const uint8x8_t clamped =
+         vmax_u8(output_activation_min_vector,
+@@ -1689,9 +1689,9 @@
+     s2 = vqrdmulhq_n_s32(s2, params.output_multiplier);
+     s1 = RoundingDivideByPOT(s1, -params.output_shift);
+     s2 = RoundingDivideByPOT(s2, -params.output_shift);
+-    const int16x4_t s1_narrowed = vmovn_s32(s1);
+-    const int16x4_t s2_narrowed = vmovn_s32(s2);
+-    const int16x8_t s = vaddq_s16(vcombine_s16(s1_narrowed, s2_narrowed),
++    const int16x4_t s1_narrowed = vqmovn_s32(s1);
++    const int16x4_t s2_narrowed = vqmovn_s32(s2);
++    const int16x8_t s = vqaddq_s16(vcombine_s16(s1_narrowed, s2_narrowed),
+                                   vdupq_n_s16(params.output_offset));
+     const uint8x8_t clamped =
+         vmax_u8(output_activation_min_vector,
+@@ -2162,7 +2162,7 @@
+     const auto p1_narrowed = vqmovn_s32(p1);
+     const auto p2_narrowed = vqmovn_s32(p2);
+     const auto p =
+-        vaddq_s16(vcombine_s16(p1_narrowed, p2_narrowed), output_offset_vector);
++        vqaddq_s16(vcombine_s16(p1_narrowed, p2_narrowed), output_offset_vector);
+     const auto clamped =
+         vmax_u8(output_activation_min_vector,
+                 vmin_u8(output_activation_max_vector, vqmovun_s16(p)));
+@@ -2233,7 +2233,7 @@
+     const auto p1_narrowed = vmovn_s32(p1);
+     const auto p2_narrowed = vmovn_s32(p2);
+     const auto p =
+-        vaddq_s16(vcombine_s16(p1_narrowed, p2_narrowed), output_offset_vector);
++        vqaddq_s16(vcombine_s16(p1_narrowed, p2_narrowed), output_offset_vector);
+     const auto clamped =
+         vmax_u8(output_activation_min_vector,
+                 vmin_u8(output_activation_max_vector, vqmovun_s16(p)));

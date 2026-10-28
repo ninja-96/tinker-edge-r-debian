@@ -86,7 +86,7 @@ and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `
 Not done on purpose: secure boot through eFuses (irreversible), a secure OS (OP-TEE / BL32 is not loaded;
 TrustZone only hosts BL31 for PSCI).
 
-### A browser with hardware video decoding (decided: Chromium is part of the image; KDE work is not in 0.3)
+### A browser with hardware video decoding (decided: Chromium is part of the image of release 0.5, after the NPU work; KDE work is not in 0.3)
 
 Why: on the KDE desktop the browser uses a lot of CPU and plays video in software (reported 2026-10-25).
 
@@ -142,8 +142,23 @@ optimised for the NPU die (`-mcpu=cortex-a35 -O3`); extra packages only from apt
 | Autotune aware of the order of the layers | 0.4.1 moves whole operator types to the CPU and measures each candidate (so the copies between NPU and CPU parts are counted). Better: move parts of the graph (a tail from node N, a head up to node M, one bad node: deny by node index, the same mechanism as by type), estimate the number of cuts before compiling and skip candidates that cannot win (every candidate costs a compilation of seconds to minutes) |
 | Float models on the CPU of the board | the four Cortex-A72/A53 of the RK3399 are much faster than the two A35 of the NPU die: with the TFLite engine of "inference engines on the CPU and the GPU" (below), `device="auto"` and autotune can choose the board's CPU for float models and float parts |
 | Split ratio as a parameter of autotune | measured (2026-10-27, MobileNet V3 int8): the accuracy lost on the NPU is lost in our split of per-channel layers, not in the driver: ratio 4 (now) 68 ms / cosine 0.966, ratio 2 90 ms / 0.982, ratio 1.5 125 ms / 0.984, no split 173 ms / 0.984 (CPU of the NPU die 95 ms). The ratio depends on the model: `autotune()` searches 4, 2, 1.5 and no split |
-| Operators that stay on the CPU, moved to the NPU (int8 / uint8) | **done for `SLICE`, `TILE`, `LOG_SOFTMAX`, `CEIL`, comparisons, logical operators, `SELECT` and `CAST` (2026-10-28, `npu-open/server/rewrite_ops.h`): 84 of 87 single-operator models on the NPU, all right; int8 / uint8 comparisons checked with quantised models.** Left: `ROUND`, `COS` (tables), `TOPK_V2`. Plan: (1) rewrites on the server before the graph is built, onto what the NPU runs: `SLICE` -> `STRIDED_SLICE`, `TILE` -> `CONCATENATION`, `LOG_SOFTMAX` -> `SOFTMAX` + `LOG`, comparisons as uint8 0/1 (`SUB`, `MUL`, `MINIMUM`/`MAXIMUM`: also avoids the TIM-VX crash on bool tensors), `AND` = `MUL`, `OR` = `MAXIMUM`, `NOT` = 1 - x, `SELECT` = c*a + (1-c)*b; (2) any unary element-wise operator of an int8 / uint8 input (`CEIL`, `ROUND`, `COS`, `FLOOR` ...) is exact as a table of 256 values (`GATHER`, or a custom kernel on the NPU's shader core through TIM-VX if needed). `TOPK_V2` stays on the CPU (a sort, usually at the end of a network). Each one checked with the single-operator models and real networks |
-| Vivante driver 6.4.8 | researched and parked (2026-10-27): the open galcore 6.4.8.415784 of Khadas with an RK1808 platform part and the entry of this chip (both written), the Khadas user space with that entry patched in. Not needed for coverage or accuracy (the measurement above); the only possible gain is the shader-run operators (`CEIL`, `ROUND`, `COS`). Taken up again only if a model needs them |
+| Operators that stay on the CPU, moved to the NPU | **done (2026-10-28): 87 of 87 single-operator models entirely on the NPU, all right.** Rewrites on the server before the graph is built (`npu-open/server/rewrite_ops.h`): `SLICE` -> `STRIDED_SLICE`, `TILE` -> `CONCATENATION`, `LOG_SOFTMAX` -> `SOFTMAX` + `LOG`, comparisons / logical operators / `SELECT` / `CAST` of bool as arithmetic on 0 / 1 (TIM-VX crashes on bool tensors), `CEIL`, `ROUND`, `COS`, truncation from `FLOOR` / `SIN` (int8 / uint8 through `DEQUANTIZE` / `QUANTIZE`); `TOPK_V2` mapped to TIM-VX `Topk` in the delegate (`npu-open/patches/0003`). Int8 / uint8 variants checked with quantised models. Found on the way and fixed: the NEON int8 / uint8 `ADD` / `SUB` / `MUL` kernels of TensorFlow Lite 2.21 wrap around in 16 bits (`npu-open/patches/0002`) |
+| Vivante driver 6.4.8 | researched and parked (2026-10-27): the open galcore 6.4.8.415784 of Khadas with an RK1808 platform part and the entry of this chip (both written), the Khadas user space with that entry patched in. Not needed for coverage or accuracy (the measurement above); the shader-run operators it might have brought (`CEIL`, `ROUND`, `COS`) run on the NPU through rewrites now. Taken up again only if a model needs it |
+
+### Release 0.5: hardware checks before the release
+
+Decision of the maintainer (2026-10-28): before 0.5 is published, each of these is checked on the board and fixed where needed (order: the NPU work, the long model
+test of the new NPU stack, the browser, then these checks).
+
+| Item | What to check |
+|---|---|
+| Wi-Fi | connect to an access point (WPA2 / WPA3), throughput with `iperf3`, reconnect after a reboot |
+| Bluetooth | pair a device (keyboard or headset), audio over A2DP |
+| Audio | RK809 at the 3.5 mm jack by ear (playback and the microphone), HDMI audio |
+| USB-A | a USB 3 disk in every port at SuperSpeed, a keyboard and a mouse |
+| USB-C | a device (host mode) in both orientations, power |
+| Boot logo | replace the logo at boot with our own (no ASUS logo): U-Boot splash and / or the kernel's boot logo |
+| Suspend / resume | `systemctl suspend`, wake up (key, RTC alarm), the NPU, Wi-Fi, USB and the display after resume |
 
 ### Release 0.5: kernel update
 

@@ -23,7 +23,7 @@ namespace npu_rewrite {
 
 using namespace tflite;
 
-struct Stats { int slice = 0, tile = 0, log_softmax = 0, boolean = 0, trunc = 0, ceil = 0; };
+struct Stats { int slice = 0, tile = 0, log_softmax = 0, boolean = 0, trunc = 0, ceil = 0, cos = 0, round = 0; };
 
 static inline BuiltinOperator code_of(const ModelT &m, const OperatorT &op)
 {
@@ -41,9 +41,11 @@ static inline BuiltinOperator code_of(const ModelT &m, const OperatorT &op)
  *   LOGICAL_AND = MUL, LOGICAL_OR = MAXIMUM, LOGICAL_NOT = 1 - x; SELECT(c, a, b) = b + c * (a - b), c first brought to the type of a, b
  *   (DEQUANTIZE / QUANTIZE) when they differ
  *   CAST(bool -> float32): float: RESHAPE (a copy); quantised: DEQUANTIZE; a constant bool input becomes a constant 0 / 1
- * and two operators without bool, float32 only (the NPU has FLOOR, not CEIL):
+ * and operators without bool:
  *   CAST(CAST(x float32 -> int32 / int64) -> float32), truncation toward 0 = MAXIMUM(FLOOR(x), 0) + MINIMUM(NEG(FLOOR(NEG(x))), 0)
- *   CEIL(x) = NEG(FLOOR(NEG(x)))
+ *   CEIL(x) = NEG(FLOOR(NEG(x))); COS(x) = SIN(x + pi / 2)
+ *   ROUND(x) (half to even, as TFLite) = r - tie * (r - 2 * FLOOR(r / 2)), r = FLOOR(x + 0.5), tie = MAXIMUM(1 - (0.5 - (r - x)) * K, 0): 1 when x + 0.5 is whole
+ *   CEIL, COS, ROUND of int8 / uint8: DEQUANTIZE, the float formula, QUANTIZE into the original output
  * Only a group whose every bool tensor is made and used by such operators (and is no model output) is rewritten. In float, |a - b| below
  * 1 / K (or below the float16 resolution) counts as equal. */
 struct QRange { float lo, hi; };
@@ -111,9 +113,10 @@ static inline bool rewrite_bool(ModelT &model, Stats &s)
 			for (int in : op->inputs) if (in < 0 || repr[in] < 0) { repr[op->outputs[0]] = -1; again = true; break; }
 		}
 	}
-	/* truncation (a CAST pair through an integer used nowhere else) and CEIL, float32 */
+	/* truncation (a CAST pair through an integer used nowhere else, float32); CEIL, COS, ROUND */
 	std::vector<int> uses(nt, 0), trunc_of(nops, -1);   /* trunc_of[second CAST] = x */
-	std::vector<char> drop(nops, 0), ceil_op(nops, 0);
+	std::vector<char> drop(nops, 0);
+	std::vector<int> unary(nops, 0);   /* CEIL, COS, ROUND: their operator code */
 	for (auto &op : sg.operators) for (int in : op->inputs) if (in >= 0) uses[in]++;
 	for (int t : sg.outputs) uses[t]++;
 	for (size_t i = 0; i < nops; i++) {
@@ -121,7 +124,8 @@ static inline bool rewrite_bool(ModelT &model, Stats &s)
 		BuiltinOperator c = code_of(model, op);
 		if (op.inputs.size() != 1 || op.outputs.size() != 1) continue;
 		const TensorT &x = *sg.tensors[op.inputs[0]], &y = *sg.tensors[op.outputs[0]];
-		if (c == BuiltinOperator_CEIL && x.type == TensorType_FLOAT32) ceil_op[i] = 1;
+		if ((c == BuiltinOperator_CEIL || c == BuiltinOperator_COS || c == BuiltinOperator_ROUND) && x.type == y.type &&
+		    (x.type == TensorType_FLOAT32 || ((x.type == TensorType_INT8 || x.type == TensorType_UINT8) && same_quant(op.inputs[0], op.outputs[0])))) unary[i] = c;
 		if (c != BuiltinOperator_CAST || x.type != TensorType_FLOAT32 || (y.type != TensorType_INT32 && y.type != TensorType_INT64) || uses[op.outputs[0]] != 1) continue;
 		for (size_t j = i + 1; j < nops; j++) {
 			const OperatorT &o2 = *sg.operators[j];
@@ -132,7 +136,7 @@ static inline bool rewrite_bool(ModelT &model, Stats &s)
 	}
 	bool any = false;
 	for (size_t t = 0; t < nt; t++) any = any || repr[t] >= 0;
-	for (size_t i = 0; i < nops; i++) any = any || drop[i] || ceil_op[i];
+	for (size_t i = 0; i < nops; i++) any = any || drop[i] || unary[i];
 	if (!any) return false;
 
 	/* helpers to build the replacement */
@@ -211,7 +215,7 @@ static inline bool rewrite_bool(ModelT &model, Stats &s)
 			int d = tensor(type, shape, 0, 0, nm("diff"));
 			sg.tensors[d]->quantization->scale = { step }; sg.tensors[d]->quantization->zero_point = { type == TensorType_INT8 ? 0 : 128 };
 			emit(BuiltinOperator_SUB, { a, b }, d);
-			/* one step of the difference gives 1; k = 2 / step (a requantisation multiplier of 4) gives wrong results in TFLite on the CPU, 1 / step (2) is right */
+			/* one step of the difference gives 1 (k = 1 / step keeps the requantisation multiplier at 2: stock TFLite's NEON MUL wraps around at 4, ours is patched) */
 			emit(BuiltinOperator_MUL, { d, constant(type, 1.0f / step, nm("k")) }, o);
 		}
 	};
@@ -250,7 +254,29 @@ static inline bool rewrite_bool(ModelT &model, Stats &s)
 			s.trunc++;
 			continue;
 		}
-		if (ceil_op[i]) { ceil(op->inputs[0], o, sg.tensors[o]->shape); s.ceil++; continue; }
+		if (unary[i]) {
+			const std::vector<int> shape = sg.tensors[o]->shape;
+			auto f32 = [&](const char *w) { return tensor(TensorType_FLOAT32, shape, 0, 0, nm(w)); };
+			auto k = [&](float v) { return constant(TensorType_FLOAT32, v, nm("c")); };
+			bool q = sg.tensors[o]->type != TensorType_FLOAT32;
+			int x = op->inputs[0], y = o;
+			if (q) { x = f32("dq"); emit(BuiltinOperator_DEQUANTIZE, { op->inputs[0] }, x); y = f32("res"); }
+			if (unary[i] == BuiltinOperator_CEIL) { ceil(x, y, shape); s.ceil++; }
+			else if (unary[i] == BuiltinOperator_COS) { int a = f32("shift"); emit(BuiltinOperator_ADD, { x, k(1.57079632679f) }, a); emit(BuiltinOperator_SIN, { a }, y); s.cos++; }
+			else {
+				int h = f32("h"), r = f32("r"), d = f32("d"), e = f32("e"), m = f32("m"), t0 = f32("t0"), tie = f32("tie");
+				int hf = f32("half"), fh = f32("fh"), tw = f32("twice"), odd = f32("odd"), p = f32("p");
+				emit(BuiltinOperator_ADD, { x, k(0.5f) }, h); emit(BuiltinOperator_FLOOR, { h }, r);
+				emit(BuiltinOperator_SUB, { r, x }, d); emit(BuiltinOperator_SUB, { k(0.5f), d }, e);
+				emit(BuiltinOperator_MUL, { e, k(60000.0f) }, m); emit(BuiltinOperator_SUB, { k(1.0f), m }, t0);
+				emit(BuiltinOperator_MAXIMUM, { t0, k(0.0f) }, tie);
+				emit(BuiltinOperator_MUL, { r, k(0.5f) }, hf); emit(BuiltinOperator_FLOOR, { hf }, fh); emit(BuiltinOperator_MUL, { fh, k(2.0f) }, tw);
+				emit(BuiltinOperator_SUB, { r, tw }, odd); emit(BuiltinOperator_MUL, { tie, odd }, p); emit(BuiltinOperator_SUB, { r, p }, y);
+				s.round++;
+			}
+			if (q) emit(BuiltinOperator_QUANTIZE, { y }, o);
+			continue;
+		}
 		if (o >= 0 && o < (int)nt && repr[o] >= 0 && (is_cmp(c) || is_logic(c))) {
 			TensorType type = (TensorType)repr[o];
 			std::vector<int> shape = sg.tensors[o]->shape;

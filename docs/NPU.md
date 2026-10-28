@@ -125,9 +125,9 @@ and its socket `/run/npu/npu.sock` belongs to `plugdev` too, so the default user
      `target_spec.supported_ops = [TFLITE_BUILTINS_INT8]`; float inputs and outputs (a `QUANTIZE` / `DEQUANTIZE` at the ends) are fine. TensorFlow 2.x makes the weights
      per channel: the server rearranges such layers so that they use the fast path of the NPU and stay exact (see below).
    * Float32 and float16 models run, by default on the CPU of the NPU die (see "How it works"); `device="npu"` puts them on the NPU (slower, some give wrong results).
-   * `device="npu"` is strict: a model with an operator the NPU does not take is refused with its name (in our operator models: `ROUND`, `COS`, `TOPK_V2`); `"auto"` runs it.
+   * `device="npu"` is strict: a model with an operator the NPU does not take is refused with its name (none of our 87 operator models); `"auto"` runs it.
      **Dynamic-range** models (int8 weights, float activations) are not supported on the NPU.
-   * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`): 84 of 87 single-operator models run entirely on the NPU with the right result (main after 0.4.1; `SLICE`, `TILE`, `LOG_SOFTMAX`, `CEIL`, comparisons, logical operators, `SELECT` and `CAST` are rewritten by the server). What the NPU cannot do runs on the CPU of the NPU die
+   * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`): all 87 single-operator models run entirely on the NPU with the right result (main after 0.4.1; `SLICE`, `TILE`, `LOG_SOFTMAX`, `CEIL`, `ROUND`, `COS`, comparisons, logical operators, `SELECT` and `CAST` are rewritten by the server, `TOPK_V2` is mapped by our delegate patch). What the NPU cannot do runs on the CPU of the NPU die
      (TensorFlow Lite with XNNPACK).
    * TensorFlow Lite 2.21 reads the models (LiteRT is the new name of TensorFlow Lite; its `.tflite` files and the classic interpreter API are what is used here).
    * ONNX or PyTorch models: convert to TFLite first (for example with `ai-edge-torch` or `onnx2tf`) and quantise as above. (Not part of the image.)
