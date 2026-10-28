@@ -127,7 +127,7 @@ and its socket `/run/npu/npu.sock` belongs to `plugdev` too, so the default user
    * `device="npu"` is strict: a model with an operator the NPU does not take is refused with its name (in our operator models: `SLICE`, `TILE`, `CEIL`, `ROUND`, `COS`,
      `LOG_SOFTMAX`, `TOPK_V2`, comparisons, logical operators, `CAST`); `"auto"` runs it.
      **Dynamic-range** models (int8 weights, float activations) are not supported on the NPU.
-   * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`): 68 of 87 single-operator models run entirely on the NPU with the right result. What the NPU cannot do runs on the CPU of the NPU die
+   * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`): 72 of 87 single-operator models run entirely on the NPU with the right result (main after 0.4.1; `SLICE`, `TILE`, `LOG_SOFTMAX` are rewritten by the server). What the NPU cannot do runs on the CPU of the NPU die
      (TensorFlow Lite with XNNPACK).
    * TensorFlow Lite 2.21 reads the models (LiteRT is the new name of TensorFlow Lite; its `.tflite` files and the classic interpreter API are what is used here).
    * ONNX or PyTorch models: convert to TFLite first (for example with `ai-edge-torch` or `onnx2tf`) and quantise as above. (Not part of the image.)

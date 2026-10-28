@@ -1,15 +1,17 @@
 # TensorFlow Lite operators on the NPU
 
-Which operators of a TFLite model run on the NPU of the Tinker Edge R (release 0.4.1: TensorFlow Lite 2.21, TIM-VX and the TFLite VX delegate), and, for comparison,
+Which operators of a TFLite model run on the NPU of the Tinker Edge R (TensorFlow Lite 2.21, TIM-VX and the TFLite VX delegate, with the rewrites of our server; main branch
+after release 0.4.1, measured on 2026-10-28), and, for comparison,
 which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 
 * **NPU**: `yes` = the operator runs on the NPU with the right result (compared with TensorFlow on the CPU, tolerance 0.05); `CPU` = it runs on the CPU of the NPU die
   (with `device="auto"`; `device="npu"` refuses a model with such an operator and names it); `-` = not tested (no model could be made, or the test model
   also needs an operator that stays on the CPU).
 * **RKNN**: `yes` = RKNN-Toolkit 1.7.5 accepted the model (it has no simulator, so its results were not checked); `no` = refused; `-` = not tested.
-* One tiny float32 model per operator (input 1x8x8x4), 87 models, measured on one board on 2026-10-27 (NPU) and 2026-10-26 (RKNN).
+* One tiny float32 model per operator (input 1x8x8x4), 87 models, measured on one board on 2026-10-28 (NPU) and 2026-10-26 (RKNN).
 
-68 of the 87 models run entirely on the NPU, none gives a wrong result. Comparisons, logical operators and `CAST` stay on the CPU on purpose: TIM-VX crashes on bool tensors with this driver.
+72 of the 87 models run entirely on the NPU, none gives a wrong result. `SLICE`, `TILE` and `LOG_SOFTMAX` are rewritten by our server into operators the NPU runs
+(`STRIDED_SLICE`, `CONCATENATION`, `SOFTMAX` + `LOG`; `npu-open/server/rewrite_ops.h`). Comparisons, logical operators and `CAST` stay on the CPU on purpose: TIM-VX crashes on bool tensors with this driver.
 
 | Operator | NPU | RKNN |
 |---|---|---|
@@ -19,8 +21,8 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `ARG_MAX` | yes | yes |
 | `ARG_MIN` | yes | yes |
 | `AVERAGE_POOL_2D` | yes | yes |
-| `BATCH_MATMUL` | - | - |
-| `BATCH_TO_SPACE_ND` | - | yes |
+| `BATCH_MATMUL` | yes | - |
+| `BATCH_TO_SPACE_ND` | yes | yes |
 | `CAST` | CPU | no |
 | `CEIL` | CPU | yes |
 | `CONCATENATION` | yes | yes |
@@ -54,7 +56,7 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `LOGICAL_NOT` | - | - |
 | `LOGICAL_OR` | CPU | no |
 | `LOGISTIC` | yes | yes |
-| `LOG_SOFTMAX` | CPU | yes |
+| `LOG_SOFTMAX` | yes | yes |
 | `LSTM` | - | - |
 | `MAXIMUM` | yes | yes |
 | `MAX_POOL_2D` | yes | yes |
@@ -103,7 +105,7 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `SUM` | yes | yes |
 | `SVDF` | - | - |
 | `TANH` | yes | yes |
-| `TILE` | CPU | yes |
+| `TILE` | yes | yes |
 | `TOPK_V2` | CPU | no |
 | `TRANSPOSE` | yes | yes |
 | `TRANSPOSE_CONV` | yes | yes |

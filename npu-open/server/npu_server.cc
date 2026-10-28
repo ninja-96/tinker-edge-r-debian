@@ -34,6 +34,7 @@
 
 #include "protocol.h"
 #include "fix_dynamic_reshape.h"
+#include "rewrite_ops.h"
 #include "split_per_channel.h"
 #include "tensorflow/lite/delegates/external/external_delegate.h"
 #include "tim/vx/context.h"
@@ -178,6 +179,11 @@ static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &rep
 		npu_reshape::Stats st; std::string e = npu_reshape::run(m->bytes, &st);
 		if (!e.empty()) return e;
 		if (st.fixed) logf_("graph-computed reshape shapes made constant: %d (%d operators removed)", st.fixed, st.removed);
+	}
+	if (!cpu_only && (!getenv("NPU_REWRITE") || getenv("NPU_REWRITE")[0] != '0')) {   /* SLICE, TILE, LOG_SOFTMAX into operators the NPU runs, see rewrite_ops.h */
+		npu_rewrite::Stats st; std::string e = npu_rewrite::run(m->bytes, &st);
+		if (!e.empty()) return e;
+		if (st.slice + st.tile + st.log_softmax) logf_("operators rewritten for the NPU: SLICE %d, TILE %d, LOG_SOFTMAX %d", st.slice, st.tile, st.log_softmax);
 	}
 	if (!cpu_only && !no_split && (!getenv("NPU_SPLIT") || getenv("NPU_SPLIT")[0] != '0')) {   /* per-channel int8 layers -> per-tensor groups (fast path of the NPU, exact), see split_per_channel.h */
 		npu_split::Stats st; std::string e = npu_split::run(m->bytes, 4.0, &st);
