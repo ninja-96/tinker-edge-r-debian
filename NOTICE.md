@@ -27,8 +27,8 @@ This is the project's own summary, not legal advice.
 | `python/rk3399pro_npu/`, `overlay/usr/local/bin/npu-info`, `npu-models`, `npu-selftest`, `tests/npu/` | MIT | own work: the Python package of the NPU, tools and test models |
 | `npu-open/host/` | MIT | own work: `npu-daemon`, the C++ library `librk3399pro_npu` and its Python binding; `op_names.h` is generated from the operator list of the TensorFlow Lite schema (Apache-2.0) |
 | `npu-open/server/`, `npu-open/ramdisk/`, `npu-open/tools/` | MIT | own work: the server that runs on the NPU die, model rewrites, init-script changes, ramdisk tool |
-| `npu-open/patches/0001`, `0003` | MIT (patches of MIT-licensed code) | the compiled-graph export, int8 as uint8, folded constant Dequantize, operators left to the CPU, `TOPK_V2`, for VeriSilicon's tflite-vx-delegate |
-| `npu-open/patches/0002` | Apache-2.0 (patch of Apache-2.0 code) | saturating NEON int8 / uint8 `ADD` / `SUB` / `MUL` kernels of TensorFlow Lite |
+| `npu-open/patches/0001`, `0003`, `0004` | MIT (patches of MIT-licensed code) | the compiled-graph export, int8 as uint8, folded constant Dequantize, operators left to the CPU, `TOPK_V2`, the build on LiteRT, for VeriSilicon's tflite-vx-delegate |
+| `npu-open/patches/0002-litert` | Apache-2.0 (patch of Apache-2.0 code) | saturating NEON int8 / uint8 `ADD` / `SUB` / `MUL` kernels of LiteRT's TensorFlow Lite |
 | `blobs/rockchip/` | Rockchip licence, see below | unmodified Rockchip binaries and one file assembled from them |
 
 ## 2. Binary-only files (Rockchip)
@@ -60,7 +60,7 @@ loader), which is the one point a reader may want to judge for themselves.
 | Rockchip GStreamer plugins (`JeffyCN/mirrors`, branch `gstreamer-rockchip`, commit in `sources.lock`) | LGPL-2.0-or-later (file headers; `COPYING` is the LGPL-2.1 text) | built by `scripts/build-gst-rockchip.sh` |
 | Firmware of the NPU die (`airockchip/RK3399Pro_npu`, commit in `sources.lock`): `MiniLoaderAll.bin`, `uboot.img`, `trust.img`, `boot.img` | Apache-2.0 (the repository's `LICENSE`, installed as `licenses/RK3399Pro_npu-LICENSE`); binary only. The firmware contains GPL software (Linux 4.4.185, BusyBox, the galcore driver) whose sources Rockchip publishes in its repositories, and Vivante's closed user libraries. The image's `boot.img` differs from Rockchip's in the device tree (`scripts/npu-fw-tinker.py`) and in the ramdisk (our server and libraries below, two init scripts changed) |
 | VeriSilicon TIM-VX, `tflite-vx-delegate` (`main` commits in `sources.lock`) | MIT (installed as `licenses/TIM-VX-LICENSE`, `licenses/tflite-vx-delegate-LICENSE`) | built by `scripts/build-npu-open.sh` for the NPU die, with our patch; they run inside the NPU's boot image |
-| TensorFlow 2.21.0 (TensorFlow Lite) and the libraries it is built with | TensorFlow, abseil, flatbuffers, gemmlowp, ruy, ml_dtypes: Apache-2.0; XNNPACK: BSD-3-Clause; cpuinfo, pthreadpool: BSD-2-Clause; FP16, FXdiv, farmhash: MIT; Eigen: MPL-2.0 (its sources: the commit in `sources.lock`); fft2d: Takuya Ooura's licence (use, copy, modify, distribute). Texts installed as `licenses/<name>-LICENSE` (Eigen: `Eigen-COPYING.MPL2`, fft2d: `fft2d-readme2d.txt`). protobuf (BSD-3-Clause) is fetched by the build, not linked | statically linked into `npu_server` and `libvx_delegate.so` by `scripts/build-npu-open.sh` |
+| LiteRT 2.3.2 (TensorFlow Lite as its `tflite/`), the TensorFlow tree it pins (commit `5c0b7a59`) and the libraries it is built with | TensorFlow, abseil, flatbuffers, gemmlowp, ruy, ml_dtypes: Apache-2.0; XNNPACK: BSD-3-Clause; cpuinfo, pthreadpool: BSD-2-Clause; FP16, FXdiv, farmhash: MIT; Eigen: MPL-2.0 (its sources: the commit in `sources.lock`); fft2d: Takuya Ooura's licence (use, copy, modify, distribute). Texts installed as `licenses/<name>-LICENSE` (Eigen: `Eigen-COPYING.MPL2`, fft2d: `fft2d-readme2d.txt`). protobuf (BSD-3-Clause) is fetched by the build, not linked | statically linked into `npu_server` and `libvx_delegate.so` by `scripts/build-npu-open.sh` |
 | pybind11 (Debian package `pybind11-dev`) | BSD-3-Clause (`licenses/pybind11-copyright`) | header-only, compiled into the Python module `rk3399pro_npu._core` by `scripts/build-npu-host.sh` |
 | Debian 13 packages (kernel modules excepted), including the `non-free-firmware` packages | per package; see `/usr/share/doc/<package>/copyright` in the image | installed into the root filesystem |
 
@@ -80,7 +80,7 @@ gone, write to the repository's issue tracker):
 | Linux kernel and its modules | the kernel.org tarball named in `sources.lock`, plus `patches/linux/`, `kernel-mods/`, `config/linux-tinker.fragment`, `dts/` of the release tag |
 | U-Boot | the tag named in `sources.lock`, plus `u-boot-mods/` of the release tag |
 | Rockchip `mpp`, GStreamer plugin | the repositories and commits named in `sources.lock` |
-| TIM-VX, tflite-vx-delegate, TensorFlow 2.21.0 and its libraries (inside the NPU boot image; permissive licences and MPL-2.0 for Eigen) | the repositories, commits and tarball checksums named in `sources.lock`, plus `npu-open/` of the release tag |
+| TIM-VX, tflite-vx-delegate, LiteRT 2.3.2, the TensorFlow tree it pins and their libraries (inside the NPU boot image; permissive licences and MPL-2.0 for Eigen) | the repositories, commits and tarball checksums named in `sources.lock`, plus `npu-open/` of the release tag |
 | Debian packages | the Debian source archive (`deb-src` of suite `trixie`, https://deb.debian.org/debian) and https://snapshot.debian.org for old versions; the exact package versions are listed in `/usr/share/doc/tinker-edge-r/packages.txt` in the image (and as `packages.txt` with the release, from release 0.3 on) |
 | Rockchip binaries (DRAM init, BL31) | no source (see section 2) |
 

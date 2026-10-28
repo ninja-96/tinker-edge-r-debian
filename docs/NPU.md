@@ -1,8 +1,8 @@
 # RK3399Pro NPU on the Tinker Edge R: TensorFlow Lite
 
-> **Status (release 0.4.1): TensorFlow Lite 2.21 models run on the NPU through an open software stack**, several at once and from several programs.
+> **Status (release 0.5): LiteRT / TensorFlow Lite models run on the NPU through an open software stack** (LiteRT 2.3.2 on the NPU die since 0.5; 0.4.1: TensorFlow Lite 2.21), several at once and from several programs.
 > The NPU die runs Linux 4.4.185 and the Vivante driver from Rockchip's firmware (closed, Apache-2.0 repository `airockchip/RK3399Pro_npu`, used as it is except for
-> one device tree change). Everything above the driver is open: [TIM-VX](https://github.com/VeriSilicon/TIM-VX), VeriSilicon's TFLite VX delegate, TensorFlow Lite 2.21
+> one device tree change). Everything above the driver is open: [TIM-VX](https://github.com/VeriSilicon/TIM-VX), VeriSilicon's TFLite VX delegate, LiteRT 2.3.2 (TensorFlow Lite)
 > with XNNPACK, our server on the NPU die, our USB channel, the daemon `npu-daemon`, the C++ library `librk3399pro_npu` and its Python module `rk3399pro_npu`.
 > The numbers below were measured on a board; the research behind them is in [NPU-RESEARCH.md](NPU-RESEARCH.md) and `npu-open/`.
 
@@ -11,7 +11,7 @@
 ```
  board (RK3399Pro host, Debian 13)                                  NPU die (2 x Cortex-A35, 2 GB, Linux 4.4.185 from RAM)
  program A: rk3399pro_npu.Model("a.tflite") --+                        npu_server (our): one child process ("engine") per model:
- program B: rk3399pro_npu.Model("b.tflite") --+-- npu-daemon -- USB 3 -->  TensorFlow Lite 2.21 + VX delegate (VeriSilicon) -> TIM-VX -> libVSC/galcore
+ program B: rk3399pro_npu.Model("b.tflite") --+-- npu-daemon -- USB 3 -->  LiteRT 2.3.2 + VX delegate (VeriSilicon) -> TIM-VX -> libVSC/galcore
  (C++: librk3399pro_npu, the same)              /run/npu/npu.sock          + XNNPACK on the A35 for what stays on the CPU
                                                 own bulk channel ("ntb"), 38-52 MB/s
 ```
@@ -136,7 +136,7 @@ and its socket `/run/npu/npu.sock` belongs to `plugdev` too, so the default user
      **Dynamic-range** models (int8 weights, float activations) are not supported on the NPU.
    * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`): all 87 single-operator models run entirely on the NPU with the right result (main after 0.4.1; `SLICE`, `TILE`, `LOG_SOFTMAX`, `CEIL`, `ROUND`, `COS`, comparisons, logical operators, `SELECT` and `CAST` are rewritten by the server, `TOPK_V2` is mapped by our delegate patch). What the NPU cannot do runs on the CPU of the NPU die
      (TensorFlow Lite with XNNPACK).
-   * TensorFlow Lite 2.21 reads the models (LiteRT is the new name of TensorFlow Lite; its `.tflite` files and the classic interpreter API are what is used here).
+   * LiteRT 2.3.2 reads the models: LiteRT is the new name of TensorFlow Lite and carries it as `tflite/`; its `.tflite` files and the classic interpreter API are what is used here (release 0.4.1 used TensorFlow Lite 2.21).
    * ONNX or PyTorch models: convert to TFLite first (for example with `ai-edge-torch` or `onnx2tf`) and quantise as above. (Not part of the image.)
 2. **Copy the file to the board and run it** with the system Python:
    ```python

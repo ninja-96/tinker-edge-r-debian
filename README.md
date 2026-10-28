@@ -2,7 +2,7 @@
 
 <p align="center">
 <b>Give your ASUS Tinker Edge R a second life</b><br>
-🐧 Debian 13 &nbsp;·&nbsp; ⚙️ Linux 6.18 LTS &nbsp;·&nbsp; 🥾 mainline U-Boot &nbsp;·&nbsp; 🎬 hardware video &nbsp;·&nbsp; 🎨 OpenGL ES + OpenCL &nbsp;·&nbsp; 🧠 NPU
+🐧 Debian 13 &nbsp;·&nbsp; ⚙️ Linux 6.18 LTS &nbsp;·&nbsp; 🥾 mainline U-Boot &nbsp;·&nbsp; 🎬 hardware video &nbsp;·&nbsp; 🎨 OpenGL ES + OpenCL &nbsp;·&nbsp; 🧠 NPU with LiteRT
 </p>
 
 Build and flash scripts for an open-source system on the **ASUS Tinker Edge R**
@@ -30,31 +30,31 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 |---|---|---|---|
 | Boot: DRAM init, U-Boot, extlinux, Linux 6.18.59 from the eMMC | ✅ yes | ✅ yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
 | Flashing over USB, backup, restore, kernel update | ✅ yes | ✅ yes | read-back verification |
-| Ethernet, SSH, mDNS name, NTP | ✅ yes | 🟡 partly | link and names; about 500 Mbit/s measured on a 500 Mbit/s line, gigabit not measured |
+| Ethernet, SSH, mDNS name, NTP | ✅ yes | ✅ yes | gigabit link; 500 Mbit/s measured, the limit of the internet line it was measured on |
 | CPU (6 cores, cpufreq), RAM 4 GB | ✅ yes | ✅ yes | `stress-ng` 8 + 10 min, `memtester` full pass, 47 C at full load; 933 MHz not benchmarked against 800 |
 | eMMC (HS200) | ✅ yes | ✅ yes | read 164 MB/s, write 26-52 MB/s; root grows to the whole eMMC on the first boot |
-| GPU: OpenGL ES 3.1, OpenGL 3.1 (Panfrost), OpenCL 3.0 (Rusticl) | ✅ yes | ✅ yes | OpenCL kernels give correct results; Vulkan: no |
+| GPU: OpenGL ES 3.1, OpenGL 3.1 (Panfrost), OpenCL 3.0 (Rusticl) | ✅ yes | ✅ yes | OpenCL kernels give correct results |
 | Hardware video: H.264 / VP8 / JPEG encode, H.264 decode (`mpp`), GStreamer plugins | ✅ yes | ✅ yes | 720p H.264 encode 54 fps, decode 116 fps |
 | HDMI picture | ✅ yes | ✅ yes | KDE Plasma on Wayland works; on X11 the frame rate drops from 60 to 30 while windows move |
-| HDMI audio | ❔ not known | 🙋 needs you | |
-| Wi-Fi (RTL8822CE) | ⚠️ scan only | 🟡 partly | access points are seen; connection and throughput not tested |
-| Bluetooth | ⚠️ adapter only | 🟡 partly | `hci0` up, scan finds a device; pairing not tested |
-| Audio, 3.5 mm jack (RK809) | ❔ not known | 🟡 partly | tone and recording run without errors; not listened to |
-| RTC | ✅ yes | 🟡 partly | write and read back; retention without power not tested |
+| HDMI audio | ✅ yes | 🟡 partly | the stream runs; not heard yet (a monitor without speakers) |
+| Wi-Fi (RTL8822CE) | ✅ yes | 🟡 partly | driver, firmware, the scan sees 2.4 and 5 GHz networks; **connect the two antennas** (U.FL on the module); connection and throughput with antennas not measured yet |
+| Bluetooth | ✅ yes | 🟡 partly | pairing through KDE, PipeWire offers A2DP (SBC, SBC-XQ) and HFP (mSBC); without antennas the audio link drops; to be repeated with antennas |
+| Audio, 3.5 mm jack (RK809) | ✅ yes | ✅ yes | headphones heard; the headset microphone works (it is the right channel: a mono `Headset microphone` source; a fix of the mainline codec driver, +30 dB) |
+| RTC | ✅ yes | ✅ yes | keeps the time across reboots, set from NTP; without power it keeps the time only with a backup battery on the `RTC_BATTERY` header (without one it restarts at 2017-08-05) |
 | 40-pin header: GPIO, I2C6/7, SPI1/5, PWM0/1/3 | ⚠️ software side | 🟡 partly | every plain GPIO pin driven and read; no loopback, no real devices ([GPIO.md](docs/GPIO.md)) |
-| USB-A ports (keyboard, mouse) | ✅ yes | 🟡 partly | a keyboard and a mouse work; a flash drive and USB 3 speed not tried |
-| USB-C as host | ❔ not known | 🙋 needs you | plug a device in; USB 3 speed |
+| USB-A ports | ✅ yes | ✅ yes | all three ports at 5 Gbit/s (USB 3), a flash drive reads 94-96 MB/s in each; a keyboard and a mouse |
+| USB-C port (devices plugged in: flash drive, hub) | ✅ yes, USB 2.0 | ✅ yes | flash drives and disks work at USB 2.0 speed (480 Mbit/s, 29-35 MB/s), in both plug orientations; the port gives 5 V to devices (FUSB302, TPS2553 switch, about 1.5 A); USB 3 over USB-C does not come up (to be looked at); board revision 1.02 ([HARDWARE.md](docs/HARDWARE.md#board-revision)) |
 | Boot from an SD card, swap file | ❔ not known | 🙋 needs you | `scripts/flash-sd.sh` |
-| NPU: TensorFlow Lite 2.21 models from Python 3.13 and C++ (open stack: TIM-VX + TFLite VX delegate, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU, int8 ResNet18 19 ms (27 times its CPU time), ResNet50 70 ms; several models at once, shared by several programs (`npu-daemon`), float models on the CPU of the NPU die by default, `autotune()` picks NPU / CPU / mixed per model; built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`full` device tree) |
+| NPU: LiteRT / TensorFlow Lite models (`.tflite`) from Python 3.13 and C++ (open stack: LiteRT 2.3.2 + TIM-VX + TFLite VX delegate on the NPU die, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU, int8 ResNet18 19 ms (27 times its CPU time), ResNet50 70 ms; several models at once, shared by several programs (`npu-daemon`), float models on the CPU of the NPU die by default, `autotune()` picks NPU / CPU / mixed per model; built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`full` device tree) |
 | Power profiles `tinker-power` (powersave / normal / performance) | ✅ yes | ✅ yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
 | Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
 | Python for the header: libgpiod, smbus2, spidev | ✅ yes | 🟡 partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
+| Boot logo | ✅ yes | ⬜ not yet | the white Debian swirl centred on black in U-Boot, the kernel and Plymouth, at any resolution |
+| Suspend and resume | ⚠️ partly | 🟡 partly | deep sleep and an RTC wake-up work, the NPU is put to sleep with the board and keeps its models; a USB keyboard or mouse does not wake the board |
 | DisplayPort over USB-C | ❌ no | | mainline has no Type-C DP glue for this SoC; the USB-C port is a USB host only ([OPEN.md](docs/OPEN.md)) |
-| Vulkan | ❌ no | | Mali-T860 (Midgard) is not supported by PanVK; software `llvmpipe` only |
-| GPU inference engines | ❌ no | | Arm NN GpuAcc does not run (needs OpenCL 2.0); MNN, TVM and TFLite on the GPU are untried; CPU numbers in [ROADMAP.md](docs/ROADMAP.md) |
+| GPU inference engines | ❌ no | | Arm NN (`CpuAcc`, `GpuAcc`) is planned ([ROADMAP.md](docs/ROADMAP.md)) |
 | MIPI DSI display, MIPI CSI cameras | ❌ no | | drivers are built, no panel or camera is described in the device tree ([MIPI.md](docs/MIPI.md)) |
 | Mini PCIe LTE modem, nano-SIM | ❌ no | | the slot is there, no modem is fitted, modem drivers are off |
-| Suspend and resume, boot logo | ❌ no | | not implemented |
 | Open DRAM init and open BL31 | ❌ no | | the image uses two closed Rockchip binaries; an open TF-A builds, never booted ([OPEN.md](docs/OPEN.md)) |
 
 Details and plans: [docs/ROADMAP.md](docs/ROADMAP.md).
@@ -265,7 +265,8 @@ sources of what ends up in the images are in [NOTICE.md](NOTICE.md) and inside t
 | [airockchip/RK3399Pro_npu](https://github.com/airockchip/RK3399Pro_npu) | firmware of the NPU die (Linux 4.4.185, the Vivante driver and libraries), binary only; we change its device tree and ramdisk | Apache-2.0 ([LICENSE](https://github.com/airockchip/RK3399Pro_npu/blob/8858114555f1700e41e185b14ec3d266342f8059/LICENSE)); inside: GPL software, Vivante's closed libraries |
 | [VeriSilicon/TIM-VX](https://github.com/VeriSilicon/TIM-VX) | graph library on top of the Vivante driver, `main` (commit in `sources.lock`) built with the SDK headers of tag `v1.1.32`, for the NPU die | MIT ([LICENSE](https://github.com/VeriSilicon/TIM-VX/blob/main/LICENSE)) |
 | [VeriSilicon/tflite-vx-delegate](https://github.com/VeriSilicon/tflite-vx-delegate) | TensorFlow Lite delegate for TIM-VX, `main` (commit in `sources.lock`), with [our patch](npu-open/patches) | MIT ([LICENSE](https://github.com/VeriSilicon/tflite-vx-delegate/blob/main/LICENSE)) |
-| [tensorflow/tensorflow](https://github.com/tensorflow/tensorflow) | TensorFlow Lite 2.21.0, linked into our server | Apache-2.0 ([LICENSE](https://github.com/tensorflow/tensorflow/blob/v2.21.0/LICENSE)) |
+| [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT) | LiteRT 2.3.2 (TensorFlow Lite as its `tflite/`), linked into our server on the NPU die | Apache-2.0 ([LICENSE](https://github.com/google-ai-edge/LiteRT/blob/main/LICENSE)) |
+| [tensorflow/tensorflow](https://github.com/tensorflow/tensorflow) | the TensorFlow tree pinned by LiteRT (commit `5c0b7a59`), for the few files LiteRT takes from it | Apache-2.0 ([LICENSE](https://github.com/tensorflow/tensorflow/blob/master/LICENSE)) |
 | [google/XNNPACK](https://github.com/google/XNNPACK) | CPU kernels of TensorFlow Lite on the NPU die | BSD-3-Clause ([LICENSE](https://github.com/google/XNNPACK/blob/master/LICENSE)) |
 | [pytorch/cpuinfo](https://github.com/pytorch/cpuinfo), [google/pthreadpool](https://github.com/google/pthreadpool) | used by XNNPACK | BSD-2-Clause ([cpuinfo](https://github.com/pytorch/cpuinfo/blob/main/LICENSE), [pthreadpool](https://github.com/google/pthreadpool/blob/main/LICENSE)) |
 | [Maratyszcza/FP16](https://github.com/Maratyszcza/FP16), [Maratyszcza/FXdiv](https://github.com/Maratyszcza/FXdiv), [google/farmhash](https://github.com/google/farmhash) | headers and code used by TensorFlow Lite and XNNPACK | MIT ([FP16](https://github.com/Maratyszcza/FP16/blob/master/LICENSE), [FXdiv](https://github.com/Maratyszcza/FXdiv/blob/master/LICENSE), [farmhash](https://github.com/google/farmhash/blob/master/COPYING)) |

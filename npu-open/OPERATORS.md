@@ -1,6 +1,6 @@
 # TensorFlow Lite operators on the NPU
 
-Which operators of a TFLite model run on the NPU of the Tinker Edge R (TensorFlow Lite 2.21, TIM-VX and the TFLite VX delegate, with the rewrites of our server; main branch
+Which operators of a TFLite model run on the NPU of the Tinker Edge R (LiteRT 2.3.2, TIM-VX and the TFLite VX delegate, with the rewrites of our server; main branch
 after release 0.4.1, measured on 2026-10-28), and, for comparison,
 which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 
@@ -134,6 +134,6 @@ the CPU differs at values closer than about 1/256 (its comparison of two differe
 
 Scripts and raw results (private notes): `rnd/verisilicon/models/gen_op_models.py`, `test_ops_041.py`, `rknn_check.py`, `ops/*.tsv`.
 
-Found on the way: the NEON int8 / uint8 `ADD`, `SUB` and `MUL` kernels of TensorFlow Lite 2.21 (used on the CPU of the NPU die when XNNPACK does not take an operator)
+Found on the way: the NEON int8 / uint8 `ADD`, `SUB` and `MUL` kernels of TensorFlow Lite 2.21 and LiteRT 2.3.2 (used on the CPU of the NPU die when XNNPACK does not take an operator)
 add the output zero point in 16 bits without saturation: a large result wraps around to the opposite extreme (an int8 `MUL` with a requantisation multiplier of 4 gave 127
-instead of -128). Our build saturates there (`npu-open/patches/0002`), as the reference kernels do.
+instead of -128). Our build saturates there (`npu-open/patches/0002-litert`), as the reference kernels do.

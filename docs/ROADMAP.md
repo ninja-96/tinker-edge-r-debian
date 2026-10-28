@@ -22,14 +22,12 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 
 | Item | What to do |
 |---|---|
-| HDMI picture, HDMI audio | connect a monitor, run `scripts/test-board.sh`, look and listen |
-| USB-A with a flash drive, USB-C with a device, USB 3 speed | a keyboard and a mouse work on USB-A (checked by the user); plug a USB 3 disk into every port, run the test |
+| HDMI audio by ear | the stream runs (2026-10-28); a monitor or TV with speakers is needed |
+| USB 3 over USB-C | USB-C works at USB 2.0 in both orientations (a flash drive, a JMicron NVMe enclosure, 2026-10-28); the USB 3 port of the controller stays in RxDetect: check with a cable known to carry USB 3, then pass the plug orientation from TCPM to the Type-C PHY (it has no extcon) |
 | Boot from an SD card, the 2 GiB swap file | `scripts/flash-sd.sh`, boot |
-| KDE Plasma desktop | install `task-kde-desktop` once HDMI works |
-| Bluetooth pairing, Wi-Fi connection | pair a device, connect to an access point |
-| Network throughput | `sudo apt install iperf3` on the PC, run the test |
+| KDE Plasma desktop | works on Wayland (checked by the user); idle suspend of KDE puts the board to sleep, and a USB keyboard does not wake it (see Suspend below) |
+| Wi-Fi connection and Bluetooth audio with antennas | both work without antennas only at centimetres; connect the two antennas and repeat |
 | 40-pin electrical side | `GPIO_LOOPBACK` test with jumper wires, real I2C/SPI devices |
-| Audio by ear | listen to the test tone at the 3.5 mm jack |
 
 ## Not supported
 
@@ -39,7 +37,7 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 | Vulkan on the GPU | Mali-T860 (Midgard) is not covered by PanVK | none; only software `llvmpipe` |
 | Mini PCIe LTE modem and SIM | the board has the slot and the SIM holder, no modem is fitted | fit a modem; enable the modem drivers; check slot power in the device tree |
 | MIPI DSI display and MIPI CSI cameras | no panel or sensor is described in the device tree | [MIPI.md](MIPI.md) |
-| Suspend/resume, boot logo | not implemented | |
+| Wake-up from a USB keyboard or mouse in deep sleep | the closed BL31 does not keep the USB controllers as wake sources; RTC alarms wake the board (2026-10-28) | the power key of the RK809 (to try); s2idle; or turn off idle suspend in the desktop |
 
 ## Planned
 

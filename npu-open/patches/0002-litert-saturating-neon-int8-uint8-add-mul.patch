@@ -1,4 +1,4 @@
-TensorFlow Lite 2.21.0: saturate the int16 steps of the NEON int8 / uint8 ADD, SUB and MUL kernels
+LiteRT 2.3.2 (tflite/): saturate the int16 steps of the NEON int8 / uint8 ADD, SUB and MUL kernels
 
 The optimised NEON kernels narrow the rescaled 32-bit result to 16 bits and then add the output
 zero point in 16 bits. ADD / SUB narrow without saturation (vmovn_s32) and all of them add without
@@ -8,8 +8,9 @@ give -128 (checked on the NPU die with the built-in kernels, XNNPACK off; the re
 XNNPACK are right). Saturating narrowing (vqmovn_s32) and saturating addition (vqaddq_s16) give the
 result of the reference kernels.
 
---- a/tensorflow/lite/kernels/internal/optimized/integer_ops/add.h	2026-10-28 11:14:05.303573393 +0300
-+++ b/tensorflow/lite/kernels/internal/optimized/integer_ops/add.h	2026-10-28 11:14:05.326964036 +0300
+
+--- a/tflite/kernels/internal/optimized/integer_ops/add.h
++++ b/tflite/kernels/internal/optimized/integer_ops/add.h
 @@ -124,13 +124,13 @@
      s12 = RoundingDivideByPOT(s12, -params.output_shift);
      s21 = RoundingDivideByPOT(s21, -params.output_shift);
@@ -43,8 +44,8 @@ result of the reference kernels.
                                    vdupq_n_s16(params.output_offset));
      const int8x8_t clamped =
          vmax_s8(output_activation_min_vector,
---- a/tensorflow/lite/kernels/internal/optimized/integer_ops/mul.h	2026-10-28 11:14:05.313941243 +0300
-+++ b/tensorflow/lite/kernels/internal/optimized/integer_ops/mul.h	2026-10-28 11:14:05.328441895 +0300
+--- a/tflite/kernels/internal/optimized/integer_ops/mul.h
++++ b/tflite/kernels/internal/optimized/integer_ops/mul.h
 @@ -111,9 +111,9 @@
      const auto p4_narrowed = vqmovn_s32(p4);
  
@@ -69,9 +70,9 @@ result of the reference kernels.
      const int8x16_t p = vcombine_s8(vqmovn_s16(p_part2), vqmovn_s16(p_part1));
  
      const auto clamped = vmaxq_s8(output_activation_min_vector,
---- a/tensorflow/lite/kernels/internal/optimized/optimized_ops.h	2026-10-28 11:14:05.324412016 +0300
-+++ b/tensorflow/lite/kernels/internal/optimized/optimized_ops.h	2026-10-28 11:14:05.330664922 +0300
-@@ -1591,9 +1591,9 @@
+--- a/tflite/kernels/internal/optimized/optimized_ops.h
++++ b/tflite/kernels/internal/optimized/optimized_ops.h
+@@ -1590,9 +1590,9 @@
      using gemmlowp::RoundingDivideByPOT;
      s1 = RoundingDivideByPOT(s1, -params.output_shift);
      s2 = RoundingDivideByPOT(s2, -params.output_shift);
@@ -84,7 +85,7 @@ result of the reference kernels.
                                    vdupq_n_s16(params.output_offset));
      const uint8x8_t clamped =
          vmax_u8(output_activation_min_vector,
-@@ -1689,9 +1689,9 @@
+@@ -1688,9 +1688,9 @@
      s2 = vqrdmulhq_n_s32(s2, params.output_multiplier);
      s1 = RoundingDivideByPOT(s1, -params.output_shift);
      s2 = RoundingDivideByPOT(s2, -params.output_shift);
@@ -97,7 +98,7 @@ result of the reference kernels.
                                    vdupq_n_s16(params.output_offset));
      const uint8x8_t clamped =
          vmax_u8(output_activation_min_vector,
-@@ -2162,7 +2162,7 @@
+@@ -2174,7 +2174,7 @@
      const auto p1_narrowed = vqmovn_s32(p1);
      const auto p2_narrowed = vqmovn_s32(p2);
      const auto p =
@@ -106,7 +107,7 @@ result of the reference kernels.
      const auto clamped =
          vmax_u8(output_activation_min_vector,
                  vmin_u8(output_activation_max_vector, vqmovun_s16(p)));
-@@ -2233,7 +2233,7 @@
+@@ -2245,7 +2245,7 @@
      const auto p1_narrowed = vmovn_s32(p1);
      const auto p2_narrowed = vmovn_s32(p2);
      const auto p =
@@ -115,3 +116,4 @@ result of the reference kernels.
      const auto clamped =
          vmax_u8(output_activation_min_vector,
                  vmin_u8(output_activation_max_vector, vqmovun_s16(p)));
+Only in b/tflite/kernels/internal/optimized: optimized_ops.h.orig

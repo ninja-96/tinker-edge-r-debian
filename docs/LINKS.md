@@ -39,7 +39,7 @@ depend on any of these at build time except the open upstream sources listed und
 | U-Boot v2026.10 | https://github.com/u-boot/u-boot | `sources.lock` |
 | TF-A v2.15.0 (only for the open BL31) | https://github.com/ARM-software/arm-trusted-firmware | `sources.lock` |
 | Debian 13 "trixie" packages | https://deb.debian.org/debian | `scripts/build-rootfs.sh` |
-| NPU stack: TIM-VX, tflite-vx-delegate (`main` branches), TensorFlow 2.21.0 and what TensorFlow Lite builds with (abseil, Eigen, farmhash, fft2d, flatbuffers, gemmlowp, ml_dtypes, ruy, cpuinfo, FP16, protobuf, XNNPACK, pthreadpool, FXdiv) | the repositories in `TFLITE_DEPS` | `sources.lock` (commits; tarballs with sha256), licences in [../README.md](../README.md) |
+| NPU stack: TIM-VX, tflite-vx-delegate (`main` branches), LiteRT 2.3.2, the TensorFlow tree it pins, and what its TensorFlow Lite builds with (abseil, Eigen, farmhash, fft2d, flatbuffers, gemmlowp, ml_dtypes, ruy, cpuinfo, FP16, protobuf, XNNPACK, pthreadpool, FXdiv) | the repositories in `TFLITE_DEPS` | `sources.lock` (commits; tarballs with sha256), licences in [../README.md](../README.md) |
 
 ## Artwork
 

@@ -1,0 +1,224 @@
+tflite-vx-delegate: build on LiteRT
+
+LiteRT (google-ai-edge/LiteRT) carries TensorFlow Lite as tflite/, with its headers under tflite/ (the
+TensorFlow tree it takes a few files from still has an older tensorflow/lite/ of its own, which must not be
+mixed in). With -DLITERT_SOURCE_DIR the delegate builds LiteRT's tflite/ (TENSORFLOW_SOURCE_DIR: the
+TensorFlow tree pinned by LiteRT); the sources include tflite/... instead of tensorflow/lite/...; LiteRT has
+no label_image example target.
+
+--- a/cmake/modules/Findtensorflow.cmake
++++ b/cmake/modules/Findtensorflow.cmake
+@@ -19,18 +19,23 @@
+ #    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+ #    DEALINGS IN THE SOFTWARE
+ #
+-include(FetchContent)
+-FetchContent_Declare(
+-  tensorflow
+-  GIT_REPOSITORY https://github.com/tensorflow/tensorflow.git
+-  GIT_TAG v2.16.1
+-)
+-FetchContent_GetProperties(tensorflow)
+-if(NOT tensorflow_POPULATED)
+-  FetchContent_Populate(tensorflow)
++# LiteRT (google-ai-edge/LiteRT): its tflite/ is TensorFlow Lite; it takes a few files of the TensorFlow tree given as TENSORFLOW_SOURCE_DIR
++if(LITERT_SOURCE_DIR)
++  add_subdirectory("${LITERT_SOURCE_DIR}/tflite" "${CMAKE_BINARY_DIR}/tflite")
++else()
++  include(FetchContent)
++  FetchContent_Declare(
++    tensorflow
++    GIT_REPOSITORY https://github.com/tensorflow/tensorflow.git
++    GIT_TAG v2.16.1
++  )
++  FetchContent_GetProperties(tensorflow)
++  if(NOT tensorflow_POPULATED)
++    FetchContent_Populate(tensorflow)
++  endif()
++  add_subdirectory("${tensorflow_SOURCE_DIR}/tensorflow/lite"
++                   "${tensorflow_BINARY_DIR}")
+ endif()
+-add_subdirectory("${tensorflow_SOURCE_DIR}/tensorflow/lite"
+-                 "${tensorflow_BINARY_DIR}")
+ get_target_property(TFLITE_SOURCE_DIR tensorflow-lite SOURCE_DIR)
+ 
+ if(TFLITE_LIB_LOC)
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -92,8 +92,11 @@
+ target_link_libraries(vx_custom_op TensorFlow::tensorflow-lite)
+ add_dependencies(vx_custom_op vx_delegate)
+ 
+-set_target_properties(benchmark_model PROPERTIES INTERFACE_LINK_LIBRARIES vx_custom_op)
+-set_target_properties(label_image PROPERTIES INTERFACE_LINK_LIBRARIES vx_custom_op)
++foreach(t benchmark_model label_image)   # LiteRT builds benchmark_model only
++  if(TARGET ${t})
++    set_target_properties(${t} PROPERTIES INTERFACE_LINK_LIBRARIES vx_custom_op)
++  endif()
++endforeach()
+ 
+ add_subdirectory(examples/minimal)
+ if(TFLITE_ENABLE_MULTI_DEVICE)
+--- a/delegate_main.cc
++++ b/delegate_main.cc
+@@ -37,11 +37,11 @@
+ 
+ #include "op_map.h"
+ #include "utils.h"
+-#include "tensorflow/lite/minimal_logging.h"
+-#include "tensorflow/lite/context_util.h"
+-#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
+-#include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
+-#include "tensorflow/lite/kernels/internal/types.h"
++#include "tflite/minimal_logging.h"
++#include "tflite/context_util.h"
++#include "tflite/kernels/internal/reference/reference_ops.h"
++#include "tflite/kernels/internal/tensor_ctypes.h"
++#include "tflite/kernels/internal/types.h"
+ #include "tim/transform/layout_inference.h"
+ #include "tim/transform/mean_stddev_normalize_fusion.h"
+ 
+--- a/delegate_main.h
++++ b/delegate_main.h
+@@ -34,10 +34,10 @@
+ 
+ #include "absl/types/optional.h"
+ #include "vsi_npu_custom_op.h"
+-#include "tensorflow/lite/builtin_op_data.h"
+-#include "tensorflow/lite/builtin_ops.h"
+-#include "tensorflow/lite/context.h"
+-#include "tensorflow/lite/interpreter.h"
++#include "tflite/builtin_op_data.h"
++#include "tflite/builtin_ops.h"
++#include "tflite/context.h"
++#include "tflite/interpreter.h"
+ #include "tim/vx/context.h"
+ #include "tim/vx/graph.h"
+ #include "tim/vx/operation.h"
+--- a/examples/minimal/minimal.cc
++++ b/examples/minimal/minimal.cc
+@@ -20,13 +20,13 @@
+ #include <thread>
+ #include <chrono>
+ #include <map>
+-#include "tensorflow/lite/interpreter.h"
+-#include "tensorflow/lite/kernels/register.h"
+-#include "tensorflow/lite/model.h"
+-#include "tensorflow/lite/optional_debug_tools.h"
+-#include "tensorflow/lite/minimal_logging.h"
++#include "tflite/interpreter.h"
++#include "tflite/kernels/register.h"
++#include "tflite/model.h"
++#include "tflite/optional_debug_tools.h"
++#include "tflite/minimal_logging.h"
+ 
+-#include "tensorflow/lite/delegates/external/external_delegate.h"
++#include "tflite/delegates/external/external_delegate.h"
+ #include "vsi_npu_custom_op.h"
+ #include "util.h"
+ 
+--- a/examples/multi_device/multi_device.cc
++++ b/examples/multi_device/multi_device.cc
+@@ -25,12 +25,12 @@
+ #include <functional>
+ #include <string>
+ 
+-#include "tensorflow/lite/interpreter.h"
+-#include "tensorflow/lite/kernels/register.h"
+-#include "tensorflow/lite/model.h"
+-#include "tensorflow/lite/optional_debug_tools.h"
+-#include "tensorflow/lite/delegates/external/external_delegate.h"
+-#include "tensorflow/lite/minimal_logging.h"
++#include "tflite/interpreter.h"
++#include "tflite/kernels/register.h"
++#include "tflite/model.h"
++#include "tflite/optional_debug_tools.h"
++#include "tflite/delegates/external/external_delegate.h"
++#include "tflite/minimal_logging.h"
+ 
+ #include "vsi_npu_custom_op.h"
+ #include "util.h"
+--- a/op_map.cc
++++ b/op_map.cc
+@@ -33,13 +33,13 @@
+ #include <vector>
+ 
+ #include "op_map.h"
+-#include "tensorflow/lite/context_util.h"
+-#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
+-#include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
+-#include "tensorflow/lite/kernels/internal/types.h"
+-#include "tensorflow/lite/minimal_logging.h"
+-#include "tensorflow/lite/kernels/kernel_util.h"
+-#include "tensorflow/lite/kernels/lstm_shared.h"
++#include "tflite/context_util.h"
++#include "tflite/kernels/internal/reference/reference_ops.h"
++#include "tflite/kernels/internal/tensor_ctypes.h"
++#include "tflite/kernels/internal/types.h"
++#include "tflite/minimal_logging.h"
++#include "tflite/kernels/kernel_util.h"
++#include "tflite/kernels/lstm_shared.h"
+ #include "tim/vx/ops.h"
+ #include "tim/vx/tensor.h"
+ #include "utils.h"
+--- a/utils.cc
++++ b/utils.cc
+@@ -23,7 +23,7 @@
+ *****************************************************************************/
+ 
+ #include "utils.h"
+-#include "tensorflow/lite/minimal_logging.h"
++#include "tflite/minimal_logging.h"
+ 
+ #ifdef NODE_TRACE_DB_MODE
+ #include "json/json.h"
+--- a/vsi_npu_custom_op.cc
++++ b/vsi_npu_custom_op.cc
+@@ -20,13 +20,13 @@
+ #include <vector>
+ 
+ #include "flatbuffers/flexbuffers.h"  // from @flatbuffers
+-#include "tensorflow/lite/c/common.h"
+-#include "tensorflow/lite/kernels/internal/optimized/optimized_ops.h"
+-#include "tensorflow/lite/kernels/internal/reference/reference_ops.h"
+-#include "tensorflow/lite/kernels/internal/spectrogram.h"
+-#include "tensorflow/lite/kernels/internal/tensor.h"
+-#include "tensorflow/lite/kernels/internal/tensor_ctypes.h"
+-#include "tensorflow/lite/kernels/kernel_util.h"
++#include "tflite/c/common.h"
++#include "tflite/kernels/internal/optimized/optimized_ops.h"
++#include "tflite/kernels/internal/reference/reference_ops.h"
++#include "tflite/kernels/internal/spectrogram.h"
++#include "tflite/kernels/internal/tensor.h"
++#include "tflite/kernels/internal/tensor_ctypes.h"
++#include "tflite/kernels/kernel_util.h"
+ 
+ #include "vsi_npu_custom_op.h"
+ 
+--- a/vsi_npu_custom_op.h
++++ b/vsi_npu_custom_op.h
+@@ -15,7 +15,7 @@
+ #ifndef TENSORFLOW_LITE_DELEGATES_VSI_NPU_CUSTOM_OP_H_
+ #define TENSORFLOW_LITE_DELEGATES_VSI_NPU_CUSTOM_OP_H_
+ 
+-#include "tensorflow/lite/c/common.h"
++#include "tflite/c/common.h"
+ 
+ #ifdef __cplusplus
+ extern "C" {
+--- a/vx_delegate_adaptor.cc
++++ b/vx_delegate_adaptor.cc
+@@ -39,10 +39,10 @@
+ #include <vector>
+ #include <string.h>
+ 
+-#include "tensorflow/lite/c/common.h"
++#include "tflite/c/common.h"
+ #include "delegate_main.h"
+-#include "tensorflow/lite/tools/command_line_flags.h"
+-#include "tensorflow/lite/tools/logging.h"
++#include "tflite/tools/command_line_flags.h"
++#include "tflite/tools/logging.h"
+ 
+ namespace vx {
+ namespace delegate {

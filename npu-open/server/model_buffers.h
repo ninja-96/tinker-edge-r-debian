@@ -10,7 +10,7 @@
 
 #include <string>
 #include <vector>
-#include "tensorflow/lite/schema/schema_generated.h"
+#include "tflite/schema/schema_generated.h"
 
 namespace npu_model {
 

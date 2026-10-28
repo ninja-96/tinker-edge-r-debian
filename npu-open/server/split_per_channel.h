@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 #include "flatbuffers/flatbuffers.h"
-#include "tensorflow/lite/schema/schema_generated.h"
+#include "tflite/schema/schema_generated.h"
 #include "model_buffers.h"
 
 namespace npu_split {

@@ -2,7 +2,7 @@
 # Copyright (c) 2026 the tinker-edge-r project contributors
 """TensorFlow Lite on the NPU of the RK3399Pro (ASUS Tinker Edge R).
 
-The NPU die runs our small server (`npu_server`) with the open TIM-VX / TFLite VX delegate stack and TensorFlow Lite 2.21. This package is a thin
+The NPU die runs our small server (`npu_server`) with the open TIM-VX / TFLite VX delegate stack and LiteRT 2.3.2 (TensorFlow Lite). This package is a thin
 layer over the C++ library librk3399pro_npu (module `_core`, pybind11). Several models can be loaded at once and used by several programs: a model
 stays on the NPU until it is stopped, and opening the same .tflite file again attaches to the loaded model (no second load). System Python 3.13,
 numpy and nothing else.

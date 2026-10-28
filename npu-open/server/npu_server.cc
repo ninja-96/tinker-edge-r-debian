@@ -34,18 +34,18 @@
 #include <vector>
 
 #include "protocol.h"
-#include "tensorflow/lite/core/api/profiler.h"
+#include "tflite/core/api/profiler.h"
 #include "fix_dynamic_reshape.h"
 #include "rewrite_ops.h"
 #include "split_per_channel.h"
-#include "tensorflow/lite/delegates/external/external_delegate.h"
+#include "tflite/delegates/external/external_delegate.h"
 #include "tim/vx/context.h"
 #include "tim/vx/graph.h"
 #include "tim/vx/ops/nbg.h"
 #include "tim/vx/tensor.h"
-#include "tensorflow/lite/interpreter.h"
-#include "tensorflow/lite/kernels/register.h"
-#include "tensorflow/lite/model.h"
+#include "tflite/interpreter.h"
+#include "tflite/kernels/register.h"
+#include "tflite/model.h"
 
 #define FFS "/dev/usb-ffs/ntb"
 #define NPU_SYSFS "/sys/devices/platform/ffbc0000.npu"
