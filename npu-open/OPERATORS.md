@@ -10,8 +10,23 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 * **RKNN**: `yes` = RKNN-Toolkit 1.7.5 accepted the model (it has no simulator, so its results were not checked); `no` = refused; `-` = not tested.
 * One tiny float32 model per operator (input 1x8x8x4), 87 models, measured on one board on 2026-10-28 (NPU) and 2026-10-26 (RKNN).
 
-72 of the 87 models run entirely on the NPU, none gives a wrong result. `SLICE`, `TILE` and `LOG_SOFTMAX` are rewritten by our server into operators the NPU runs
-(`STRIDED_SLICE`, `CONCATENATION`, `SOFTMAX` + `LOG`; `npu-open/server/rewrite_ops.h`). Comparisons, logical operators and `CAST` stay on the CPU on purpose: TIM-VX crashes on bool tensors with this driver.
+84 of the 87 models run entirely on the NPU, none gives a wrong result. Our server rewrites operators into ones the NPU runs (`npu-open/server/rewrite_ops.h`):
+
+| Operator | Rewritten as |
+|---|---|
+| `SLICE` | `STRIDED_SLICE` |
+| `TILE` | `CONCATENATION` of copies |
+| `LOG_SOFTMAX` | `SOFTMAX` + `LOG` |
+| `CEIL` (float) | `NEG(FLOOR(NEG(x)))` |
+| `CAST` float -> int32 -> float (truncation) | `MAXIMUM(FLOOR(x), 0) + MINIMUM(CEIL(x), 0)` |
+| comparisons (`GREATER`, `LESS`, `EQUAL`, ...) | bool becomes 0 / 1 of the input type: `SUB` + `MUL` (float: + `MAXIMUM` / `MINIMUM` to [0, 1]; int8 / uint8: the requantisation saturates to 0 / 1) |
+| `LOGICAL_AND` / `OR` / `NOT` | `MUL` / `MAXIMUM` / 1 - x |
+| `SELECT` | b + c * (a - b) |
+| `CAST` of bool | `RESHAPE` (float) or `DEQUANTIZE` (int8 / uint8) |
+
+TIM-VX crashes on bool tensors with this driver; a bool tensor that cannot be rewritten (a model output, or used by an operator not in this table) stays on the CPU.
+Int8 and uint8 comparisons were also checked with quantised models (`rnd/verisilicon/models/q8/`): the NPU gives the exact result of the dequantised values; TensorFlow Lite on
+the CPU differs at values closer than about 1/256 (its comparison of two different scales is that coarse).
 
 | Operator | NPU | RKNN |
 |---|---|---|
@@ -23,8 +38,8 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `AVERAGE_POOL_2D` | yes | yes |
 | `BATCH_MATMUL` | yes | - |
 | `BATCH_TO_SPACE_ND` | yes | yes |
-| `CAST` | CPU | no |
-| `CEIL` | CPU | yes |
+| `CAST` | yes | no |
+| `CEIL` | yes | yes |
 | `CONCATENATION` | yes | yes |
 | `CONV_2D` | yes | yes |
 | `COS` | CPU | yes |
@@ -33,7 +48,7 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `DEQUANTIZE` | - | - |
 | `DIV` | yes | - |
 | `ELU` | yes | yes |
-| `EQUAL` | CPU | no |
+| `EQUAL` | yes | no |
 | `EXP` | yes | yes |
 | `EXPAND_DIMS` | yes | - |
 | `FILL` | yes | - |
@@ -42,19 +57,19 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `FULLY_CONNECTED` | yes | yes |
 | `GATHER` | yes | yes |
 | `GATHER_ND` | yes | yes |
-| `GREATER` | CPU | yes |
-| `GREATER_EQUAL` | CPU | no |
+| `GREATER` | yes | yes |
+| `GREATER_EQUAL` | yes | no |
 | `HARD_SWISH` | yes | yes |
 | `L2_NORMALIZATION` | yes | no |
 | `L2_POOL_2D` | - | - |
 | `LEAKY_RELU` | yes | yes |
-| `LESS` | CPU | no |
-| `LESS_EQUAL` | CPU | no |
+| `LESS` | yes | no |
+| `LESS_EQUAL` | yes | no |
 | `LOCAL_RESPONSE_NORMALIZATION` | yes | yes |
 | `LOG` | yes | yes |
-| `LOGICAL_AND` | CPU | no |
-| `LOGICAL_NOT` | - | - |
-| `LOGICAL_OR` | CPU | no |
+| `LOGICAL_AND` | yes | no |
+| `LOGICAL_NOT` | yes | - |
+| `LOGICAL_OR` | yes | no |
 | `LOGISTIC` | yes | yes |
 | `LOG_SOFTMAX` | yes | yes |
 | `LSTM` | - | - |
@@ -65,7 +80,7 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `MIRROR_PAD` | yes | yes |
 | `MUL` | yes | yes |
 | `NEG` | yes | yes |
-| `NOT_EQUAL` | CPU | no |
+| `NOT_EQUAL` | yes | no |
 | `ONE_HOT` | yes | no |
 | `PACK` | yes | yes |
 | `PAD` | yes | yes |
@@ -86,7 +101,7 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 | `REVERSE_V2` | yes | no |
 | `ROUND` | CPU | yes |
 | `RSQRT` | yes | yes |
-| `SELECT` | - | yes |
+| `SELECT` | yes | yes |
 | `SELECT_V2` | - | - |
 | `SHAPE` | yes | - |
 | `SIN` | yes | yes |

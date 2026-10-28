@@ -31,7 +31,8 @@
     and is 2-2.5 times slower than that CPU for float models, and gave wrong results for some of them.
   * `"npu"`: strictly the whole model on the NPU. If an operator would stay on the CPU, the load fails with `NpuError` naming it and recommending `"auto"`.
   * `"cpu"`: strictly the whole model on the CPU of the NPU die.
-  Comparisons, logical operators and `CAST` (bool tensors) are never given to the NPU: they crash TIM-VX on this driver. `Model.autotune()` measures the plans of one model (whole NPU, NPU without the per-channel split, mixed: operator types moved to the CPU, CPU only)
+  Bool tensors crash TIM-VX on this driver: the server rewrites comparisons, logical operators, `SELECT` and `CAST` of bool into arithmetic on 0 / 1 values that the NPU runs;
+  a bool tensor it cannot rewrite (a model output, or used by another operator) stays on the CPU. `Model.autotune()` measures the plans of one model (whole NPU, NPU without the per-channel split, mixed: operator types moved to the CPU, CPU only)
   against the CPU result and keeps the fastest one with the same result (cosine similarity of the outputs at least 0.98 by default, about 20 % relative error); later loads use it.
 * The server checks the chip identity (model 0x8000, revision 0x7100, product 0x45080001 - every Tinker Edge R has it, see "The chip" below) and refuses to run on anything else.
 
@@ -124,10 +125,9 @@ and its socket `/run/npu/npu.sock` belongs to `plugdev` too, so the default user
      `target_spec.supported_ops = [TFLITE_BUILTINS_INT8]`; float inputs and outputs (a `QUANTIZE` / `DEQUANTIZE` at the ends) are fine. TensorFlow 2.x makes the weights
      per channel: the server rearranges such layers so that they use the fast path of the NPU and stay exact (see below).
    * Float32 and float16 models run, by default on the CPU of the NPU die (see "How it works"); `device="npu"` puts them on the NPU (slower, some give wrong results).
-   * `device="npu"` is strict: a model with an operator the NPU does not take is refused with its name (in our operator models: `SLICE`, `TILE`, `CEIL`, `ROUND`, `COS`,
-     `LOG_SOFTMAX`, `TOPK_V2`, comparisons, logical operators, `CAST`); `"auto"` runs it.
+   * `device="npu"` is strict: a model with an operator the NPU does not take is refused with its name (in our operator models: `ROUND`, `COS`, `TOPK_V2`); `"auto"` runs it.
      **Dynamic-range** models (int8 weights, float activations) are not supported on the NPU.
-   * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`): 72 of 87 single-operator models run entirely on the NPU with the right result (main after 0.4.1; `SLICE`, `TILE`, `LOG_SOFTMAX` are rewritten by the server). What the NPU cannot do runs on the CPU of the NPU die
+   * The operators the NPU runs: [OPERATORS.md](../npu-open/OPERATORS.md) (also in `/usr/share/doc/tinker-edge-r/`): 84 of 87 single-operator models run entirely on the NPU with the right result (main after 0.4.1; `SLICE`, `TILE`, `LOG_SOFTMAX`, `CEIL`, comparisons, logical operators, `SELECT` and `CAST` are rewritten by the server). What the NPU cannot do runs on the CPU of the NPU die
      (TensorFlow Lite with XNNPACK).
    * TensorFlow Lite 2.21 reads the models (LiteRT is the new name of TensorFlow Lite; its `.tflite` files and the classic interpreter API are what is used here).
    * ONNX or PyTorch models: convert to TFLite first (for example with `ai-edge-torch` or `onnx2tf`) and quantise as above. (Not part of the image.)
