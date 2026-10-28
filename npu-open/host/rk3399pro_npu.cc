@@ -15,6 +15,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -339,28 +340,69 @@ Model::~Model() { try { close(); } catch (...) {} }
 // ---- the plan of a load: where the model runs ("npu", "npu-nosplit", "cpu", "mixed:<codes>[:nosplit]")
 struct Plan {
 	bool cpu = false, split = true;
-	std::vector<int> deny;
+	double ratio = 4;                 // split ratio of per-channel layers
+	double err = 0;                   // > 0: the ratio per layer from this weight error (see split_per_channel.h)
+	std::vector<int> deny;            // operator types on the CPU
+	std::vector<std::pair<int, int>> nodes;   // ranges of nodes on the CPU (first, last; last -1: to the end)
+	static std::string ranges_text(const std::vector<std::pair<int, int>> &r)
+	{
+		std::string s;
+		for (auto &x : r) s += (s.empty() ? "" : ",") + std::to_string(x.first) + (x.second == x.first ? "" : "-" + (x.second < 0 ? std::string() : std::to_string(x.second)));
+		return s;
+	}
 	std::string tag() const
 	{
 		if (cpu) return "cpu";
-		if (deny.empty()) return split ? "npu" : "npu-nosplit";
+		char r[48] = ""; if (split && ratio != 4) snprintf(r, sizeof r, "r%g", ratio);
+		if (split && err > 0) snprintf(r + strlen(r), sizeof r - strlen(r), "%se%g", r[0] ? "-" : "", err);
+		if (deny.empty() && nodes.empty()) return !split ? "npu-nosplit" : r[0] ? std::string("npu-") + r : "npu";
 		std::string s = "mixed:";
 		for (size_t i = 0; i < deny.size(); i++) s += (i ? "," : "") + std::to_string(deny[i]);
-		return s + (split ? "" : ":nosplit");
+		if (!split) s += ":nosplit"; else if (r[0]) s += std::string(":") + r;
+		if (!nodes.empty()) s += ":cpu=" + ranges_text(nodes);
+		return s;
 	}
 	static Plan parse(const std::string &t)
 	{
 		Plan p;
 		if (t == "cpu") { p.cpu = true; return p; }
 		if (t == "npu-nosplit") { p.split = false; return p; }
+		if (t.compare(0, 4, "npu-") == 0) { p.parse_split(t.substr(4)); return p; }
 		if (t.compare(0, 6, "mixed:") == 0) {
 			std::string r = t.substr(6);
-			if (r.size() >= 8 && r.compare(r.size() - 8, 8, ":nosplit") == 0) { p.split = false; r.resize(r.size() - 8); }
-			for (const char *q = r.c_str(); *q;) { char *e; long c = strtol(q, &e, 10); if (e == q) { q++; continue; } p.deny.push_back((int)c); q = e; }
+			size_t c = r.find(':');
+			std::string codes = r.substr(0, c), rest = c == std::string::npos ? "" : r.substr(c + 1);
+			for (const char *q = codes.c_str(); *q;) { char *e; long v = strtol(q, &e, 10); if (e == q) { q++; continue; } p.deny.push_back((int)v); q = e; }
+			for (size_t a = 0; a < rest.size();) {
+				size_t b = rest.find(':', a); if (b == std::string::npos) b = rest.size();
+				std::string k = rest.substr(a, b - a);
+				if (k == "nosplit") p.split = false;
+				else if (k.size() > 1 && (k[0] == 'r' || k[0] == 'e')) p.parse_split(k);
+				else if (k.compare(0, 5, "from=") == 0) p.nodes.push_back({ atoi(k.c_str() + 5), -1 });   // 0.5 pre-release plans
+				else if (k.compare(0, 4, "cpu=") == 0)
+					for (const char *q = k.c_str() + 4; *q;) {
+						char *e; long lo = strtol(q, &e, 10); if (e == q) { q++; continue; }
+						long hi = lo;
+						if (*e == '-') { q = e + 1; hi = strtol(q, &e, 10); if (e == q) hi = -1; }
+						p.nodes.push_back({ (int)lo, (int)hi }); q = e;
+					}
+				a = b + 1;
+			}
 		}
+		if (!(p.ratio > 1)) p.ratio = 4;
 		return p;
 	}
-	bool whole_npu() const { return !cpu && deny.empty(); }   // only then is there a compiled graph of the whole model to cache
+	bool whole_npu() const { return !cpu && deny.empty() && nodes.empty(); }   // only then is there a compiled graph of the whole model to cache
+	void parse_split(const std::string &k)   // "r2", "e0.01", "r2-e0.01"
+	{
+		for (size_t a = 0; a < k.size();) {
+			size_t b = k.find('-', a); if (b == std::string::npos) b = k.size();
+			if (k[a] == 'r') ratio = atof(k.c_str() + a + 1); else if (k[a] == 'e') err = atof(k.c_str() + a + 1);
+			a = b + 1;
+		}
+		if (!(ratio > 1)) ratio = 4;
+		if (!(err > 0)) err = 0;
+	}
 };
 
 // ---- a few fields of the TFLite flatbuffer (schema: Model.subgraphs = field 2, Model.buffers = 4; SubGraph.tensors = 0; Tensor.type = 1, Tensor.buffer = 2;
@@ -385,6 +427,24 @@ struct Fb {
 	size_t vec(size_t table, int i, uint32_t *len) const { size_t v = ref(field(table, i)); *len = v ? u32(v) : 0; return v ? v + 4 : 0; }
 };
 }  // namespace
+
+// a tensor quantised per channel (more than one scale): Tensor.quantization = field 4, QuantizationParameters.scale = field 2
+static bool has_per_channel(const std::vector<uint8_t> &d)
+{
+	Fb f{ d.data(), d.size() };
+	size_t root = f.u32(0);
+	uint32_t nsg, nt;
+	size_t sgs = f.vec(root, 2, &nsg);
+	if (!nsg) return false;
+	size_t sg = f.ref(sgs), tens = f.vec(sg, 0, &nt);
+	for (uint32_t i = 0; i < nt; i++) {
+		size_t t = f.ref(tens + 4 * i), qt = f.ref(f.field(t, 4));
+		uint32_t ns = 0;
+		if (qt) f.vec(qt, 2, &ns);
+		if (ns > 1) return true;
+	}
+	return false;
+}
 
 bool is_quantized(const std::vector<uint8_t> &d)
 {
@@ -508,7 +568,11 @@ std::vector<uint8_t> Model::load(const std::vector<uint8_t> &data, const LoadOpt
 	Meta meta = meta_path.empty() ? Meta() : read_meta(meta_path);
 	Plan plan; bool strict = false;
 	if (opt.device == "cpu") plan.cpu = true;
-	else if (opt.device == "npu") { plan.split = opt.split; plan.deny = opt.cpu_ops; strict = opt.strict && opt.cpu_ops.empty(); }
+	else if (opt.device == "npu") {
+		if (!(opt.split_ratio > 1 && opt.split_ratio <= 100)) throw Error("split_ratio must be above 1 (and at most 100)");
+		plan.split = opt.split; plan.ratio = opt.split_ratio; plan.err = opt.split_max_error; plan.deny = opt.cpu_ops; plan.nodes = opt.cpu_nodes;
+		strict = opt.strict && opt.cpu_ops.empty() && opt.cpu_nodes.empty();
+	}
 	else if (opt.device == "auto" || opt.device.empty()) {
 		if (meta.count("plan")) plan = Plan::parse(meta["plan"]);   // found by autotune
 		else plan.cpu = !is_quantized(data);                        // float models: the CPU of the NPU die beats the float16 path of this NPU
@@ -533,6 +597,12 @@ std::vector<uint8_t> Model::load(const std::vector<uint8_t> &data, const LoadOpt
 	snprintf(lq.key, sizeof lq.key, "%s", (key_ + opt.key_suffix).c_str()); snprintf(lq.name, sizeof lq.name, "%s", name_.c_str());
 	lq.flags = (plan.cpu ? NPU_LOAD_CPU_ONLY : 0) | (plan.split ? 0 : NPU_LOAD_NO_SPLIT) | (strict ? NPU_LOAD_STRICT : 0);
 	for (size_t i = 0; i < plan.deny.size() && i < NPU_MAX_DENY; i++) lq.deny_ops[i] = (uint16_t)plan.deny[i];
+	lq.split_ratio_x100 = (uint16_t)std::lround(plan.ratio * 100); lq.split_max_err = (float)plan.err;
+	if (plan.nodes.size() > NPU_MAX_RANGES) throw Error("at most " + std::to_string(NPU_MAX_RANGES) + " ranges of nodes on the CPU");
+	lq.n_cpu_ranges = (uint16_t)plan.nodes.size();
+	for (size_t i = 0; i < plan.nodes.size(); i++) { lq.cpu_ranges[2 * i] = (uint16_t)plan.nodes[i].first; lq.cpu_ranges[2 * i + 1] = plan.nodes[i].second < 0 ? 0xffff : (uint16_t)plan.nodes[i].second; }
+	if (opt.profile) lq.flags |= NPU_LOAD_PROFILE;
+	snprintf(lq.plan, sizeof lq.plan, "%s", plan_.c_str());
 	Link::Reply r; bool have = false; std::string mem_field;
 	if (!nbg.empty()) {
 		std::vector<uint8_t> p(sizeof lq + nbg.size());
@@ -585,6 +655,147 @@ std::vector<OpStat> Model::ops()
 	}
 	return v;
 }
+
+GraphInfo Model::graph()
+{
+	if (!link_) throw Error("this Model is closed");
+	auto r = link_->call(NPU_GRAPH, nullptr, 0, id_, 30);
+	GraphInfo g;
+	if (r.data.size() < sizeof(npu_graph_head)) return g;
+	npu_graph_head gh; memcpy(&gh, r.data.data(), sizeof gh);
+	size_t need = sizeof gh + (size_t)gh.n_tensors * 4 + (size_t)gh.n_nodes * sizeof(npu_graph_node);
+	if (r.data.size() < need) throw Error("short reply of the NPU");
+	g.profile_us = gh.profile_us;
+	g.tensor_bytes.resize(gh.n_tensors);
+	if (gh.n_tensors) memcpy(g.tensor_bytes.data(), r.data.data() + sizeof gh, 4 * (size_t)gh.n_tensors);
+	for (uint32_t i = 0; i < gh.n_nodes; i++) {
+		npu_graph_node n; memcpy(&n, r.data.data() + sizeof gh + 4 * (size_t)gh.n_tensors + i * sizeof n, sizeof n);
+		GraphNode x; x.code = n.code; x.on_npu = n.on_npu; x.cpu_us = n.cpu_us;
+		for (int k = 0; k < n.n_in && k < NPU_GRAPH_MAX_IN; k++) x.in.push_back(n.in[k]);
+		for (int k = 0; k < n.n_out && k < NPU_GRAPH_MAX_OUT; k++) x.out.push_back(n.out[k]);
+		g.nodes.push_back(x);
+	}
+	return g;
+}
+
+// ---- the cost model of autotune
+// The time of a plan is predicted from its placement (every node on the NPU or on the CPU, in execution order):
+//   T = a_heavy * (profiled CPU time of the convolutions / FC / matmuls on the NPU) + a_light * (of the other nodes on the NPU)
+//     + c_heavy * (... on the CPU) + c_light * (... on the CPU) + cut_us * (cuts between NPU and CPU parts) + byte_us * (bytes crossing the cuts)
+// The profile (TensorFlow Lite's own kernels on the graph after our passes) gives the relative weight of every node; the six factors are fitted to
+// every plan measured so far (least squares relative to the times, pulled towards priors so that a few measurements suffice). The cheapest
+// placement under the model is found exactly by dynamic programming over the execution order (two states: NPU, CPU): that weighs the copies of
+// every cut against what a node gains on the other side, and keeps the order of the layers.
+namespace {
+enum { A_HEAVY, A_LIGHT, C_HEAVY, C_LIGHT, CUT_US, BYTE_US, NPARAM };
+bool heavy_op(int c) { return c == 3 || c == 4 || c == 9 || c == 67 || c == 126; }   // CONV_2D, DEPTHWISE_CONV_2D, FULLY_CONNECTED, TRANSPOSE_CONV, BATCH_MATMUL
+struct CostModel {
+	const GraphInfo &g;
+	std::vector<double> live;         // live[b]: bytes of the activations crossing the boundary before node b
+	std::vector<char> npu_ok;         // the NPU takes the node (in the whole-NPU plan of this graph)
+	double th[NPARAM], prior[NPARAM];
+	std::vector<std::pair<std::array<double, NPARAM>, double>> meas;
+	explicit CostModel(const GraphInfo &gi) : g(gi)
+	{
+		size_t n = g.nodes.size();
+		std::vector<int> prod(g.tensor_bytes.size(), -1), last(g.tensor_bytes.size(), -1);
+		for (size_t i = 0; i < n; i++) {
+			for (int t : g.nodes[i].out) if (t >= 0 && (size_t)t < prod.size()) prod[t] = (int)i;
+			for (int t : g.nodes[i].in) if (t >= 0 && (size_t)t < last.size()) last[t] = (int)i;
+		}
+		std::vector<double> diff(n + 2, 0);
+		for (size_t t = 0; t < prod.size(); t++)
+			if (prod[t] >= 0 && last[t] > prod[t]) { diff[prod[t] + 1] += g.tensor_bytes[t]; diff[last[t] + 1] -= g.tensor_bytes[t]; }
+		live.assign(n + 1, 0);
+		double acc = 0;
+		for (size_t b = 0; b <= n; b++) { acc += diff[b]; live[b] = acc; }
+		for (auto &x : g.nodes) npu_ok.push_back(x.on_npu);
+		for (int k = 0; k < NPARAM; k++) th[k] = prior[k] = 1;
+	}
+	std::array<double, NPARAM> features(const std::vector<char> &on_cpu) const
+	{
+		std::array<double, NPARAM> f{};
+		for (size_t i = 0; i < g.nodes.size(); i++) {
+			bool c = on_cpu[i] || !npu_ok[i], h = heavy_op(g.nodes[i].code);
+			f[c ? (h ? C_HEAVY : C_LIGHT) : (h ? A_HEAVY : A_LIGHT)] += g.nodes[i].cpu_us;
+			bool pc = i ? (on_cpu[i - 1] || !npu_ok[i - 1]) : c;
+			if (i && pc != c) { f[CUT_US] += 1; f[BYTE_US] += live[i]; }
+		}
+		return f;
+	}
+	double predict(const std::array<double, NPARAM> &f) const { double t = 0; for (int k = 0; k < NPARAM; k++) t += th[k] * f[k]; return t; }
+	void add(const std::vector<char> &on_cpu, double ms) { if (ms > 0) meas.push_back({ features(on_cpu), ms * 1000 }); }
+	// ridge least squares, relative to the measured times, towards the priors
+	void fit(double lambda = 0.3)
+	{
+		double A[NPARAM][NPARAM + 1] = {};
+		for (int j = 0; j < NPARAM; j++) { A[j][j] += lambda / (prior[j] * prior[j]); A[j][NPARAM] += lambda / prior[j]; }
+		for (auto &m : meas) {
+			double w = 1 / (m.second * m.second);
+			for (int j = 0; j < NPARAM; j++) {
+				for (int k = 0; k < NPARAM; k++) A[j][k] += w * m.first[j] * m.first[k];
+				A[j][NPARAM] += w * m.first[j] * m.second;
+			}
+		}
+		for (int c = 0; c < NPARAM; c++) {   // Gauss-Jordan with partial pivoting
+			int pv = c;
+			for (int r = c + 1; r < NPARAM; r++) if (std::fabs(A[r][c]) > std::fabs(A[pv][c])) pv = r;
+			if (std::fabs(A[pv][c]) < 1e-30) return;
+			for (int k = 0; k <= NPARAM; k++) std::swap(A[c][k], A[pv][k]);
+			for (int r = 0; r < NPARAM; r++) {
+				if (r == c) continue;
+				double q = A[r][c] / A[c][c];
+				for (int k = c; k <= NPARAM; k++) A[r][k] -= q * A[c][k];
+			}
+		}
+		for (int j = 0; j < NPARAM; j++) th[j] = std::max(A[j][NPARAM] / A[j][j], 0.02 * prior[j]);
+	}
+	// the cheapest placement; forced: nodes that must stay on the CPU (for the accuracy); cut_extra: a penalty per cut (to limit the number of parts)
+	std::vector<char> best(const std::vector<char> &forced, double cut_extra = 0) const
+	{
+		size_t n = g.nodes.size();
+		const double INF = 1e300;
+		std::vector<std::array<double, 2>> cost(n);
+		std::vector<std::array<char, 2>> from(n);
+		for (size_t i = 0; i < n; i++) {
+			bool h = heavy_op(g.nodes[i].code);
+			double t[2] = { npu_ok[i] && !forced[i] ? th[h ? A_HEAVY : A_LIGHT] * g.nodes[i].cpu_us : INF, th[h ? C_HEAVY : C_LIGHT] * g.nodes[i].cpu_us };
+			for (int s2 = 0; s2 < 2; s2++) {
+				if (!i) { cost[i][s2] = t[s2]; from[i][s2] = (char)s2; continue; }
+				double cut = th[CUT_US] + cut_extra + th[BYTE_US] * live[i];
+				double stay = cost[i - 1][s2], sw = cost[i - 1][1 - s2] + cut;
+				cost[i][s2] = std::min(stay, sw) + t[s2]; from[i][s2] = (char)(stay <= sw ? s2 : 1 - s2);
+			}
+		}
+		std::vector<char> on_cpu(n, 0);
+		if (!n) return on_cpu;
+		int s2 = cost[n - 1][0] <= cost[n - 1][1] ? 0 : 1;
+		for (size_t i = n; i-- > 0;) { on_cpu[i] = (char)s2; s2 = from[i][s2]; }
+		return on_cpu;
+	}
+};
+// the ranges of nodes a placement puts on the CPU (nodes the NPU does not take anyway are left out where that saves a range)
+std::vector<std::pair<int, int>> cpu_ranges(const std::vector<char> &on_cpu, const std::vector<char> &npu_ok)
+{
+	std::vector<std::pair<int, int>> r;
+	int n = (int)on_cpu.size();
+	for (int i = 0; i < n;) {
+		if (!on_cpu[i] || !npu_ok[i]) { i++; continue; }
+		int j = i;
+		while (j + 1 < n && (on_cpu[j + 1] || !npu_ok[j + 1])) j++;
+		while (j > i && !npu_ok[j]) j--;
+		r.push_back({ i, j + 1 == n ? -1 : j });
+		i = j + 1;
+	}
+	return r;
+}
+std::vector<char> placement_of(const std::vector<std::pair<int, int>> &ranges, size_t n)
+{
+	std::vector<char> c(n, 0);
+	for (auto &x : ranges) for (int i = std::max(x.first, 0); i < (int)n && (x.second < 0 || i <= x.second); i++) c[i] = 1;
+	return c;
+}
+}  // namespace
 
 // ---- autotune
 static double half_to_float(uint16_t h)
@@ -642,18 +853,19 @@ std::vector<TuneResult> Model::autotune(const std::vector<std::vector<uint8_t>> 
 	// the loaded copy of this model is unloaded while the candidates are compiled: a big model and a candidate together may not fit into the 2 GB of the
 	// NPU die (seen with EfficientNet: about 550 MB each plus the compiler). This object is loaded again with the chosen plan at the end.
 	try { link_->call(NPU_UNLOAD, nullptr, 0, id_, 30); } catch (Error &) {}
-	auto trial = [&](const Plan &p, const char *suffix, std::vector<std::vector<uint8_t>> *outs, std::vector<OpStat> *ops) {
+	// one candidate: loaded, run once (the result), then `runs` times (the time); g: the graph of this load (with the CPU profile when `profile`)
+	auto trial = [&](const Plan &p, const char *suffix, std::vector<std::vector<uint8_t>> *outs, GraphInfo *g, bool profile) {
 		TuneResult r; r.plan = p.tag();
 		try {
-			LoadOptions o = base; o.key_suffix = suffix; o.name = "autotune"; o.strict = false;
-			if (ops) o.use_cache = false;   // the operator statistics need a load through TensorFlow Lite, not the compiled graph
-			if (p.cpu) o.device = "cpu"; else { o.device = "npu"; o.split = p.split; o.cpu_ops = p.deny; }
+			LoadOptions o = base; o.key_suffix = suffix; o.name = "autotune"; o.strict = false; o.profile = profile;
+			if (g) o.use_cache = false;   // the graph needs a load through TensorFlow Lite, not the compiled graph
+			if (p.cpu) o.device = "cpu"; else { o.device = "npu"; o.split = p.split; o.split_ratio = p.ratio; o.split_max_error = p.err; o.cpu_ops = p.deny; o.cpu_nodes = p.nodes; }
 			Model m(data_, o);
 			std::vector<std::vector<uint8_t>> y = m.exec(x, 600);
 			auto t0 = std::chrono::steady_clock::now();
 			for (int i = 0; i < runs; i++) m.exec(x, 600);
 			r.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / runs;
-			if (ops) *ops = m.ops();
+			if (g) *g = m.graph();
 			if (outs) *outs = y;
 			m.stop();
 		} catch (Error &e) { r.error = e.what(); }
@@ -662,7 +874,7 @@ std::vector<TuneResult> Model::autotune(const std::vector<std::vector<uint8_t>> 
 	std::vector<TuneResult> res;
 	std::vector<std::vector<uint8_t>> ref;
 	Plan cpu; cpu.cpu = true;
-	TuneResult rc = trial(cpu, "#tune-ref", &ref, nullptr);
+	TuneResult rc = trial(cpu, "#tune-ref", &ref, nullptr, false);
 	if (!rc.error.empty()) throw Error("autotune: the model does not run on the CPU of the NPU die: " + rc.error);
 	rc.cosine = 1; rc.ok = true;
 	res.push_back(rc);
@@ -672,33 +884,121 @@ std::vector<TuneResult> Model::autotune(const std::vector<std::vector<uint8_t>> 
 		for (size_t i = 0; i < y.size(); i++) c = std::min(c, cosine(as_real(outputs_[i], y[i].data()), as_real(outputs_[i], ref[i].data())));
 		r.cosine = c; r.ok = c >= tolerance;
 	};
-	// the whole model on the NPU, with and without the split of per-channel layers
-	Plan best_npu; double best_npu_ms = 1e30; bool best_npu_ok = false; std::vector<OpStat> best_ops;
-	for (bool split : { true, false }) {
-		Plan p; p.split = split;
-		std::vector<std::vector<uint8_t>> y; std::vector<OpStat> ops;
-		TuneResult r = trial(p, "#tune", &y, &ops);
+	// 1. the whole model on the NPU. Per-channel int8 layers are split into groups whose scales differ at most `ratio` times (the fast path of the NPU);
+	// a group requantises its channels to its largest scale, which costs accuracy (MobileNet V3: ratio 4 68 ms / cosine 0.966, 2 90 ms / 0.982, no split
+	// 173 ms / 0.984). The server can choose the ratio per layer from a bound on the weight error (split_per_channel.h): only the layers that need it
+	// get a finer split or none. So: ratio 4; if that is not right, the bound by bisection on a grid (a smaller bound: more exact, slower); if even the
+	// smallest bound is not right, no split. Every one of these loads also times every node of its graph on the CPU (the cost model below).
+	struct Whole { Plan p; TuneResult r; GraphInfo g; };
+	std::vector<Whole> measured;
+	auto whole_trial = [&](const Plan &p) {
+		std::vector<std::vector<uint8_t>> y; GraphInfo gi;
+		TuneResult r = trial(p, "#tune", &y, &gi, true);
 		score(r, y);
 		res.push_back(r);
-		if (r.error.empty() && ((r.ok && !best_npu_ok) || (r.ok == best_npu_ok && r.ms < best_npu_ms))) { best_npu = p; best_npu_ms = r.ms; best_npu_ok = r.ok; best_ops = ops; }
-	}
-	// mixed plans: move operator types from the NPU to the CPU one by one, keep a move when it is faster (or makes the result right)
-	if (best_npu_ms < 1e30) {
-		std::vector<OpStat> cand;
-		for (auto &o : best_ops) if (o.on_npu > 0) cand.push_back(o);
-		std::sort(cand.begin(), cand.end(), [](const OpStat &a, const OpStat &b) { return a.on_npu < b.on_npu; });   // the rare types first: cheap to move
-		Plan cur = best_npu; double cur_ms = best_npu_ms; bool cur_ok = best_npu_ok;
-		int tries = 0;
-		for (auto &o : cand) {
-			if (tries++ >= max_trials) break;
-			Plan p = cur; p.deny.push_back(o.code);
-			std::vector<std::vector<uint8_t>> y;
-			TuneResult r = trial(p, "#tune", &y, nullptr);
-			score(r, y);
-			res.push_back(r);
-			if (r.error.empty() && ((r.ok && !cur_ok) || (r.ok == cur_ok && r.ms < cur_ms * 0.97))) { cur = p; cur_ms = r.ms; cur_ok = r.ok; }   // 3 %: not the noise
+		if (r.error.empty()) measured.push_back({ p, r, gi });
+		return r;
+	};
+	{
+		TuneResult r4 = whole_trial(Plan());
+		if (has_per_channel(data_) && !(r4.error.empty() && r4.ok)) {
+			// the bound between the last wrong and the first right one, geometric bisection: the time can jump between two bounds (ResNet18: 0.02
+			// 23 ms, 0.01 243 ms, when some layers keep their per-channel weights), so the search narrows to a factor of 1.25, at most 5 loads
+			double wrong = 0, right = 0;   // 0: none yet (wrong 0: only ratio 4 is known to be wrong)
+			bool slow = false;
+			for (int k = 0; k < 5; k++) {
+				double e = !wrong ? 0.02 : !right ? wrong / 2 : std::sqrt(wrong * right);
+				if (e < 0.0005 || (wrong && right && wrong / right < 1.25)) break;
+				Plan p; p.err = e;
+				TuneResult r = whole_trial(p);
+				if (r.error.empty() && r.ok) right = e;
+				else { wrong = e; if (r.error.empty() && r.ms > rc.ms) { slow = true; break; } }   // wrong and slower than the CPU: finer is slower still
+			}
+			if (!right && !slow) { Plan n; n.split = false; whole_trial(n); }
 		}
 	}
+	// the base of steps 2 and 3: the fastest right whole-NPU plan, else the fastest one
+	Plan best_npu; double best_npu_ms = 1e30; bool best_npu_ok = false; GraphInfo g;
+	{
+		const Whole *fast = nullptr, *right = nullptr;
+		for (auto &w : measured) {
+			if (!fast || w.r.ms < fast->r.ms) fast = &w;
+			if (w.r.ok && (!right || w.r.ms < right->r.ms)) right = &w;
+		}
+		const Whole *b = right ? right : fast;   // the parts on the CPU are tried for the accuracy only when no whole-NPU plan is right (the bound on the
+		                                         // weight error handles a loss spread over the network, measured with SqueezeNet and ResNet18)
+		if (b) { best_npu = b->p; best_npu_ms = b->r.ms; best_npu_ok = b->r.ok; g = b->g; }
+	}
+	const size_t n = g.nodes.size();
+	if (best_npu_ms >= 1e30 || n < 2 || g.profile_us <= 0) goto choose;   // no NPU plan, or no profile: nothing to place
+	{
+		CostModel cm(g);
+		// priors: the CPU factors from the measured CPU plan, the NPU factors from the whole-NPU plan with the light nodes 8 times less accelerated
+		// than the convolutions (ResNet18: 36 times faster on the NPU than on the CPU, element-wise operators a few times)
+		std::vector<char> none(n, 0), all(n, 1);
+		auto fc = cm.features(all), fn = cm.features(none);
+		double c = rc.ms * 1000 / std::max(fc[C_HEAVY] + fc[C_LIGHT], 1.0);
+		cm.prior[C_HEAVY] = cm.prior[C_LIGHT] = c;
+		cm.prior[CUT_US] = 300; cm.prior[BYTE_US] = 0.002;   // a switch between NPU and CPU parts; about 500 MB/s for the copy and the conversion
+		double rest = best_npu_ms * 1000 - c * (fn[C_HEAVY] + fn[C_LIGHT]) - cm.prior[CUT_US] * fn[CUT_US] - cm.prior[BYTE_US] * fn[BYTE_US];
+		double a = std::max(rest, 0.05 * best_npu_ms * 1000) / std::max(fn[A_HEAVY] + 8 * fn[A_LIGHT], 1.0);
+		cm.prior[A_HEAVY] = a; cm.prior[A_LIGHT] = 8 * a;
+		for (int k = 0; k < NPARAM; k++) cm.th[k] = cm.prior[k];
+		cm.add(none, best_npu_ms);   // the CPU plan runs the original graph, not this one (no split, no rewrites): a prior only, not a measurement of it
+		int tries = 0;
+		std::vector<char> forced(n, 0);
+		std::map<std::string, bool> tried;
+		tried[best_npu.tag()] = true;
+		auto measure = [&](const Plan &p, std::vector<char> on_cpu) {
+			std::vector<std::vector<uint8_t>> y;
+			double pred = cm.predict(cm.features(on_cpu)) / 1000;
+			TuneResult r = trial(p, "#tune", &y, nullptr, false);
+			r.predicted_ms = pred;
+			score(r, y);
+			res.push_back(r); tried[p.tag()] = true; tries++;
+			if (r.error.empty()) { cm.add(on_cpu, r.ms); cm.fit(); }
+			return r;
+		};
+		// 2. accuracy: no whole-NPU plan is right. Find where the result goes wrong: the latest node from which on the CPU the result is right, by
+		// bisection (about log2(nodes) compilations); then whether the damage is local: only a window of nodes there on the CPU, 1, 2, 4, ... wide.
+		// Those nodes must stay on the CPU in every later plan.
+		if (!best_npu_ok && best_npu_ms < rc.ms) {
+			int lo = 0, hi = (int)n;   // nodes from lo on, on the CPU: right; from hi on: wrong
+			while (hi - lo > 1 && tries < max_trials) {
+				int mid = (lo + hi) / 2;
+				Plan p = best_npu; p.nodes = { { mid, -1 } };
+				TuneResult r = measure(p, placement_of(p.nodes, n));
+				if (r.error.empty() && r.ok) lo = mid; else hi = mid;
+			}
+			for (int i = lo; i < (int)n; i++) forced[i] = 1;
+			for (int w = 1; lo + w < (int)n && tries < max_trials; w *= 2) {   // lo 0: the first node (SqueezeNet: all the loss is there)
+				Plan p = best_npu; p.nodes = { { lo, lo + w - 1 } };
+				TuneResult r = measure(p, placement_of(p.nodes, n));
+				if (r.error.empty() && r.ok) { forced.assign(n, 0); for (int i = lo; i < lo + w; i++) forced[i] = 1; break; }
+			}
+		}
+		// 3. speed: the cheapest placement under the model (with the forced nodes on the CPU), measured; the model is fitted again after every
+		// measurement, until it proposes nothing new that it expects to be 3 % faster than the best right plan so far
+		while (tries < max_trials) {
+			double best_ok = 1e30;
+			for (auto &r : res) if (r.ok && r.error.empty()) best_ok = std::min(best_ok, r.ms);
+			std::vector<char> on_cpu;
+			std::vector<std::pair<int, int>> rg;
+			for (double extra = 0;; extra = extra ? extra * 2 : cm.th[CUT_US]) {   // at most NPU_MAX_RANGES parts on the CPU
+				on_cpu = cm.best(forced, extra);
+				rg = cpu_ranges(on_cpu, cm.npu_ok);
+				if (rg.size() <= NPU_MAX_RANGES || extra > 1e9) break;
+			}
+			if (rg.size() > NPU_MAX_RANGES) break;
+			Plan p = best_npu; p.nodes = rg;
+			bool all_cpu = true; for (size_t i = 0; i < n; i++) all_cpu = all_cpu && (on_cpu[i] || !cm.npu_ok[i]);
+			if (all_cpu) break;   // the CPU plan is measured already
+			double pred = cm.predict(cm.features(on_cpu)) / 1000;
+			if (tried.count(p.tag()) || pred > best_ok * 0.97) break;
+			measure(p, on_cpu);
+		}
+	}
+choose:
 	// the choice: the fastest candidate with a right result (the CPU is always right). A plan without a compiled graph to cache (mixed, cpu) is loaded
 	// through TensorFlow Lite every time: it must beat the whole-NPU plan by 5 % (and 0.3 ms) to be taken, a difference in the noise is not worth it
 	size_t bi = 0;
@@ -723,7 +1023,7 @@ std::vector<TuneResult> Model::autotune(const std::vector<std::vector<uint8_t>> 
 	{
 		LoadOptions o = opt_;
 		Plan p = Plan::parse(res[0].plan);
-		if (p.cpu) o.device = "cpu"; else { o.device = "npu"; o.split = p.split; o.cpu_ops = p.deny; o.strict = false; }
+		if (p.cpu) o.device = "cpu"; else { o.device = "npu"; o.split = p.split; o.split_ratio = p.ratio; o.split_max_error = p.err; o.cpu_ops = p.deny; o.cpu_nodes = p.nodes; o.strict = false; }
 		std::vector<uint8_t> d = data_;
 		link_.reset();
 		attached_ = from_cache_ = false;

@@ -6,6 +6,10 @@
  * The layer becomes K convolutions of the same input, one per group, each with per-tensor weights (the scale of the group; the channels of other groups are
  * zero, their bias is zero) and the K outputs are summed with ADD. A channel outside the group gives exactly the zero point, so the sum loses nothing,
  * and the fused ReLU / ReLU6 stays valid because 0 is inside its range. MobileNet V2 needs 2.5 groups per layer on average at ratio 4.
+ * What a group costs in accuracy: its channels are requantised to the largest scale of the group, a channel whose scale is `ratio` times smaller loses up to
+ * log2(ratio) bits of its weights. With max_err > 0 the ratio is chosen per layer: the largest of `ratio`, 2, 1.5, 1.25 whose weight error (relative RMS
+ * per channel, against the int8 weights of the model, averaged as RMS over the channels) is at most max_err; a layer that needs less keeps its per-channel
+ * weights (the slow, exact path of the NPU). One number then trades speed for accuracy over the whole network (autotune searches it).
  */
 #ifndef NPU_SPLIT_PER_CHANNEL_H
 #define NPU_SPLIT_PER_CHANNEL_H
@@ -24,7 +28,7 @@ namespace npu_split {
 
 using namespace tflite;
 
-struct Stats { int layers = 0, split = 0, convs_added = 0, adds = 0; };
+struct Stats { int layers = 0, split = 0, convs_added = 0, adds = 0, kept = 0; double max_err = 0; };
 
 /* TensorT has no copy constructor in TensorFlow 2.6 */
 static inline std::unique_ptr<TensorT> clone_tensor(const TensorT &t)
@@ -58,7 +62,7 @@ static inline bool fused_act(const OperatorT &op, BuiltinOperator code, Activati
 }
 
 /* bytes: a TFLite model; on success replaced with the converted model. Returns "" or an error text; a model without per-channel layers is left as it is. */
-static inline std::string run(std::vector<uint8_t> &bytes, double ratio, Stats *st)
+static inline std::string run(std::vector<uint8_t> &bytes, double ratio, Stats *st, double max_err = 0)
 {
 	flatbuffers::Verifier v(bytes.data(), bytes.size());
 	if (!VerifyModelBuffer(v)) return "not a TFLite model";
@@ -117,16 +121,41 @@ static inline std::string run(std::vector<uint8_t> &bytes, double ratio, Stats *
 		if (qd < 0 || (size_t)qd >= w.shape.size() || (size_t)w.shape[qd] != n || wdata.size() != total || bdata.size() != n * 4) { out_ops.push_back(std::move(op)); continue; }
 		const float xs = x.quantization->scale[0];
 
-		/* groups: sorted by scale, a group spans at most `ratio` */
+		/* groups: sorted by scale, a group spans at most `r` */
 		std::vector<size_t> order(n);
 		std::iota(order.begin(), order.end(), 0);
 		std::sort(order.begin(), order.end(), [&](size_t a, size_t c) { return sc[a] < sc[c]; });
 		std::vector<int> group(n); std::vector<float> gmax;
-		for (size_t i = 0; i < n;) {
-			double top = std::max<double>(sc[order[i]], 1e-12) * ratio; size_t j = i; float mx = 0;
-			while (j < n && sc[order[j]] <= top) { group[order[j]] = (int)gmax.size(); mx = std::max(mx, sc[order[j]]); j++; }
-			gmax.push_back(mx); i = j;
-		}
+		auto make_groups = [&](double r) {
+			gmax.clear();
+			for (size_t i = 0; i < n;) {
+				double top = std::max<double>(sc[order[i]], 1e-12) * r; size_t j = i; float mx = 0;
+				while (j < n && sc[order[j]] <= top) { group[order[j]] = (int)gmax.size(); mx = std::max(mx, sc[order[j]]); j++; }
+				gmax.push_back(mx); i = j;
+			}
+		};
+		auto weight_error = [&]() {   /* RMS over the channels of the relative RMS error of each channel after the requantisation */
+			std::vector<double> e2(n, 0), w2(n, 0);
+			for (size_t i = 0; i < total; i++) {
+				size_t c = (i / inner) % n;
+				double wv = (int8_t)wdata[i] * (double)sc[c], smax = std::max(gmax[group[c]], 1e-30f);
+				double q = std::max(-127.0, std::min(127.0, std::round(wv / smax)));
+				e2[c] += (q * smax - wv) * (q * smax - wv); w2[c] += wv * wv;
+			}
+			double acc = 0; int m = 0;
+			for (size_t c = 0; c < n; c++) if (w2[c] > 0) { acc += e2[c] / w2[c]; m++; }
+			return m ? std::sqrt(acc / m) : 0.0;
+		};
+		if (max_err > 0) {
+			bool found = false;
+			for (double r : { ratio, 2.0, 1.5, 1.25 }) {
+				if (r > ratio) continue;
+				make_groups(r);
+				double e = weight_error();
+				if (e <= max_err) { found = true; s.max_err = std::max(s.max_err, e); break; }
+			}
+			if (!found) { s.layers++; s.kept++; out_ops.push_back(std::move(op)); continue; }   /* exact only per channel */
+		} else make_groups(ratio);
 		const int K = (int)gmax.size();
 		s.layers++; if (K > 1) { s.split++; s.convs_added += K - 1; s.adds += K - 1; }
 		changed = true;

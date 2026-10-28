@@ -12,6 +12,7 @@
 #include <pthread.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/syscall.h>
 #include <stdarg.h>
@@ -33,6 +34,7 @@
 #include <vector>
 
 #include "protocol.h"
+#include "tensorflow/lite/core/api/profiler.h"
 #include "fix_dynamic_reshape.h"
 #include "rewrite_ops.h"
 #include "split_per_channel.h"
@@ -112,6 +114,7 @@ struct Model {
 	TfLiteDelegate *delegate = nullptr;
 	std::vector<npu_tensor> info;   /* inputs, then outputs */
 	std::vector<npu_op_stat> ops;   /* the operators and where they run (NPU_OPS) */
+	std::vector<uint8_t> graph_desc;   /* the reply to NPU_GRAPH */
 	/* NBG mode: the compiled graph is loaded with TIM-VX directly, TFLite is not used */
 	bool nbg_mode = false;
 	size_t n_in = 0, n_out = 0;
@@ -153,6 +156,26 @@ static void describe(Model &m)
 	for (int i : m.interp->outputs()) add(i);
 }
 
+/* the time of every operator of one run (NPU_LOAD_PROFILE): OPERATOR_INVOKE events by node index */
+struct NodeTimer : public tflite::Profiler {
+	std::vector<double> us;
+	std::vector<std::pair<int64_t, uint64_t>> open;
+	uint32_t BeginEvent(const char *, EventType t, int64_t node, int64_t) override
+	{
+		if (t != EventType::OPERATOR_INVOKE_EVENT) return 0;
+		open.emplace_back(node, now_us());
+		return (uint32_t)open.size();
+	}
+	void EndEvent(uint32_t h) override
+	{
+		if (!h || h > open.size()) return;
+		auto &e = open[h - 1];
+		if (e.first < 0) return;
+		if ((size_t)e.first >= us.size()) us.resize(e.first + 1);
+		us[e.first] += now_us() - e.second;
+	}
+};
+
 /* returns an error text, or "" and fills `reply` */
 static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &reply)
 {
@@ -188,9 +211,10 @@ static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &rep
 			     st.slice, st.tile, st.log_softmax, st.boolean, st.trunc, st.ceil, st.cos, st.round, st.prelu);
 	}
 	if (!cpu_only && !no_split && (!getenv("NPU_SPLIT") || getenv("NPU_SPLIT")[0] != '0')) {   /* per-channel int8 layers -> per-tensor groups (fast path of the NPU, exact), see split_per_channel.h */
-		npu_split::Stats st; std::string e = npu_split::run(m->bytes, 4.0, &st);
+		npu_split::Stats st; std::string e = npu_split::run(m->bytes, lq.split_ratio_x100 ? lq.split_ratio_x100 / 100.0 : 4.0, &st, lq.split_max_err);
 		if (!e.empty()) return e;
-		if (st.layers) logf_("per-channel layers: %d, split into groups: %d (+%d convolutions, +%d additions)", st.layers, st.split, st.convs_added, st.adds);
+		if (st.layers) logf_("per-channel layers: %d, split into groups: %d (+%d convolutions, +%d additions), kept per channel: %d, largest weight error %.4f",
+				     st.layers, st.split, st.convs_added, st.adds, st.kept, st.max_err);
 	}
 	m->fb = tflite::FlatBufferModel::BuildFromBuffer((const char *)m->bytes.data(), m->bytes.size());
 	if (!m->fb) return "not a TFLite model (or a version this TFLite cannot read)";
@@ -198,6 +222,18 @@ static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &rep
 	tflite::InterpreterBuilder(*m->fb, resolver)(&m->interp);
 	if (!m->interp) return "cannot build the TFLite interpreter";
 	m->interp->SetNumThreads(2);   /* both Cortex-A35 for what stays on the CPU (XNNPACK, applied by TFLite after the VX delegate) */
+	std::vector<npu_graph_node> gnodes;   /* the graph before the delegate takes its part (NPU_GRAPH) */
+	for (int idx : m->interp->execution_plan()) {
+		const auto *nr = m->interp->node_and_registration(idx);
+		npu_graph_node g; memset(&g, 0, sizeof g);
+		g.code = nr->second.custom_name ? 0xffff : nr->second.builtin_code;
+		const TfLiteIntArray *in = nr->first.inputs, *out = nr->first.outputs;
+		g.n_in = (uint8_t)std::min(in->size, NPU_GRAPH_MAX_IN); g.n_out = (uint8_t)std::min(out->size, NPU_GRAPH_MAX_OUT);
+		for (int k = 0; k < g.n_in; k++) g.in[k] = in->data[k];
+		for (int k = 0; k < g.n_out; k++) g.out[k] = out->data[k];
+		if (idx != (int)gnodes.size()) logf_("node %d at position %zu of the execution plan: GRAPH indices are positions", idx, gnodes.size());
+		gnodes.push_back(g);
+	}
 	std::map<int, npu_op_stat> stat;   /* the operators before the delegate takes its part */
 	for (int idx : m->interp->execution_plan()) {
 		const auto *nr = m->interp->node_and_registration(idx);
@@ -210,6 +246,10 @@ static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &rep
 		std::string deny;
 		for (int i = 0; i < NPU_MAX_DENY && lq.deny_ops[i]; i++) deny += (deny.empty() ? "" : ",") + std::to_string(lq.deny_ops[i]);
 		if (!deny.empty()) setenv("VX_DENY_OPS", deny.c_str(), 1);
+		std::string cn;   /* parts of the graph on the CPU */
+		for (int i = 0; i < lq.n_cpu_ranges && i < NPU_MAX_RANGES; i++)
+			cn += (cn.empty() ? "" : ",") + std::to_string(lq.cpu_ranges[2 * i]) + "-" + (lq.cpu_ranges[2 * i + 1] == 0xffff ? std::string() : std::to_string(lq.cpu_ranges[2 * i + 1]));
+		if (!cn.empty()) setenv("VX_CPU_NODES", cn.c_str(), 1);
 		setenv("VX_NBG_EXPORT", nbg_file, 1);   /* the delegate writes the compiled graph here */
 		unlink(nbg_file);
 		auto opt = TfLiteExternalDelegateOptionsDefault(DELEGATE_SO);
@@ -225,6 +265,12 @@ static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &rep
 			if (stat.count(c) && stat[c].on_npu) stat[c].on_npu--;
 		}
 		whole = parts == 1 && left == 0;   /* only then is the exported graph the whole model */
+		for (int idx : m->interp->execution_plan()) {   /* which nodes the delegate took */
+			const auto *nr = m->interp->node_and_registration(idx);
+			if (!nr->first.delegate || !nr->first.builtin_data) continue;
+			const TfLiteDelegateParams *dp = (const TfLiteDelegateParams *)nr->first.builtin_data;
+			for (int k = 0; k < dp->nodes_to_replace->size; k++) { int n = dp->nodes_to_replace->data[k]; if (n >= 0 && n < (int)gnodes.size()) gnodes[n].on_npu = 1; }
+		}
 	} else {
 		for (auto &kv : stat) kv.second.on_npu = 0;
 	}
@@ -241,6 +287,27 @@ static std::string do_load(std::vector<uint8_t> &&req, std::vector<uint8_t> &rep
 	}
 	if (m->interp->AllocateTensors() != kTfLiteOk) return "cannot allocate the tensors";
 	if (m->interp->Invoke() != kTfLiteOk) return "the first run failed";   /* the Vivante compiler builds the graph here (seconds) */
+	npu_graph_head gh = { (uint32_t)gnodes.size(), (uint32_t)m->interp->tensors_size(), 0, 0 };
+	if (lq.flags & NPU_LOAD_PROFILE) {   /* the time of every node of this graph (after our passes) on the CPU: TFLite's own kernels (XNNPACK fuses the nodes into one) */
+		tflite::ops::builtin::BuiltinOpResolverWithoutDefaultDelegates r2;
+		std::unique_ptr<tflite::Interpreter> p;
+		tflite::InterpreterBuilder(*m->fb, r2)(&p);
+		NodeTimer timer;
+		if (p && p->AllocateTensors() == kTfLiteOk) {
+			p->SetNumThreads(2); p->SetProfiler(&timer);
+			uint64_t t1 = now_us();
+			if (p->Invoke() == kTfLiteOk) {
+				gh.profile_us = (uint32_t)(now_us() - t1);
+				for (size_t k = 0; k < gnodes.size() && k < timer.us.size(); k++) gnodes[k].cpu_us = (float)timer.us[k];
+			}
+			p->SetProfiler(nullptr);
+		}
+		logf_("profiled run on the CPU (TFLite kernels): %u ms", gh.profile_us / 1000);
+	}
+	m->graph_desc.resize(sizeof gh + gh.n_tensors * 4 + gnodes.size() * sizeof(npu_graph_node));
+	memcpy(m->graph_desc.data(), &gh, sizeof gh);
+	for (uint32_t t = 0; t < gh.n_tensors; t++) { uint32_t b = (uint32_t)m->interp->tensor(t)->bytes; memcpy(m->graph_desc.data() + sizeof gh + 4 * t, &b, 4); }
+	if (!gnodes.empty()) memcpy(m->graph_desc.data() + sizeof gh + gh.n_tensors * 4, gnodes.data(), gnodes.size() * sizeof(npu_graph_node));
 	describe(*m);
 	npu_load_reply lr = { (uint32_t)m->interp->inputs().size(), (uint32_t)m->interp->outputs().size(), (uint32_t)((now_us() - t0) / 1000),
 			      avail > meminfo_kb("MemAvailable:") ? avail - meminfo_kb("MemAvailable:") : 0, 0 };
@@ -426,6 +493,12 @@ static int engine_main(int fd)
 			uint32_t n = g_model->ops.size(); out.resize(4 + n * sizeof(npu_op_stat)); memcpy(out.data(), &n, 4);
 			if (n) memcpy(out.data() + 4, g_model->ops.data(), n * sizeof(npu_op_stat));
 			break; }
+		case NPU_GRAPH: {
+			std::lock_guard<std::mutex> lk(g_model_mu);
+			if (!g_model) { e = "no model loaded"; break; }
+			if (g_model->graph_desc.empty()) { npu_graph_head gh = { 0, 0, 0, 0 }; out.assign((uint8_t *)&gh, (uint8_t *)&gh + sizeof gh); }
+			else out = g_model->graph_desc;
+			break; }
 		default: e = "the engine does not know this request";
 		}
 		if ((h.type == NPU_LOAD || h.type == NPU_LOAD_NBG) && e.empty()) { if (!freopen("/dev/null", "w", stderr)) {} }   /* the delegate prints on every run: only the load is logged */
@@ -527,12 +600,26 @@ static bool engine_call(Engine &g, const npu_hdr &h0, const uint8_t *p, size_t n
 	if (rc != 0) { dead("crashed"); return false; }
 	return true;
 }
+/* the log of an engine that ends: appended to /tmp/npu_engines.log (kept below 2 MB) before it is removed, for a look afterwards (autotune) */
+static void archive_log(const Engine &e)
+{
+	const char *arch = "/tmp/npu_engines.log";
+	struct stat st;
+	if (stat(arch, &st) == 0 && st.st_size > 2 * 1024 * 1024) unlink(arch);
+	FILE *in = fopen(e.log.c_str(), "rb"); if (!in) return;
+	FILE *out = fopen(arch, "ab"); if (!out) { fclose(in); return; }
+	fprintf(out, "==== engine %u (%s, %s)\n", e.id, e.name.c_str(), e.plan.c_str());
+	char b[4096]; size_t n;
+	while ((n = fread(b, 1, sizeof b, in)) > 0) fwrite(b, 1, n, out);
+	fclose(in); fclose(out);
+}
 static void engine_remove(uint32_t id)
 {
 	std::shared_ptr<Engine> e;
 	{ std::lock_guard<std::mutex> lk(g_eng_mu); auto it = g_engines.find(id); if (it == g_engines.end()) return; e = it->second; g_engines.erase(it); }
 	std::lock_guard<std::mutex> lk(e->mu);   /* waits for a RUN in progress */
 	engine_kill(*e);
+	archive_log(*e);
 	unlink(e->log.c_str());
 	logf_("model %u (%s) unloaded", id, e->name.c_str());
 }
@@ -565,7 +652,8 @@ static void handle(int in_fd, Msg &m)
 		auto e = std::make_shared<Engine>();
 		{ std::lock_guard<std::mutex> lk(g_eng_mu); e->id = g_next_id++; }
 		e->key = lq.key; e->name = lq.name; e->from_nbg = m.h.type == NPU_LOAD_NBG;
-		if (e->from_nbg) e->plan = "npu";
+		if (lq.plan[0]) e->plan.assign(lq.plan, strnlen(lq.plan, sizeof lq.plan));
+		else if (e->from_nbg) e->plan = "npu";
 		else if (lq.flags & NPU_LOAD_CPU_ONLY) e->plan = "cpu";
 		else {
 			std::string d; for (int i = 0; i < NPU_MAX_DENY && lq.deny_ops[i]; i++) d += (d.empty() ? "" : ",") + std::to_string(lq.deny_ops[i]);
@@ -597,7 +685,7 @@ static void handle(int in_fd, Msg &m)
 		if (!ok) { engine_remove(m.h.model); reply_err(in_fd, m.h, et + " (the model is unloaded)"); break; }
 		if (rh.flags & NPU_FLAG_ERROR) reply_err(in_fd, m.h, std::string((const char *)out.data(), out.size())); else reply(in_fd, m.h, false, out.data(), out.size());
 		break; }
-	case NPU_OPS: {
+	case NPU_OPS: case NPU_GRAPH: {
 		auto e = engine_get(m.h.model);
 		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU"); break; }
 		npu_hdr rh; std::string et; bool ok;

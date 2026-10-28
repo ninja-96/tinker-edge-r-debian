@@ -10,7 +10,7 @@ index 3fb4d6e..2bd4ef0 100644
 +  add_subdirectory(/w/server ${CMAKE_BINARY_DIR}/npu_server)
 +endif()
 diff --git a/delegate_main.cc b/delegate_main.cc
-index 1f6e8e9..8264473 100644
+index 1f6e8e9..e7fcd82 100644
 --- a/delegate_main.cc
 +++ b/delegate_main.cc
 @@ -25,6 +25,10 @@
@@ -24,7 +24,35 @@ index 1f6e8e9..8264473 100644
  #include <cstring>
  #include <iostream>
  #include <limits>
-@@ -140,10 +144,24 @@ std::vector<uint32_t> TfLiteTensorDims(const TfLiteTensor* tensor) {
+@@ -95,11 +99,27 @@ TfLiteStatus PrepareDelegate(TfLiteContext* context, TfLiteDelegate* delegate) {
+   TfLiteRegistration* registration;
+   TF_LITE_ENSURE_STATUS(context->GetExecutionPlan(context, &plan));
+ 
++  // rnd/verisilicon: VX_CPU_NODES="120-,40-45" (ranges of node indices, "N-": to the end) leaves these nodes to the CPU: the npu_server sets it for
++  // a plan made by autotune that runs a part of the graph on the CPU
++  std::vector<std::pair<int, int>> cpu_nodes;
++  if (const char* e = getenv("VX_CPU_NODES"))
++    for (const char* p = e; *p;) {
++      char* q; long lo = strtol(p, &q, 10);
++      if (q == p) { p++; continue; }
++      long hi = lo;
++      if (*q == '-') { p = q + 1; hi = strtol(p, &q, 10); if (q == p) hi = 1L << 30; }
++      cpu_nodes.emplace_back((int)lo, (int)hi);
++      p = q;
++    }
++
+   // Get a list of supported nodes.
+   std::vector<int> supported_nodes = {0};
+   for (int node_index : tflite::TfLiteIntArrayView(plan)) {
+     TF_LITE_ENSURE_STATUS(context->GetNodeAndRegistration(
+         context, node_index, &node, &registration));
++    bool on_cpu = false;
++    for (auto& r : cpu_nodes) on_cpu = on_cpu || (node_index >= r.first && node_index <= r.second);
++    if (on_cpu) continue;
+     if (vx::delegate::Delegate::SupportedOp(context, node, registration)) {
+       supported_nodes.push_back(node_index);
+     }
+@@ -140,10 +160,24 @@ std::vector<uint32_t> TfLiteTensorDims(const TfLiteTensor* tensor) {
    return dims;
  }
  
@@ -50,7 +78,7 @@ index 1f6e8e9..8264473 100644
      case kTfLiteInt32:
        return tim::vx::DataType::INT32;
      case kTfLiteUInt8:
-@@ -172,11 +190,29 @@ bool IsVariableTensor(const TfLiteTensor* tensor) {
+@@ -172,11 +206,29 @@ bool IsVariableTensor(const TfLiteTensor* tensor) {
    return tensor->is_variable;
  }
  
@@ -80,7 +108,7 @@ index 1f6e8e9..8264473 100644
    std::vector<uint32_t> dims(TfLiteTensorDims(tensor));
    tim::vx::ShapeType whcn_shape(dims.size());
  
-@@ -215,7 +251,7 @@ tim::vx::TensorSpec CreateTensorSpec(
+@@ -215,7 +267,7 @@ tim::vx::TensorSpec CreateTensorSpec(
        quantization =
            tim::vx::Quantization(qtype, vx_channel_dim, scales, zero_points);
      } else {
@@ -89,7 +117,7 @@ index 1f6e8e9..8264473 100644
      }
  
      return tim::vx::TensorSpec(datatype, whcn_shape, attr, quantization);
-@@ -285,6 +321,54 @@ bool TransposeTensorData(const TfLiteTensor* tensor,
+@@ -285,6 +337,54 @@ bool TransposeTensorData(const TfLiteTensor* tensor,
    return true;
  }
  
@@ -144,7 +172,7 @@ index 1f6e8e9..8264473 100644
  std::shared_ptr<tim::vx::Tensor> CreateTensor(
      std::shared_ptr<tim::vx::Graph>& graph,
      const TfLiteTensor* tensor,
-@@ -299,11 +383,48 @@ std::shared_ptr<tim::vx::Tensor> CreateTensor(
+@@ -299,11 +399,48 @@ std::shared_ptr<tim::vx::Tensor> CreateTensor(
        break;
      case tim::vx::TensorAttribute::CONSTANT:
        tensor_data = reinterpret_cast<const uint8_t*>(tensor->data.raw_const);
@@ -195,7 +223,7 @@ index 1f6e8e9..8264473 100644
          }
        }
        break;
-@@ -364,6 +485,18 @@ bool Delegate::SupportedOp(TfLiteContext* context,
+@@ -364,6 +501,18 @@ bool Delegate::SupportedOp(TfLiteContext* context,
      }
    }
  
@@ -214,7 +242,7 @@ index 1f6e8e9..8264473 100644
    const auto& supported_builtins = vx::op_map::SupportedBuiltinOps();
    const auto& it = supported_builtins.find(
        static_cast<TfLiteBuiltinOperator>(registration->builtin_code));
-@@ -611,6 +744,48 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+@@ -611,6 +760,48 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
        std::vector<std::shared_ptr<tim::vx::Operation>> before_op_vector;
        std::vector<std::shared_ptr<tim::vx::Operation>> after_op_vector;
  #endif
@@ -263,7 +291,7 @@ index 1f6e8e9..8264473 100644
  
        std::vector<int> inputs_outputs;
        std::copy(
-@@ -768,6 +943,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+@@ -768,6 +959,19 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
          compiled_ = true;
        }
  #else
@@ -283,7 +311,7 @@ index 1f6e8e9..8264473 100644
        compiled_ = layout_infered_.first->Compile();
  #endif
        if (!compiled_) {
-@@ -801,7 +989,18 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+@@ -801,7 +1005,18 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
      tensor_handles_[tensor_idx]->CopyDataToTensor(tensor_data,
                                              input_spec.GetByteSize());
  #else
@@ -303,7 +331,7 @@ index 1f6e8e9..8264473 100644
  #endif
      } else {
        TFLITE_LOG_PROD(TFLITE_LOG_WARNING,
-@@ -852,7 +1051,16 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
+@@ -852,7 +1067,16 @@ TfLiteStatus Delegate::Invoke(const OpData& op_data,
        }
  
        auto infered_output_tesnor = layout_infered_.second[src_output_tensor];

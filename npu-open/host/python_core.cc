@@ -71,9 +71,9 @@ PYBIND11_MODULE(_core, mod)
 
 	py::class_<Model>(mod, "Model")
 		.def(py::init([](py::object src, const std::string &name, int load_timeout, bool use_cache, const std::string &cache_dir, int max_inflight, int gap,
-				 const std::string &device, bool split, const std::vector<int> &cpu_ops) {
+				 const std::string &device, bool split, double split_ratio, double split_max_error, const std::vector<int> &cpu_ops) {
 			LoadOptions o; o.name = name; o.load_timeout_s = load_timeout; o.use_cache = use_cache; o.cache_dir = cache_dir; o.max_inflight = max_inflight; o.async_gap_us = gap;
-			o.device = device; o.split = split; o.cpu_ops = cpu_ops;
+			o.device = device; o.split = split; o.split_ratio = split_ratio; o.split_max_error = split_max_error; o.cpu_ops = cpu_ops;
 			if (py::isinstance<py::bytes>(src)) {
 				std::string s = src.cast<std::string>();
 				std::vector<uint8_t> d(s.begin(), s.end());
@@ -84,7 +84,7 @@ PYBIND11_MODULE(_core, mod)
 			py::gil_scoped_release nogil;   // a load takes seconds to minutes: other Python threads go on
 			return new Model(path, o);
 		}), py::arg("src"), py::arg("name") = "", py::arg("load_timeout") = 600, py::arg("use_cache") = true, py::arg("cache_dir") = "",
-		    py::arg("max_inflight") = 2, py::arg("async_gap_us") = 300, py::arg("device") = "auto", py::arg("split") = true, py::arg("cpu_ops") = std::vector<int>())
+		    py::arg("max_inflight") = 2, py::arg("async_gap_us") = 300, py::arg("device") = "auto", py::arg("split") = true, py::arg("split_ratio") = 4.0, py::arg("split_max_error") = 0.0, py::arg("cpu_ops") = std::vector<int>())
 		.def_property_readonly("id", &Model::id).def_property_readonly("name", &Model::name).def_property_readonly("key", &Model::key)
 		.def_property_readonly("attached", &Model::attached).def_property_readonly("from_cache", &Model::from_cache)
 		.def_property_readonly("load_ms", &Model::load_ms).def_property_readonly("mem_used_kb", &Model::mem_used_kb)
@@ -101,9 +101,9 @@ PYBIND11_MODULE(_core, mod)
 			std::vector<TuneResult> r;
 			{ py::gil_scoped_release nogil; r = m.autotune(x, tolerance, runs, max_trials); }   // minutes: every candidate is compiled once
 			py::list out;
-			for (auto &t : r) { py::dict d; d["plan"] = t.plan; d["ms"] = t.ms; d["cosine"] = t.cosine; d["ok"] = t.ok; d["error"] = t.error; out.append(d); }
+			for (auto &t : r) { py::dict d; d["plan"] = t.plan; d["ms"] = t.ms; d["predicted_ms"] = t.predicted_ms; d["cosine"] = t.cosine; d["ok"] = t.ok; d["error"] = t.error; out.append(d); }
 			return out;
-		}, py::arg("sample") = py::none(), py::arg("tolerance") = 0.98, py::arg("runs") = 5, py::arg("max_trials") = 8)
+		}, py::arg("sample") = py::none(), py::arg("tolerance") = 0.98, py::arg("runs") = 5, py::arg("max_trials") = 12)
 		.def("exec", [](Model &m, const py::list &xs, int timeout) {
 			auto bi = input_buffers(m, xs);
 			std::vector<const void *> in; for (auto &b : bi) in.push_back(b.ptr);

@@ -32,8 +32,15 @@
   * `"npu"`: strictly the whole model on the NPU. If an operator would stay on the CPU, the load fails with `NpuError` naming it and recommending `"auto"`.
   * `"cpu"`: strictly the whole model on the CPU of the NPU die.
   Bool tensors crash TIM-VX on this driver: the server rewrites comparisons, logical operators, `SELECT` and `CAST` of bool into arithmetic on 0 / 1 values that the NPU runs;
-  a bool tensor it cannot rewrite (a model output, or used by another operator) stays on the CPU. `Model.autotune()` measures the plans of one model (whole NPU, NPU without the per-channel split, mixed: operator types moved to the CPU, CPU only)
-  against the CPU result and keeps the fastest one with the same result (cosine similarity of the outputs at least 0.98 by default, about 20 % relative error); later loads use it.
+  a bool tensor it cannot rewrite (a model output, or used by another operator) stays on the CPU. `Model.autotune()` searches the plans of one model against the CPU result
+  and keeps the fastest one with the same result (cosine similarity of the outputs at least 0.98 by default, about 20 % relative error); later loads use it. The search:
+  (1) the whole model on the NPU; with per-channel int8 layers split ratio 4, and if that is not right the split ratio per layer: the server gives every layer the
+  largest ratio (4, 2, 1.5, 1.25) whose weight error stays below a bound, a layer that needs less keeps its per-channel weights; the bound is found by bisection (SqueezeNet
+  at cosine 0.9995: 33 ms, against 65 ms with no split at all); if no bound is right, no split; these loads also time every node on the CPU; (2) if none is right, where it goes wrong:
+  the latest node from which on the CPU the result is right (bisection), then the smallest window of nodes there that is enough; (3) a cost model (the time of every node on
+  the NPU and on the CPU, the cost of every cut between NPU and CPU parts and of the bytes copied there, fitted to every measurement) and dynamic programming over the
+  execution order give the cheapest placement of the nodes; it is measured and the model fitted again until nothing better is expected.
+  Plans: `npu`, `npu-r2`, `npu-e0.01` (the weight-error bound), `npu-nosplit`, `cpu`, `mixed:<operator codes>[:r2|:e0.01|:nosplit][:cpu=<node ranges>]`.
 * The server checks the chip identity (model 0x8000, revision 0x7100, product 0x45080001 - every Tinker Edge R has it, see "The chip" below) and refuses to run on anything else.
 
 ## The chip

@@ -99,7 +99,8 @@ class ModelInfo:
 class Model:
     """A TFLite model on the NPU.
 
-    Model(model, name=None, device="auto", load_timeout=600, cache_dir=None, max_inflight=2, async_gap_us=300, split=True, cpu_ops=())
+    Model(model, name=None, device="auto", load_timeout=600, cache_dir=None, max_inflight=2, async_gap_us=300, split=True, split_ratio=4, split_max_error=0,
+          cpu_ops=())
 
     model: path to a .tflite file, or its bytes. The model is identified by the sha256 of these bytes:
       * if it is loaded on the NPU already (by this or another program), the object is attached to it: nothing is loaded and nothing is
@@ -112,11 +113,13 @@ class Model:
     name: the name in models() (default: the file name).
     device: where it runs.
         "auto" (default): NPU and CPU together - the plan autotune() found for this model if there is one, else integer models on the NPU (with what the
-            NPU cannot do on the CPU) and float models on the CPU of the NPU die (faster for them than the float16 path of this NPU). Comparisons, logical
-            operators and CAST never go to the NPU (they crash its graph library on this driver).
+            NPU cannot do on the CPU) and float models on the CPU of the NPU die (faster for them than the float16 path of this NPU).
         "npu": strictly the whole model on the NPU; if an operator would stay on the CPU the load fails with NpuError naming it (use "auto" then).
         "cpu": strictly the whole model on the CPU of the NPU die (TensorFlow Lite with XNNPACK on its two Cortex-A35).
     split: for "npu", split per-channel int8 layers into per-tensor groups (the fast path of the NPU; normally not changed).
+    split_ratio: for "npu", the channel scales in one group differ at most this much (default 4; 2 or 1.5: more exact and slower).
+    split_max_error: for "npu", > 0: the ratio per layer, the largest of split_ratio, 2, 1.5, 1.25 whose weight error (relative RMS against the int8
+        weights) is at most this; a layer that needs less keeps its per-channel weights (exact, slower). autotune() chooses these.
     cpu_ops: internal (the mixed plans of autotune()).
     load_timeout: seconds to wait for the load.
     max_inflight, async_gap_us: see async_exec.
@@ -127,7 +130,8 @@ class Model:
     is closed at the end of the block, not stopped. Several threads may use one Model; the runs of a model are served one after another.
     """
 
-    def __init__(self, model, name=None, device="auto", load_timeout=600, cache_dir=None, max_inflight=2, async_gap_us=300, split=True, cpu_ops=()):
+    def __init__(self, model, name=None, device="auto", load_timeout=600, cache_dir=None, max_inflight=2, async_gap_us=300, split=True, split_ratio=4,
+                 split_max_error=0, cpu_ops=()):
         if isinstance(model, (bytes, bytearray, memoryview)):
             src = bytes(model)
         else:
@@ -138,7 +142,7 @@ class Model:
         if device not in ("auto", "npu", "cpu"):
             raise NpuError('device must be "auto", "npu" or "cpu", not %r' % (device,))
         self._m = _core.Model(src, name or "", int(load_timeout), use_cache, cache_dir or "", int(max_inflight), int(async_gap_us),
-                              str(device), bool(split), [int(c) for c in cpu_ops])
+                              str(device), bool(split), float(split_ratio), float(split_max_error), [int(c) for c in cpu_ops])
         self.inputs = [Tensor(t) for t in self._m.inputs]
         self.outputs = [Tensor(t) for t in self._m.outputs]
         self.id, self.name, self.key = self._m.id, self._m.name, self._m.key
@@ -147,26 +151,34 @@ class Model:
 
     @property
     def plan(self):
-        """Where the model runs: "npu", "npu-nosplit", "cpu" or "mixed:<operator codes on the CPU>[:nosplit]" ("" when attached to an older load)."""
+        """Where the model runs: "npu", "npu-r<split ratio>", "npu-nosplit", "cpu" or "mixed:<operator codes on the CPU>[:r<ratio>|:nosplit][:from=<node>]"
+        (from=N: the operators from index N on run on the CPU; "" when attached to an older load)."""
         return self._m.plan
 
     def ops(self):
         """The operator types of the model and where they run: a list of OpStat (empty for a model loaded from its compiled graph: all on the NPU)."""
         return [OpStat(o) for o in self._m.ops()]
 
-    def autotune(self, sample=None, tolerance=0.98, runs=5, max_trials=8):
+    def autotune(self, sample=None, tolerance=0.98, runs=5, max_trials=12):
         """Find the fastest way to run this model with the same results, keep it, and switch to it.
 
-        Candidates: the whole model on the CPU of the NPU die (the reference: TensorFlow Lite with XNNPACK), the whole model on the NPU, the same without
-        the split of per-channel int8 layers, and mixed plans in which operator types move from the NPU to the CPU one by one (kept when that is faster or
-        makes the result right; at most max_trials of them). Each candidate runs the sample (an input array, or a list for several inputs; None: random
+        The search, step by step (every candidate is compared with the reference, the whole model on the CPU of the NPU die):
+          1. the whole model on the NPU. A model with per-channel int8 layers: split ratio 4; if that is not right, the split ratio per layer from a
+             bound on the weight error, the bound by bisection (0.02 ... 0.000625: smaller is more exact and slower); if none is right, no split.
+             These loads also time every node of the graph on the CPU (the weights of the cost model);
+          2. if none is right: where the result goes wrong. The latest node from which on the CPU the result is right (bisection), then whether a
+             window of nodes there is enough; those nodes stay on the CPU;
+          3. a cost model predicts the time of any placement of the nodes (NPU or CPU each) from the profile, the cuts between NPU and CPU parts
+             and the bytes copied at each cut, fitted to every measurement so far; the cheapest placement is found by dynamic programming over
+             the execution order, measured, the model fitted again, until it expects nothing 3 % faster than the best right plan.
+        Steps 2 and 3 together try at most max_trials candidates. Every result has predicted_ms: what the model expected (0: not predicted). Each candidate runs the sample (an input array, or a list for several inputs; None: random
         data, but real data is better) and is compared with the reference: the lowest cosine similarity of the outputs must be at least `tolerance`
         (default 0.98: about 20 % relative error of the outputs; 0.99: about 14 %, 0.95: about 32 %).
         Every candidate is loaded and compiled once: for a big model this takes minutes, once.
 
         The fastest candidate that passes is kept next to the compiled-graph cache (later loads with device "auto" use it, a whole-NPU plan from its cached
         graph) and this object is reloaded with it (programs attached to the old load lose it). Returns the candidates as dicts
-        {plan, ms, cosine, ok, error}, the chosen one first; ms is one exec() with the USB transfer."""
+        {plan, ms, predicted_ms, cosine, ok, error}, the chosen one first; ms is one exec() with the USB transfer."""
         x = None if sample is None else self._prepare(sample)
         r = self._m.autotune(x, float(tolerance), int(runs), int(max_trials))
         self.inputs = [Tensor(t) for t in self._m.inputs]

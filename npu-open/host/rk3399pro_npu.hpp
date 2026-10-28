@@ -48,7 +48,7 @@ struct ModelInfo {
 	uint32_t inputs = 0, outputs = 0;
 	uint32_t load_ms = 0, mem_used_kb = 0, runs = 0, age_s = 0;
 	bool from_cache = false;          // loaded from a compiled graph
-	std::string plan;                 // where it runs: "npu", "npu-nosplit", "cpu", "mixed:<operator codes on the CPU>[:nosplit]"
+	std::string plan;                 // where it runs: "npu", "npu-r2", "npu-nosplit", "cpu", "mixed:<operator codes on the CPU>[:r2|:nosplit][:from=N]"
 };
 
 // An operator type of a model and where it runs (Model::ops()).
@@ -60,11 +60,25 @@ struct OpStat {
 
 // One candidate of Model::autotune().
 struct TuneResult {
-	std::string plan;                 // "npu", "npu-nosplit", "cpu", "mixed:<operator codes on the CPU>[:nosplit]"
+	std::string plan;                 // "npu", "npu-r<ratio>", "npu-nosplit", "cpu", "mixed:<operator codes on the CPU>[:r<ratio>|:nosplit][:from=<node>]"
 	double ms = 0;                    // time of one exec(), with the USB transfer
+	double predicted_ms = 0;          // what the cost model expected before the measurement (0: not predicted)
 	double cosine = 0;                // the worst cosine similarity of the outputs to the reference (the model on the CPU)
 	bool ok = false;                  // cosine >= the tolerance
 	std::string error;                // the candidate could not be loaded or run
+};
+
+// The graph of a loaded model after the passes of the server, nodes in execution order (internal: the cost model of autotune()).
+struct GraphNode {
+	int code = 0;                     // TfLiteBuiltinOperator (0xffff: a custom operator)
+	bool on_npu = false;              // taken by the NPU in this plan
+	double cpu_us = 0;                // profiled time on the CPU of the NPU die (TensorFlow Lite's own kernels), 0 if not profiled
+	std::vector<int> in, out;         // tensor indices
+};
+struct GraphInfo {
+	double profile_us = 0;            // the whole profiled run, 0: not profiled
+	std::vector<uint32_t> tensor_bytes;
+	std::vector<GraphNode> nodes;
 };
 
 // The state of the NPU (info()).
@@ -91,7 +105,12 @@ struct LoadOptions {
 	// on the NPU: an Error naming the operators otherwise); "cpu" (strictly the whole model on the CPU of the NPU die: TensorFlow Lite with XNNPACK on its two A35)
 	std::string device = "auto";
 	bool split = true;                // device "npu": split per-channel int8 layers into per-tensor groups (the fast path of the NPU)
+	double split_ratio = 4;           // device "npu": the scales of the channels in one group differ at most this much (smaller: more exact, slower; > 1)
+	double split_max_error = 0;       // device "npu": > 0: the ratio per layer, the largest (split_ratio, 2, 1.5, 1.25) whose weight error (relative RMS) is
+	                                  // at most this; a layer that needs less keeps its per-channel weights (exact, slower)
 	std::vector<int> cpu_ops;         // internal (autotune, plans): operator codes (TfLiteBuiltinOperator) to leave to the CPU
+	std::vector<std::pair<int, int>> cpu_nodes;   // internal (autotune, plans): ranges of nodes (first, last; last -1: to the end) on the CPU
+	bool profile = false;             // internal (autotune): time every node of the graph on the CPU after the load (graph())
 	std::string key_suffix;           // internal (autotune): load a second copy next to the loaded one
 	bool strict = true;               // internal: false lets device "npu" leave what the NPU cannot do to the CPU (the "auto" plans)
 	int load_timeout_s = 600;         // the first load of a big int8 model takes a minute or more
@@ -131,13 +150,14 @@ public:
 	uint32_t last_invoke_us() const;  // time of the last run on the NPU die
 	const std::string &plan() const { return plan_; }   // where it runs: "npu", "npu-nosplit", "cpu", "mixed:..." ("?" when attached to the model of another program)
 	std::vector<OpStat> ops();        // the operator types of the model and where they run (empty for a model loaded from its compiled graph: all on the NPU)
+	GraphInfo graph();                // internal (autotune): the graph after the passes of the server (empty for a model loaded from its compiled graph)
 
 	// Find the fastest way to run this model whose results match the model on the CPU: the whole model on the NPU, without the split of per-channel
 	// layers, operator types moved to the CPU one by one (a mixed plan), or the CPU only. sample: inputs to compare with (empty: random data; real data
 	// is better); tolerance: the lowest cosine similarity of the outputs to the reference accepted; runs: exec() calls timed per candidate; max_trials: mixed
 	// plans tried. Every candidate is loaded once (for big models: minutes); the loaded copy of this model is unloaded meanwhile (programs attached to it
 	// lose it). The best plan is kept in the cache (later loads with device "auto" use it) and this object is loaded with it. Returns the candidates, the chosen one first.
-	std::vector<TuneResult> autotune(const std::vector<std::vector<uint8_t>> &sample = {}, double tolerance = 0.98, int runs = 5, int max_trials = 8);
+	std::vector<TuneResult> autotune(const std::vector<std::vector<uint8_t>> &sample = {}, double tolerance = 0.98, int runs = 5, int max_trials = 12);
 	bool closed() const { return !link_; }
 
 	// One run. in[i] points to the bytes of input i (inputs()[i].bytes long, in the dtype of the model); out[i] receives output i
