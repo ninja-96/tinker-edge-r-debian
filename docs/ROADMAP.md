@@ -122,16 +122,16 @@ Decision (2026-10-27): a patch release of 0.4 (the kernel and Debian of 0.4 stay
 | Tests | done: `npu-selftest` (17 checks: also two models, attaching, another process, stopping); LiteRT community vision models measured (docs/NPU.md) |
 | Operators | measured again ([OPERATORS.md](../npu-open/OPERATORS.md)): 68 of 87 single-operator models entirely on the NPU, all right; `GATHER_ND` and `RESIZE_NEAREST_NEIGHBOR` are right now, float `FULLY_CONNECTED` / `TRANSPOSE_CONV` run, `SUM`, `UNPACK`, `FLOOR`, `MIRROR_PAD` and others moved to the NPU; comparisons, logical operators and `CAST` stay on the CPU (TIM-VX crashes on bool tensors) |
 
-### Release 0.5: LiteRT and LiteRT-LM on the NPU die (the main goal)
+### Release 0.5: LiteRT on the NPU die (the main goal)
 
-Decision of the maintainer (2026-10-28): LiteRT and LiteRT-LM run on the NPU die only, not on the board's CPU or GPU (changed from 2026-10-27). Every build works out of
-the box and is optimised for the NPU die (`-mcpu=cortex-a35 -O3`); extra packages only from apt.
+Decision of the maintainer (2026-10-28): LiteRT runs on the NPU die only, not on the board's CPU or GPU; **LiteRT-LM is dropped**: no language model fits this NPU
+(no int4, float16 on 2 of 10 cores, static graphs only on driver 6.4.6, 2 GB on the die, two Cortex-A35 for what stays on the CPU). Every build works out of the box and is
+optimised for the NPU die (`-mcpu=cortex-a35 -O3`); extra packages only from apt.
 
 | Item | Notes |
 |---|---|
-| **LiteRT on the NPU die** instead of TensorFlow Lite 2.21 | [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT) (2.3.2 on 2026-10-26): its `tflite/` is the continuation of TensorFlow Lite, so the VX delegate and our server keep the classic interpreter API. CPU (XNNPACK on the A35), NPU or both, as now |
-| **LiteRT-LM on the NPU die** | [google-ai-edge/LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) (0.18.1): language models. First on the CPU of the NPU die (XNNPACK; small models such as Gemma 3 270M int8 fit into its 2 GB), then research how much of an LM graph the NPU takes (static graphs only on driver 6.4.6: fixed sequence lengths, matrix products as `FULLY_CONNECTED`). Its closed WebGPU prebuilts are not used |
-| Build | LiteRT-LM needs Rust (HF `tokenizers`), Java (ANTLR) and CMake >= 3.25: too new for the Debian 11 container. Plan: build in Debian 13 (apt only) and put Debian's glibc into the ramdisk of the NPU die for our server (LGPL; the Vivante libraries run on a newer glibc) |
+| **LiteRT on the NPU die** instead of TensorFlow Lite 2.21 | [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT) (2.3.2 on 2026-10-26): the renamed TensorFlow Lite; the same `.tflite` format (all models and converters keep working) and the classic interpreter API that the VX delegate and our server use. CPU (XNNPACK on the A35), NPU or both, as now |
+| Build | the Debian 11 container stays (glibc of the NPU die); LiteRT's CMake wants >= 3.20: `cmake` from `bullseye-backports` (apt) |
 | **Autotune, improved** | over the NPU and the CPU of the NPU die, parts of the graph instead of whole operator types, the split ratio as a parameter (see "Release 0.5: NPU") |
 | Relation to "inference engines on the CPU and the GPU" | LiteRT is not put on the board; Arm NN, MNN and TVM stay in that list unless the maintainer decides otherwise |
 
