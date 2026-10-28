@@ -15,6 +15,16 @@
  *   release lines high one by one (2 ms apart, 25 ms before the last).
  * Power down is the reverse of "all lines low".
  *
+ * System sleep (reconstructed from `npu_powerctrl -s` / `-r`, which the vendor
+ * system ran from its suspend hooks): the NPU die is a computer of its own and
+ * sleeps by itself, keeping its memory and the models loaded on it.
+ *   suspend: a 20 ms pulse on the wake line, then up to 1 s for the sleep-state
+ *            line to go high; release lines 0 and 2 low, 32 kHz clock off.
+ *   resume:  32 kHz clock on, release lines 0 and 2 high, 10 ms, a 20 ms pulse
+ *            on the wake line, then up to 1 s for the sleep-state line to go low.
+ * Without this the die loses its clocks in deep sleep and comes back in its
+ * boot ROM, with the firmware and every model gone.
+ *
  * Copyright (C) 2026 tinker-edge-r project
  */
 #include <linux/clk.h>
@@ -32,9 +42,34 @@ struct tinker_npu_power {
 	struct gpio_descs *rails;
 	struct gpio_descs *release;
 	struct gpio_desc *wake;	/* held low; pulsed only on suspend/resume */
+	struct gpio_desc *sleep_state;	/* input: high while the NPU sleeps */
 	struct mutex lock;
 	bool on;
+	bool asleep;		/* put to sleep by tinker_npu_power_suspend() */
 };
+
+/* the two release lines that the vendor tool drops while the NPU sleeps (GPIO1_C6, GPIO1_D0) */
+static const int npu_sleep_release[] = { 0, 2 };
+
+static void npu_wake_pulse(struct tinker_npu_power *p)
+{
+	gpiod_set_value_cansleep(p->wake, 1);
+	msleep(20);
+	gpiod_set_value_cansleep(p->wake, 0);
+}
+
+/* wait up to 1 s for the sleep-state line to read `level` */
+static bool npu_wait_sleep_state(struct tinker_npu_power *p, int level)
+{
+	int i;
+
+	for (i = 0; i < 100; i++) {
+		if (gpiod_get_value_cansleep(p->sleep_state) == level)
+			return true;
+		msleep(10);
+	}
+	return gpiod_get_value_cansleep(p->sleep_state) == level;
+}
 
 static void npu_all_low(struct tinker_npu_power *p)
 {
@@ -197,6 +232,10 @@ static int tinker_npu_power_probe(struct platform_device *pdev)
 	if (IS_ERR(p->wake))
 		return dev_err_probe(dev, PTR_ERR(p->wake), "wake gpio\n");
 
+	p->sleep_state = devm_gpiod_get_optional(dev, "sleep-state", GPIOD_IN);
+	if (IS_ERR(p->sleep_state))
+		return dev_err_probe(dev, PTR_ERR(p->sleep_state), "sleep-state gpio\n");
+
 	platform_set_drvdata(pdev, p);
 
 	if (!of_property_read_bool(dev->of_node, "tinker,keep-off")) {
@@ -220,6 +259,61 @@ static void tinker_npu_power_remove(struct platform_device *pdev)
 	mutex_unlock(&p->lock);
 }
 
+static int tinker_npu_power_suspend(struct device *dev)
+{
+	struct tinker_npu_power *p = dev_get_drvdata(dev);
+	unsigned int i;
+
+	mutex_lock(&p->lock);
+	if (!p->on || !p->wake || !p->sleep_state ||
+	    p->release->ndescs <= npu_sleep_release[ARRAY_SIZE(npu_sleep_release) - 1])
+		goto out;
+	if (!gpiod_get_value_cansleep(p->sleep_state)) {
+		npu_wake_pulse(p);
+		if (!npu_wait_sleep_state(p, 1)) {
+			dev_warn(dev, "the NPU did not go to sleep within 1 s: it may need its firmware again after resume\n");
+			goto out;
+		}
+	}
+	for (i = 0; i < ARRAY_SIZE(npu_sleep_release); i++)
+		gpiod_set_value_cansleep(p->release->desc[npu_sleep_release[i]], 0);
+	clk_disable_unprepare(p->clk32k);
+	p->asleep = true;
+	msleep(1000);		/* as the vendor tool */
+	dev_info(dev, "NPU asleep\n");
+out:
+	mutex_unlock(&p->lock);
+	return 0;
+}
+
+static int tinker_npu_power_resume(struct device *dev)
+{
+	struct tinker_npu_power *p = dev_get_drvdata(dev);
+	unsigned int i;
+	int ret;
+
+	mutex_lock(&p->lock);
+	if (!p->asleep)
+		goto out;
+	p->asleep = false;
+	ret = clk_prepare_enable(p->clk32k);
+	if (ret)
+		dev_warn(dev, "cannot enable the 32 kHz clock: %d\n", ret);
+	for (i = 0; i < ARRAY_SIZE(npu_sleep_release); i++)
+		gpiod_set_value_cansleep(p->release->desc[npu_sleep_release[i]], 1);
+	msleep(10);
+	npu_wake_pulse(p);
+	if (npu_wait_sleep_state(p, 0))
+		dev_info(dev, "NPU awake\n");
+	else
+		dev_warn(dev, "the NPU did not wake up within 1 s: it may need its firmware again\n");
+out:
+	mutex_unlock(&p->lock);
+	return 0;
+}
+
+static DEFINE_SIMPLE_DEV_PM_OPS(tinker_npu_power_pm, tinker_npu_power_suspend, tinker_npu_power_resume);
+
 static const struct of_device_id tinker_npu_power_of_match[] = {
 	{ .compatible = "asus,tinker-edge-r-npu-power" },
 	{ }
@@ -233,6 +327,7 @@ static struct platform_driver tinker_npu_power_driver = {
 		.name = "tinker-npu-power",
 		.of_match_table = tinker_npu_power_of_match,
 		.dev_groups = tinker_npu_power_groups,
+		.pm = pm_sleep_ptr(&tinker_npu_power_pm),
 	},
 };
 module_platform_driver(tinker_npu_power_driver);

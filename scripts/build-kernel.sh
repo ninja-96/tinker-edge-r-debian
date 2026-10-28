@@ -12,6 +12,10 @@ mkdir -p "$B" out
 # Patches and new files (IOMMU helpers, mpp_service port)
 scripts/apply-kernel-mods.sh "$K"
 
+# The boot logo: the white Debian swirl instead of the penguin (artwork/boot-logo; centred by fbcon=logo-pos:center in extlinux.conf)
+scripts/make-boot-logo.sh >/dev/null
+cp out/boot-logo/logo_linux_clut224.ppm "$K/drivers/video/logo/logo_linux_clut224.ppm"
+
 # Our board DTS files
 DT=$K/arch/arm64/boot/dts/rockchip
 cp dts/*.dts dts/*.dtsi "$DT/"

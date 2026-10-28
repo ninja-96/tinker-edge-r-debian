@@ -28,7 +28,7 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 
 | Area | Works | Tested on a board | Details |
 |---|---|---|---|
-| Boot: DRAM init, U-Boot, extlinux, Linux 6.18.56 from the eMMC | ✅ yes | ✅ yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
+| Boot: DRAM init, U-Boot, extlinux, Linux 6.18.59 from the eMMC | ✅ yes | ✅ yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
 | Flashing over USB, backup, restore, kernel update | ✅ yes | ✅ yes | read-back verification |
 | Ethernet, SSH, mDNS name, NTP | ✅ yes | 🟡 partly | link and names; about 500 Mbit/s measured on a 500 Mbit/s line, gigabit not measured |
 | CPU (6 cores, cpufreq), RAM 4 GB | ✅ yes | ✅ yes | `stress-ng` 8 + 10 min, `memtester` full pass, 47 C at full load; 933 MHz not benchmarked against 800 |
@@ -273,6 +273,7 @@ sources of what ends up in the images are in [NOTICE.md](NOTICE.md) and inside t
 | [libeigen/eigen](https://gitlab.com/libeigen/eigen) | linear algebra of TensorFlow Lite | MPL-2.0 ([COPYING.MPL2](https://gitlab.com/libeigen/eigen/-/blob/master/COPYING.MPL2)) |
 | [OouraFFT](https://github.com/petewarden/OouraFFT) (fft2d) | FFT of TensorFlow Lite (mirror of Takuya Ooura's code) | Ooura's licence: use, copy, modify, distribute ([readme2d.txt](https://github.com/petewarden/OouraFFT/blob/master/readme2d.txt), [home](http://www.kurims.kyoto-u.ac.jp/~ooura/fft.html)) |
 | [protocolbuffers/protobuf](https://github.com/protocolbuffers/protobuf) | fetched by the TensorFlow Lite build (its tools), not linked into our binaries | BSD-3-Clause ([LICENSE](https://github.com/protocolbuffers/protobuf/blob/main/LICENSE)) |
+| [Debian Open Use Logo](https://www.debian.org/logos/) | the boot logo (white swirl on black: U-Boot, kernel, Plymouth) | LGPL-3.0-or-later or CC-BY-SA-3.0 ([legal code](https://creativecommons.org/licenses/by-sa/3.0/legalcode)) |
 | [pybind11](https://github.com/pybind/pybind11) (Debian package `pybind11-dev`) | the Python binding of our C++ library (headers compiled into `rk3399pro_npu._core`) | BSD-3-Clause ([LICENSE](https://github.com/pybind/pybind11/blob/master/LICENSE)) |
 | [deb.debian.org](https://deb.debian.org) | Debian 13 packages, including the `non-free-firmware` ones (Wi-Fi, Bluetooth) | per package: `/usr/share/doc/<package>/copyright`, see the [Debian licence overview](https://www.debian.org/legal/licenses/) |
 

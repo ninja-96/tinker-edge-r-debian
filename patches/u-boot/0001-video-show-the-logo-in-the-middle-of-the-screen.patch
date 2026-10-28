@@ -1,0 +1,29 @@
+From: tinker-edge-r-debian
+Subject: [PATCH] video: show the logo in the middle of the screen
+
+The logo of a video device is drawn in the top right corner. tinker-edge-r-debian
+replaces it with the Debian swirl as a boot splash on a black screen; draw it
+centred on both axes (BMP_ALIGN_CENTER), whatever the resolution of the display.
+
+Signed-off-by: tinker-edge-r-debian
+---
+--- a/drivers/video/video-uclass.c
++++ b/drivers/video/video-uclass.c
+@@ -14,6 +14,7 @@
+ #include <malloc.h>
+ #include <mapmem.h>
+ #include <spl.h>
++#include <splash.h>
+ #include <stdio_dev.h>
+ #include <video.h>
+ #include <video_console.h>
+@@ -597,7 +598,8 @@
+ 	u8 *data = SPLASH_START(u_boot_logo);
+ 	int ret;
+ 
+-	ret = video_bmp_display(dev, map_to_sysmem(data), -4, 4, true);
++	ret = video_bmp_display(dev, map_to_sysmem(data), BMP_ALIGN_CENTER,
++				BMP_ALIGN_CENTER, true);
+ 
+ 	return 0;
+ }

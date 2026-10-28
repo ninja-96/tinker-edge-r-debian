@@ -86,7 +86,7 @@ and ours lacks (`HARDENED_USERCOPY`, `FORTIFY_SOURCE`, `SLAB_FREELIST_RANDOM`, `
 Not done on purpose: secure boot through eFuses (irreversible), a secure OS (OP-TEE / BL32 is not loaded;
 TrustZone only hosts BL31 for PSCI).
 
-### A browser with hardware video decoding (decided: Chromium is part of the image of release 0.5, after the NPU work; KDE work is not in 0.3)
+### Release 0.6: a browser with hardware video decoding (decided: Chromium is part of the image; moved from 0.5 to 0.6 on 2026-10-28; KDE work is not in 0.3)
 
 Why: on the KDE desktop the browser uses a lot of CPU and plays video in software (reported 2026-10-25).
 
@@ -133,14 +133,13 @@ optimised for the NPU die (`-mcpu=cortex-a35 -O3`); extra packages only from apt
 | **LiteRT on the NPU die** instead of TensorFlow Lite 2.21 | [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT) (2.3.2 on 2026-10-26): the renamed TensorFlow Lite; the same `.tflite` format (all models and converters keep working) and the classic interpreter API that the VX delegate and our server use. CPU (XNNPACK on the A35), NPU or both, as now |
 | Build | the Debian 11 container stays (glibc of the NPU die); LiteRT's CMake wants >= 3.20: `cmake` from `bullseye-backports` (apt) |
 | **Autotune, improved** | over the NPU and the CPU of the NPU die, parts of the graph instead of whole operator types, the split ratio as a parameter (see "Release 0.5: NPU") |
-| Relation to "inference engines on the CPU and the GPU" | LiteRT is not put on the board; Arm NN, MNN and TVM stay in that list unless the maintainer decides otherwise |
+| Relation to the engines on the board | LiteRT is not put on the board. Decision (2026-10-28): the board's CPU is a plain Linux system, users run their own engines there; only the NPU gets ready-made support. Of the engines on the board only Arm NN stays, in release 0.6 |
 
 ### Release 0.5: NPU
 
 | Item | Notes |
 |---|---|
 | Autotune aware of the order of the layers and of the copies | **done (2026-10-28):** the server describes the graph after its passes (`NPU_GRAPH`: nodes, tensors and their sizes, what the NPU takes, the time of every node on the CPU from a profiled run); a cost model (NPU and CPU factors of the convolution-like and the other nodes, a cost per cut and per byte copied at a cut, fitted to every measured plan) and dynamic programming over the execution order give the cheapest placement of the nodes; up to 16 ranges of nodes on the CPU (`VX_CPU_NODES`, protocol version 3). Accuracy: bisection for the node where the result goes wrong, then the smallest window there; those nodes stay on the CPU. Not used: the per-layer times of the Vivante driver (`VIV_VX_DEBUG_LEVEL=1` prints them, but only with a wait after every layer and for OpenVX layers that do not map one to one to TFLite nodes) |
-| Float models on the CPU of the board | the four Cortex-A72/A53 of the RK3399 are much faster than the two A35 of the NPU die: with the TFLite engine of "inference engines on the CPU and the GPU" (below), `device="auto"` and autotune can choose the board's CPU for float models and float parts |
 | Split ratio as a parameter of autotune | **done (2026-10-28), per layer:** `split_ratio` (`npu-r2`) for all layers, and `split_max_error` (`npu-e0.01`): every per-channel layer gets the largest ratio of 4, 2, 1.5, 1.25 whose weight error (relative RMS per channel against the int8 weights) is below the bound, a layer that needs less stays per channel. `autotune()`: ratio 4, then the bound by geometric bisection, then no split. SqueezeNet at cosine 0.9995: 33 ms (bound 0.01) against 65 ms with no split. Measured before (MobileNet V3 int8, one ratio for all layers): 4 68 ms / 0.966, 2 90 ms / 0.982, 1.5 125 ms / 0.984, no split 173 ms / 0.984 |
 | Operators that stay on the CPU, moved to the NPU | **done (2026-10-28): 87 of 87 single-operator models entirely on the NPU, all right.** Rewrites on the server before the graph is built (`npu-open/server/rewrite_ops.h`): `SLICE` -> `STRIDED_SLICE`, `TILE` -> `CONCATENATION`, `LOG_SOFTMAX` -> `SOFTMAX` + `LOG`, comparisons / logical operators / `SELECT` / `CAST` of bool as arithmetic on 0 / 1 (TIM-VX crashes on bool tensors), `CEIL`, `ROUND`, `COS`, truncation from `FLOOR` / `SIN` (int8 / uint8 through `DEQUANTIZE` / `QUANTIZE`); `TOPK_V2` mapped to TIM-VX `Topk` in the delegate (`npu-open/patches/0003`). `PRELU`: a single alpha is repeated along the channels (TIM-VX crashed on it in int8 / uint8); checked with its own models. Int8 / uint8 variants checked with quantised models. Found on the way and fixed: the NEON int8 / uint8 `ADD` / `SUB` / `MUL` kernels of TensorFlow Lite 2.21 wrap around in 16 bits (`npu-open/patches/0002`) |
 | Vivante driver 6.4.8 | researched and parked (2026-10-27): the open galcore 6.4.8.415784 of Khadas with an RK1808 platform part and the entry of this chip (both written), the Khadas user space with that entry patched in. Not needed for coverage or accuracy (the measurement above); the shader-run operators it might have brought (`CEIL`, `ROUND`, `COS`) run on the NPU through rewrites now. Taken up again only if a model needs it |
@@ -148,7 +147,7 @@ optimised for the NPU die (`-mcpu=cortex-a35 -O3`); extra packages only from apt
 ### Release 0.5: hardware checks before the release
 
 Decision of the maintainer (2026-10-28): before 0.5 is published, each of these is checked on the board and fixed where needed (order: the NPU work, the long model
-test of the new NPU stack, the browser, then these checks).
+test of the new NPU stack, then these checks; the browser moved to 0.6).
 
 | Item | What to check |
 |---|---|
@@ -164,36 +163,29 @@ test of the new NPU stack, the browser, then these checks).
 
 | Item | Notes |
 |---|---|
-| Newer Linux 6.18 | decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26; confirmed by the maintainer as the one to include), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
+| Newer Linux 6.18 | **done (2026-10-28): 6.18.59** (`sources.lock`, patches apply, booted on the board). Decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26; confirmed by the maintainer as the one to include), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
 
-### Release 0.5: memory controller
+### Release 0.6: memory controller
+
+Decision (2026-10-28): moved from 0.5 to 0.6.
 
 | Item | Notes |
 |---|---|
 | DMC: DRAM frequency scaling (`CONFIG_ARM_RK3399_DMC_DEVFREQ`, `rockchip,rk3399-dmc`) | saves power and heat at idle. Switched off today (`config/linux-tinker.fragment`) because a failing frequency change hangs the board. Needs: a device tree node with an OPP table and the DFI monitor, DRAM timings for every step (the Rockchip blob reports "dts ddr timing unavailable, use default"), and BL31 that handles the frequency change calls (the Rockchip BL31 does; the open TF-A has the code too). Test with the serial console attached and a way back (maskrom), under a memory stress test |
-| NoC QoS priorities | the vendor kernel raises the priority of the display controller so that a 4K picture does not tear under heavy memory traffic; mainline does not. Check with HDMI at 4K under load once a monitor is available |
 
-### Release 0.5: inference engines on the CPU and the GPU
+### Release 0.6: Arm NN on the CPU and the GPU
 
-Goal: a user converts or takes a model and runs it on the board with the system Python (3.13), on the CPU and on
-the GPU, from files that are in the image or one download away. Converters work on x86_64 and, where possible,
-arm64. The order is fixed: **Arm NN, TFLite, MNN, TVM**; each engine gets its own build script, a Python
-binding for the system Python, a phase in `scripts/test-board.sh` (the same model gives the same result on CPU
-and GPU within a tolerance, FPS reported) and a page in the documentation.
+Decision (2026-10-28): of the engines on the board's CPU and GPU only **Arm NN** stays (TFLite, MNN and TVM on the board are dropped: the board is a plain
+Linux system and users install what they need), and it moves to release 0.6. Goal: a Python binding for the system Python (3.13), `CpuAcc` and `GpuAcc`, a
+phase in `scripts/test-board.sh` (the same model gives the same result on CPU and GPU within a tolerance, FPS reported) and a page in the documentation.
+Builds use `-mcpu=cortex-a72.cortex-a53 -O3`. Earlier CPU number (MobileNetV2, pip build): Arm NN 20 FPS.
 
-Earlier CPU numbers (MobileNetV2, pip builds, [INFERENCE-BENCH](INFERENCE-BENCH.md) in the working copy): TFLite 33 FPS, ONNX Runtime 22,
-Arm NN 20, MNN 18, TVM untuned 1.4. Builds in 0.5 use `-mcpu=cortex-a72.cortex-a53 -O3`.
+| Engine | CPU | GPU | Notes |
+|---|---|---|---|
+| **Arm NN** (the official runtime for Arm Mali) | `CpuAcc` with the Compute Library | `GpuAcc` | **GPU is the known obstacle**: it failed on Rusticl with "Non uniform workgroup size is not supported": Rusticl on Midgard (Mali-T860) offers OpenCL C 1.2 only, the Compute Library wants OpenCL 2.0 features. To investigate: Compute Library settings or patches for uniform work-group sizes, a newer Mesa. If it cannot be done the reasons are written down. Binding: PyArmNN built with SWIG for Python 3.13 if the current Arm NN still has it, otherwise a `ctypes` binding. Models: Arm NN's parsers (ONNX, TFLite) read them at run time; an optional PC-side step can write the optimised network |
 
-| Order | Engine | CPU | GPU | Notes |
-|---|---|---|---|---|
-| 1 | **Arm NN** (the official runtime for Arm Mali) | `CpuAcc` with the Compute Library | `GpuAcc` | **GPU is the known obstacle**: it failed on Rusticl with "Non uniform workgroup size is not supported": Rusticl on Midgard (Mali-T860) offers OpenCL C 1.2 only, the Compute Library wants OpenCL 2.0 features. To investigate: Compute Library settings or patches for uniform work-group sizes, a newer Mesa. If it cannot be done the reasons are written down. Binding: PyArmNN built with SWIG for Python 3.13 if the current Arm NN still has it, otherwise a `ctypes` binding. Models: Arm NN's parsers (ONNX, TFLite) read them at run time; an optional PC-side step can write the optimised network |
-| 2 | **TFLite** | XNNPACK | GPU delegate | the GPU delegate can use OpenGL ES 3.1 compute shaders, which Panfrost has; needs a source build of the delegate and the Python `tflite_runtime` for 3.13. Models: `.tflite` (conversion from ONNX or TensorFlow on the PC) |
-| 3 | **MNN** | CPU backend | OpenCL backend | pip's MNN has no OpenCL (it silently falls back to the CPU): source build with `MNN_OPENCL=ON`, Python module for 3.13. Model: `.mnn` from the MNN converter (x86_64 and arm64) |
-| 4 | **TVM** | LLVM target for the A72/A53 | OpenCL target (`opencl`/`mali`) | untuned CPU result was 1.4 FPS: autotuning is part of the job (done on the board or with RPC); Python package for 3.13 |
-
-Expect little from the GPU in every engine: a plain float4 OpenCL kernel reached about 8 GFLOPS of a peak near 100,
-and the GPU shares the memory bandwidth with the CPU, so the CPU may stay faster for small models. Whatever the
-measurement says goes into the tables in the documentation. NCNN has no row: it needs Vulkan, which this GPU lacks.
+Expect little from the GPU: a plain float4 OpenCL kernel reached about 8 GFLOPS of a peak near 100, and the GPU shares the memory bandwidth with the CPU,
+so the CPU may stay faster for small models.
 
 ### Release 0.4: NPU on TensorFlow Lite (open stack; RKNN is removed)
 
@@ -218,9 +210,10 @@ Only the driver and Rockchip's firmware stay closed. The memory controller work 
 
 | Item | Notes |
 |---|---|
+| NoC QoS priorities | the vendor kernel raises the priority of the display controller so that a 4K picture does not tear under heavy memory traffic; mainline does not. Check with HDMI at 4K under load once a monitor is available |
 | Open BL31 (TF-A) as the default | it builds (`USE_TFA=1`) but was never booted; test by flashing only the loader |
 | Open DRAM initialisation | the U-Boot LPDDR4 timings of the Rock Pi 4 hang on this board; derive timings from the blob parameters |
-| Inference engines on the GPU | CPU numbers for MobileNetV2: TFLite 33 FPS, ONNX Runtime 22, Arm NN 20, MNN 18, TVM untuned 1.4. Arm NN GpuAcc does not run on Rusticl (needs OpenCL 2.0). MNN, TVM and TFLite on the GPU need source builds. Expect little: a simple float4 kernel reaches 8 GFLOPS against a peak of about 100 |
+| Inference engines on the GPU | superseded (2026-10-28): only Arm NN stays, in release 0.6 (above) |
 | Open NPU stack | research only, [NPU-RESEARCH.md](NPU-RESEARCH.md): a mainline kernel (6.7 or newer) on the NPU die with the `etnaviv` driver and Mesa's Teflon delegate for TensorFlow Lite. Teflon supports VeriSilicon VIPNano-QI.7120 (Amlogic A311D) and VIPNano-SI+.8002 (NXP i.MX8M Plus); MobileNet V1 takes about 6.6 ms there, about 5.3 ms on this NPU with RKNN. First step done (2026-10-26): the chip of this NPU is model 0x8000, revision 0x7100, product 0x45080001 (sysfs `info` of `galcore`); mainline `etnaviv_hwdb.c` has 0x8000 only with revisions 0x6205, 0x7120 (A311D, product 0x45080009) and 0x8002, so this chip is **not in the table, but next to the A311D one**: an entry would be a small patch if the feature bits can be taken from the table inside Rockchip's `galcore.ko`. NXP's open galcore 6.4.11.p4 does not know it either, and the matching closed Vivante libraries exist only as Rockchip's 6.4.6, see `rnd/verisilicon/README.md`. If it is: the NPU die needs its own mainline device tree (RK1808 is not in mainline), a USB gadget and a server for the tensors, because the NPU sits behind USB and the host cannot drive it directly |
 | Own kernel for the NPU die | a newer kernel is not possible (no RK1808 in mainline, `galcore` is tied to 4.4.185). A rebuild of the same 4.4.185 from Rockchip's `develop-4.4` is: Rockchip's `galcore.ko` (licence `Dual MIT/GPL`, `vermagic=4.4.185 SMP preempt mod_unload aarch64`, no `modversions`) loads into a kernel with that release string and compatible structures. Needs a reconstructed config (no `/proc/config.gz` on the NPU; the firmware kernel was built with Linaro GCC 6.3, build #27 of 2022-08-18); gain: own USB functions (network), trimming, boot time. Worth it only after the server works on the stock kernel. Also: ask Rockchip for the `galcore` sources (the licence says GPL) |
 | Next LTS kernel after 6.18 | bump `sources.lock`, rebase `patches/` and `kernel-mods/`, [KERNEL.md](KERNEL.md) |

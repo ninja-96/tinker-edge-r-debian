@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         mmdebstrap qemu-user-static binfmt-support arch-test debian-archive-keyring \
         qemu-system-arm fakeroot cmake pkg-config gpiod libusb-1.0-0-dev libudev-dev autoconf automake \
         libtool ccache sudo less vim-tiny \
+        librsvg2-bin netpbm \
     && rm -rf /var/lib/apt/lists/*
 
 # the Python module of the NPU library (scripts/build-npu-host.sh): the headers of the board's Python 3.13 and pybind11, from Debian

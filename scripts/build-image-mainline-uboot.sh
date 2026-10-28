@@ -47,7 +47,7 @@ timeout 20
 label tinker
     kernel /boot/Image
     fdt /boot/dtbs/$DTB
-    append earlycon=uart8250,mmio32,0xff180000 console=tty1 console=ttyS0,115200n8 root=PARTUUID=$PARTUUID_ROOT rw rootfstype=ext4 rootwait coherent_pool=1m
+    append earlycon=uart8250,mmio32,0xff180000 console=tty1 console=ttyS0,115200n8 root=PARTUUID=$PARTUUID_ROOT rw rootfstype=ext4 rootwait coherent_pool=1m fbcon=logo-pos:center fbcon=logo-count:1 quiet splash
 EOT
 
 mke2fs -q -t ext4 -L rootfs -d "$W" -E root_owner=0:0 $O/rootfs.ext4 ${ROOTFS_MIB}M

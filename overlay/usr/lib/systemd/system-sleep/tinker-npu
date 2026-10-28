@@ -1,0 +1,17 @@
+#!/bin/sh
+# systemd-sleep hook of tinker-edge-r-debian: the kernel driver tinker-npu-power puts the NPU die to sleep with the board and wakes it up again
+# (its firmware and the models loaded on it stay). If the die does not come back on the USB bus as our NPU (2207:0019) within 15 s after resume,
+# for example in its boot ROM (2207:180a), its firmware is loaded again; npu-daemon reconnects by itself.
+[ "$1" = post ] || exit 0
+[ -e /proc/device-tree/npu-power ] || exit 0
+(
+    for i in $(seq 1 30); do
+        for d in /sys/bus/usb/devices/*; do
+            [ "$(cat "$d/idVendor" 2>/dev/null):$(cat "$d/idProduct" 2>/dev/null)" = 2207:0019 ] && exit 0
+        done
+        sleep 0.5
+    done
+    echo "tinker-npu: the NPU did not come back after resume: loading its firmware again" > /dev/kmsg
+    systemctl --no-block restart npu-firmware.service
+) &
+exit 0

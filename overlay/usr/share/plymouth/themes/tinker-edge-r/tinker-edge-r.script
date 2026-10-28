@@ -1,0 +1,20 @@
+# tinker-edge-r-debian: the white Debian swirl (logo.png, see README.md) centred on black, 40 % of the screen height at any resolution
+Window.SetBackgroundTopColor(0, 0, 0);
+Window.SetBackgroundBottomColor(0, 0, 0);
+
+logo.image = Image("logo.png");
+logo.height = Window.GetHeight() * 0.4;
+logo.width = logo.image.GetWidth() * logo.height / logo.image.GetHeight();
+logo.image = logo.image.Scale(logo.width, logo.height);
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetX(Window.GetX() + (Window.GetWidth() - logo.width) / 2);
+logo.sprite.SetY(Window.GetY() + (Window.GetHeight() - logo.height) / 2);
+
+# a disk password or a message is not expected on this image; show messages as plain text below the logo
+message_sprite = Sprite();
+fun message_callback(text) {
+    message_sprite.SetImage(Image.Text(text, 1, 1, 1));
+    message_sprite.SetX(Window.GetX() + (Window.GetWidth() - message_sprite.GetImage().GetWidth()) / 2);
+    message_sprite.SetY(logo.sprite.GetY() + logo.height + 40);
+}
+Plymouth.SetMessageFunction(message_callback);

@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Tinker Edge R
+Description=The white Debian swirl, centred on a black screen
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/tinker-edge-r
+ScriptFile=/usr/share/plymouth/themes/tinker-edge-r/tinker-edge-r.script

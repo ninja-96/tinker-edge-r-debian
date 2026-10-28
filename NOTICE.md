@@ -19,6 +19,8 @@ This is the project's own summary, not legal advice.
 | `patches/linux/*.patch` | GPL-2.0 | patches against the Linux kernel; `0001` exports the IOMMU helpers that the Rockchip BSP kernel (GPL-2.0) also has, `0002` adds one chip revision to `fan53555` |
 | `config/` | GPL-2.0 | kernel configuration fragment |
 | `u-boot-mods/` | GPL-2.0+ | additions to U-Boot (board defconfig, device tree include) |
+| `patches/u-boot/*.patch` | GPL-2.0+ | patch against U-Boot: the logo drawn in the middle of the screen |
+| `artwork/boot-logo/debian-openlogo-white.svg` and the images made from it (`scripts/make-boot-logo.sh`: U-Boot, kernel and Plymouth boot logo) | LGPL-3.0-or-later OR CC-BY-SA-3.0 (`LICENSES/CC-BY-SA-3.0.txt`) | the [Debian Open Use Logo](https://www.debian.org/logos/), Copyright (c) 1999 Software in the Public Interest, Inc., recoloured white; Debian is a registered trademark of Software in the Public Interest, Inc. |
 | `patches/tf-a/*.patch` | BSD-3-Clause | patch against Trusted Firmware-A |
 | `third_party/rkdeveloptool/` | GPL-2.0+ (sources), `license.txt` is the GPL-2 text | Rockchip's flashing tool, **byte-identical** to `rockchip-linux/rkdeveloptool` commit `304f0737`, see its `ORIGIN.md` |
 | `patches/rkdeveloptool/`, `scripts/npu-fw-tinker.py` | GPL-2.0+ (patch of the GPL tool), MIT (script) | the `rs` command, and the device-tree adaptation of the Rockchip NPU boot image |

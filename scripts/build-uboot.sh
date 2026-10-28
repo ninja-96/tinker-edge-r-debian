@@ -25,6 +25,13 @@ export CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm BL31="$BL31"
 # Our board: defconfig and U-Boot dtsi from u-boot-mods/, the kernel device tree
 # (the same file the kernel uses) as the U-Boot control device tree.
 cp -a u-boot-mods/. "$U/"
+# The boot logo: the white Debian swirl, centred (patches/u-boot, artwork/boot-logo)
+scripts/make-boot-logo.sh >/dev/null
+cp out/boot-logo/u_boot_logo.bmp "$U/drivers/video/u_boot_logo.bmp"
+for p in patches/u-boot/*.patch; do
+    [ -e "$p" ] || continue
+    if patch -d "$U" -p1 -R --dry-run -s -f < "$p" >/dev/null 2>&1; then echo "already applied: $p"; else patch -d "$U" -p1 -s -f < "$p"; echo "applied: $p"; fi
+done
 cp dts/rk3399pro-tinker-edge-r.dts "$U/dts/upstream/src/arm64/rockchip/"
 make -C "$U" O="$B" tinker-edge-r-rk3399pro_defconfig
 make -C "$U" O="$B" -j"$(nproc)"

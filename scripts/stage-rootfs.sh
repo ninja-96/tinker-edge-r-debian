@@ -58,6 +58,10 @@ fi
 
 # overlay (services, helper scripts, udev rules) and unit enablement
 cp -a --no-preserve=ownership overlay/. "$W/"
+# the boot splash of Plymouth: the white Debian swirl (scripts/make-boot-logo.sh)
+[ -f out/boot-logo/plymouth-logo.png ] || scripts/make-boot-logo.sh >/dev/null
+install -D -m 0644 out/boot-logo/plymouth-logo.png "$W/usr/share/plymouth/themes/tinker-edge-r/logo.png"
+install -D -m 0644 artwork/boot-logo/README.md "$W/usr/share/plymouth/themes/tinker-edge-r/README.md"
 
 # Licences, the notice and the package manifest travel with the image (see NOTICE.md, section 4)
 DOC="$W/usr/share/doc/tinker-edge-r"

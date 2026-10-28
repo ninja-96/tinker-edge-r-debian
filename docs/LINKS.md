@@ -35,11 +35,17 @@ depend on any of these at build time except the open upstream sources listed und
 
 | What | Link | Pinned in |
 |---|---|---|
-| Linux 6.18.56 | https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.56.tar.xz | `sources.lock` (sha256) |
+| Linux 6.18.59 | https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.59.tar.xz | `sources.lock` (sha256) |
 | U-Boot v2026.10 | https://github.com/u-boot/u-boot | `sources.lock` |
 | TF-A v2.15.0 (only for the open BL31) | https://github.com/ARM-software/arm-trusted-firmware | `sources.lock` |
 | Debian 13 "trixie" packages | https://deb.debian.org/debian | `scripts/build-rootfs.sh` |
 | NPU stack: TIM-VX, tflite-vx-delegate (`main` branches), TensorFlow 2.21.0 and what TensorFlow Lite builds with (abseil, Eigen, farmhash, fft2d, flatbuffers, gemmlowp, ml_dtypes, ruy, cpuinfo, FP16, protobuf, XNNPACK, pthreadpool, FXdiv) | the repositories in `TFLITE_DEPS` | `sources.lock` (commits; tarballs with sha256), licences in [../README.md](../README.md) |
+
+## Artwork
+
+| What | Link | Licence |
+|---|---|---|
+| Debian Open Use Logo (the boot logo, recoloured white: `artwork/boot-logo/`) | https://www.debian.org/logos/ | LGPL-3.0-or-later or CC-BY-SA-3.0 ([legal code](https://creativecommons.org/licenses/by-sa/3.0/legalcode)) |
 
 ## Other references used in the research
 

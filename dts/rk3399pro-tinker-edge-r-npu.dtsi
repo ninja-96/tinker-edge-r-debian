@@ -5,7 +5,7 @@
  * of npu_powerctrl V1.1 converted to bank/pin:
  *   4 = GPIO0_A4, 10 = GPIO0_B2, 11 = GPIO0_B3, 32 = GPIO1_A0,
  *   36 = GPIO1_A4, 54 = GPIO1_C6, 55 = GPIO1_C7, 56 = GPIO1_D0
- * (35 = GPIO1_A3 is an input reporting the NPU sleep state; unused here.)
+ * 35 = GPIO1_A3 is an input reporting the NPU sleep state (system sleep).
  */
 / {
 	npu_power: npu-power {
@@ -22,5 +22,6 @@
 				<&gpio1 RK_PD0 GPIO_ACTIVE_HIGH>,
 				<&gpio1 RK_PA0 GPIO_ACTIVE_HIGH>;
 		wake-gpios = <&gpio1 RK_PA4 GPIO_ACTIVE_HIGH>;
+		sleep-state-gpios = <&gpio1 RK_PA3 GPIO_ACTIVE_HIGH>;
 	};
 };
