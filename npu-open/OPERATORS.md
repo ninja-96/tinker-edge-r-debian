@@ -10,7 +10,7 @@ which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.
 * **RKNN**: `yes` = RKNN-Toolkit 1.7.5 accepted the model (it has no simulator, so its results were not checked); `no` = refused; `-` = not tested.
 * One tiny float32 model per operator (input 1x8x8x4), 87 models, measured on one board on 2026-10-28 (NPU) and 2026-10-26 (RKNN).
 
-All 87 models run entirely on the NPU, none gives a wrong result. Our server rewrites operators into ones the NPU runs (`npu-open/server/rewrite_ops.h`):
+All 87 models run entirely on the NPU, none gives a wrong result. `PRELU` (its generated model had become `RELU`) was checked with its own models: alpha per channel and one alpha, float32 / int8 / uint8, all on the NPU and exact. Our server rewrites operators into ones the NPU runs (`npu-open/server/rewrite_ops.h`):
 
 | Operator | Rewritten as |
 |---|---|
@@ -26,6 +26,7 @@ All 87 models run entirely on the NPU, none gives a wrong result. Our server rew
 | `LOGICAL_AND` / `OR` / `NOT` | `MUL` / `MAXIMUM` / 1 - x |
 | `SELECT` | b + c * (a - b) |
 | `CAST` of bool | `RESHAPE` (float) or `DEQUANTIZE` (int8 / uint8) |
+| `PRELU` with one alpha | the same `PRELU`, alpha repeated along the channels (TIM-VX crashes on a single int8 / uint8 alpha) |
 
 `TOPK_V2` is not rewritten: our delegate patch maps it to TIM-VX `Topk` (`npu-open/patches/0003`). TIM-VX crashes on bool tensors with this driver; a bool tensor that cannot be rewritten (a model output, or used by an operator not in this table) stays on the CPU.
 Int8 and uint8 comparisons were also checked with quantised models (`rnd/verisilicon/models/q8/`): the NPU gives the exact result of the dequantised values; TensorFlow Lite on
@@ -88,7 +89,7 @@ the CPU differs at values closer than about 1/256 (its comparison of two differe
 | `PACK` | yes | yes |
 | `PAD` | yes | yes |
 | `POW` | yes | yes |
-| `PRELU` | - | - |
+| `PRELU` | yes | - |
 | `QUANTIZE` | - | - |
 | `RANGE` | yes | - |
 | `REDUCE_ANY` | - | - |

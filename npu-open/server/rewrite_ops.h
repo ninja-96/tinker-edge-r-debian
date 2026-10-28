@@ -23,7 +23,7 @@ namespace npu_rewrite {
 
 using namespace tflite;
 
-struct Stats { int slice = 0, tile = 0, log_softmax = 0, boolean = 0, trunc = 0, ceil = 0, cos = 0, round = 0; };
+struct Stats { int slice = 0, tile = 0, log_softmax = 0, boolean = 0, trunc = 0, ceil = 0, cos = 0, round = 0, prelu = 0; };
 
 static inline BuiltinOperator code_of(const ModelT &m, const OperatorT &op)
 {
@@ -339,6 +339,36 @@ static inline bool rewrite_bool(ModelT &model, Stats &s)
 	return true;
 }
 
+/* PRELU with one alpha for all channels: TIM-VX crashes on such an int8 / uint8 PRELU (alpha of shape [1, 1, 1]); the same operator with the
+ * constant alpha repeated along the channels (shape [1, ..., 1, C], as the per-channel PRELU that runs right) gives the same result. */
+static inline bool expand_prelu_alpha(ModelT &model, Stats &s)
+{
+	SubGraphT &sg = *model.subgraphs[0];
+	bool changed = false;
+	for (auto &op : sg.operators) {
+		if (code_of(model, *op) != BuiltinOperator_PRELU || op->inputs.size() != 2) continue;
+		const TensorT &x = *sg.tensors[op->inputs[0]];
+		TensorT &a = *sg.tensors[op->inputs[1]];
+		size_t es = a.type == TensorType_FLOAT32 ? 4 : a.type == TensorType_INT8 || a.type == TensorType_UINT8 ? 1 : 0;
+		if (!es || x.shape.empty() || x.shape.back() <= 1 || a.buffer == 0 || a.buffer >= model.buffers.size()) continue;
+		const std::vector<uint8_t> &src = model.buffers[a.buffer]->data;
+		if (src.size() != es) continue;   /* only one alpha */
+		int c = x.shape.back();
+		auto b = std::make_unique<BufferT>();
+		for (int i = 0; i < c; i++) b->data.insert(b->data.end(), src.begin(), src.end());
+		model.buffers.push_back(std::move(b));
+		/* a new tensor: the old one may be used elsewhere */
+		auto t = std::make_unique<TensorT>();
+		t->name = a.name + "_npu_per_channel"; t->type = a.type; t->buffer = (uint32_t)model.buffers.size() - 1;
+		t->shape.assign(x.shape.size() - 1, 1); t->shape.back() = c;
+		if (a.quantization) { t->quantization = std::make_unique<QuantizationParametersT>(); t->quantization->scale = a.quantization->scale; t->quantization->zero_point = a.quantization->zero_point; }
+		sg.tensors.push_back(std::move(t));
+		op->inputs[1] = (int)sg.tensors.size() - 1;
+		s.prelu++; changed = true;
+	}
+	return changed;
+}
+
 /* bytes: a TFLite model; on success replaced with the rewritten model. Returns "" or an error text; a model without such operators is left as it is. */
 static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 {
@@ -475,6 +505,7 @@ static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 	}
 	sg.operators = std::move(out);
 	changed = rewrite_bool(*model, s) || changed;
+	changed = expand_prelu_alpha(*model, s) || changed;
 	if (!changed) { if (st) *st = s; return ""; }
 	flatbuffers::FlatBufferBuilder fbb(bytes.size() + 4096);
 	fbb.Finish(Model::Pack(fbb, model.get()), ModelIdentifier());
