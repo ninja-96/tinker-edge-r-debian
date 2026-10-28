@@ -122,18 +122,18 @@ Decision (2026-10-27): a patch release of 0.4 (the kernel and Debian of 0.4 stay
 | Tests | done: `npu-selftest` (17 checks: also two models, attaching, another process, stopping); LiteRT community vision models measured (docs/NPU.md) |
 | Operators | measured again ([OPERATORS.md](../npu-open/OPERATORS.md)): 68 of 87 single-operator models entirely on the NPU, all right; `GATHER_ND` and `RESIZE_NEAREST_NEIGHBOR` are right now, float `FULLY_CONNECTED` / `TRANSPOSE_CONV` run, `SUM`, `UNPACK`, `FLOOR`, `MIRROR_PAD` and others moved to the NPU; comparisons, logical operators and `CAST` stay on the CPU (TIM-VX crashes on bool tensors) |
 
-### Release 0.5: LiteRT and LiteRT-LM on the NPU die and on the board (the main goal)
+### Release 0.5: LiteRT and LiteRT-LM on the NPU die (the main goal)
 
-Decision of the maintainer (2026-10-27): the most ambitious goal of 0.5. Every build works out of the box and is optimised for this board (`-mcpu=cortex-a35` on the NPU die,
-`-mcpu=cortex-a72.cortex-a53` and the Mali-T860 on the board, `-O3`).
+Decision of the maintainer (2026-10-28): LiteRT and LiteRT-LM run on the NPU die only, not on the board's CPU or GPU (changed from 2026-10-27). Every build works out of
+the box and is optimised for the NPU die (`-mcpu=cortex-a35 -O3`); extra packages only from apt.
 
 | Item | Notes |
 |---|---|
-| **LiteRT on the NPU die** instead of TensorFlow Lite 2.21 | [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT): the successor of TensorFlow Lite. The VX delegate keeps working with its classic interpreter API; its new `CompiledModel` / accelerator API needs a LiteRT accelerator (dispatch / compiler plugin) for TIM-VX, written by us. CPU (XNNPACK on the A35), NPU or both, as now |
-| **LiteRT-LM on the NPU die** | [google-ai-edge/LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM): language models; on the NPU die, CPU, NPU or both. To find out: which LM graphs the 6.4.6 driver and the 2 GB of the NPU die can hold (int8 weights, KV cache), and what the NPU can take of them |
-| **LiteRT and LiteRT-LM on the board** | on the four Cortex-A72/A53 (XNNPACK) and the Mali-T860 GPU (LiteRT GPU accelerator: OpenGL ES 3.1 / OpenCL through Panfrost and Rusticl), with the same Python and C++ API as the NPU (`rk3399pro_npu` grows into one library for the board: device `npu`, `cpu-npu-die`, `cpu`, `gpu`, mixed) |
-| **Autotune, improved** | over all executors (NPU, CPU of the NPU die, CPU and GPU of the board) and parts of the graph instead of whole operator types (see "Release 0.5: NPU" below), the copies between them counted; the best plan kept and used at the next load |
-| Relation to "inference engines on the CPU and the GPU" | LiteRT takes the place of the TFLite row there; Arm NN, MNN and TVM stay in that list unless the maintainer decides otherwise |
+| **LiteRT on the NPU die** instead of TensorFlow Lite 2.21 | [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT) (2.3.2 on 2026-10-26): its `tflite/` is the continuation of TensorFlow Lite, so the VX delegate and our server keep the classic interpreter API. CPU (XNNPACK on the A35), NPU or both, as now |
+| **LiteRT-LM on the NPU die** | [google-ai-edge/LiteRT-LM](https://github.com/google-ai-edge/LiteRT-LM) (0.18.1): language models. First on the CPU of the NPU die (XNNPACK; small models such as Gemma 3 270M int8 fit into its 2 GB), then research how much of an LM graph the NPU takes (static graphs only on driver 6.4.6: fixed sequence lengths, matrix products as `FULLY_CONNECTED`). Its closed WebGPU prebuilts are not used |
+| Build | LiteRT-LM needs Rust (HF `tokenizers`), Java (ANTLR) and CMake >= 3.25: too new for the Debian 11 container. Plan: build in Debian 13 (apt only) and put Debian's glibc into the ramdisk of the NPU die for our server (LGPL; the Vivante libraries run on a newer glibc) |
+| **Autotune, improved** | over the NPU and the CPU of the NPU die, parts of the graph instead of whole operator types, the split ratio as a parameter (see "Release 0.5: NPU") |
+| Relation to "inference engines on the CPU and the GPU" | LiteRT is not put on the board; Arm NN, MNN and TVM stay in that list unless the maintainer decides otherwise |
 
 ### Release 0.5: NPU
 
