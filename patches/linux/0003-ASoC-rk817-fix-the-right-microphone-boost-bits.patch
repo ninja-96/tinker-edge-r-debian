@@ -1,0 +1,25 @@
+From: tinker-edge-r-debian
+Subject: [PATCH] ASoC: rk817: fix the right microphone boost bits
+
+RK817_CODEC_AMIC_CFG0 holds the boost of both microphone amplifiers: bits 3 and 2
+for the left one, bits 1 and 0 for the right one (the vendor driver writes 0x0f to
+enable both). "Mic Boost R1" and "Mic Boost R2" pointed at bit 3, the left boost,
+so the right amplifier never got its boost. On the ASUS Tinker Edge R the headset
+microphone of the 3.5 mm jack arrives in the right channel: its level rises by
+about 30 dB with the right bits (measured on the board).
+
+Signed-off-by: tinker-edge-r-debian
+---
+--- a/sound/soc/codecs/rk817_codec.c
++++ b/sound/soc/codecs/rk817_codec.c
+@@ -136,8 +136,8 @@
+ 	/* capture path R */
+ 	SND_SOC_DAPM_ADC("ADC R", "Capture", RK817_CODEC_AADC_CFG0, 6, 1),
+ 	SND_SOC_DAPM_SUPPLY("PGA R Power On", RK817_CODEC_AMIC_CFG0, 4, 1, NULL, 0),
+-	SND_SOC_DAPM_SUPPLY("Mic Boost R1", RK817_CODEC_AMIC_CFG0, 3, 0, NULL, 0),
+-	SND_SOC_DAPM_SUPPLY("Mic Boost R2", RK817_CODEC_AMIC_CFG0, 3, 0, NULL, 0),
++	SND_SOC_DAPM_SUPPLY("Mic Boost R1", RK817_CODEC_AMIC_CFG0, 1, 0, NULL, 0),
++	SND_SOC_DAPM_SUPPLY("Mic Boost R2", RK817_CODEC_AMIC_CFG0, 0, 0, NULL, 0),
+ 
+ 	/* playback path common */
+ 	SND_SOC_DAPM_SUPPLY("DAC Clock", RK817_CODEC_DTOP_DIGEN_CLKE, 3, 0, NULL, 0),

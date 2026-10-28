@@ -2,9 +2,9 @@
 # Downloaded by the build: Linux, U-Boot, Rockchip mpp (source, Apache-2.0) and TF-A on demand. Entries marked
 # 'provenance' are NOT downloaded: the files are in the repository, these record
 # where they came from.
-LINUX_VERSION=6.18.56
+LINUX_VERSION=6.18.59
 KERNEL_LOCALVERSION=-tinker-edge-r   # kernel release becomes <LINUX_VERSION><this>
-LINUX_SHA256=4633bbda2ab95eaf2a7af4041236451d6759c72e6946265531af4b3aacefbf89
+LINUX_SHA256=53a55ac9863a5547e292b8e381d4e4c2240dd1127d5428a7c44dbc550be23963
 
 UBOOT_REPO=https://github.com/u-boot/u-boot.git
 UBOOT_TAG=v2026.10

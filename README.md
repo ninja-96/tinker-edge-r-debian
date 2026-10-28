@@ -11,6 +11,8 @@ current software on the board.
 
 **Unofficial**, not affiliated with **ASUS** or **Rockchip**.
 
+Made for and tested on **board revision 1.02** (how to check yours: [docs/HARDWARE.md](docs/HARDWARE.md#board-revision)); on another revision USB-C may give no power.
+
 🎯 **Goal:** a user with a board clones this repository, runs the commands below and ends up with a working board:
 boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles, a firewall.
 

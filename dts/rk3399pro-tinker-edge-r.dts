@@ -17,6 +17,8 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/pinctrl/rockchip.h>
+#include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/usb/pd.h>
 #include "rk3399.dtsi"
 
 / {
@@ -113,11 +115,13 @@
 		};
 	};
 
+	/* audio over HDMI (I2S2 -> dw-hdmi); rk3399-base.dtsi declares this node disabled */
 	hdmi_sound: hdmi-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "HDMI";
 		simple-audio-card,format = "i2s";
 		simple-audio-card,mclk-fs = <256>;
+		status = "okay";
 
 		simple-audio-card,cpu {
 			sound-dai = <&i2s2>;
@@ -162,6 +166,23 @@
 		pinctrl-names = "default";
 		pinctrl-0 = <&wifi_enable_h>;
 		reset-gpios = <&gpio2 RK_PD3 GPIO_ACTIVE_LOW>;
+	};
+
+	/*
+	 * 5 V out on the USB-C port: a load switch enabled by GPIO2_D2 on board
+	 * revision 1.02 (ADC channel 5 at about 1.85 V; revision 1.01 uses GPIO4_D1).
+	 * The FUSB302 driver (TCPM) turns it on only when a device is attached.
+	 */
+	vbus_typec: regulator-vbus-typec {
+		compatible = "regulator-fixed";
+		enable-active-high;
+		gpio = <&gpio2 RK_PD2 GPIO_ACTIVE_HIGH>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&vbus_typec_en>;
+		regulator-name = "vbus_typec";
+		regulator-min-microvolt = <5000000>;
+		regulator-max-microvolt = <5000000>;
+		vin-supply = <&vcc5v0_sys>;
 	};
 
 	vcc5v0_sys: regulator-vcc5v0-sys {
@@ -556,6 +577,28 @@
 			regulator-off-in-suspend;
 		};
 	};
+
+	/*
+	 * USB-C port controller. The board is powered from its DC jack, so the
+	 * port is a power source only (5 V, 900 mA) and a USB host.
+	 */
+	usbc0: typec-portc@22 {
+		compatible = "fcs,fusb302";
+		reg = <0x22>;
+		interrupt-parent = <&gpio1>;
+		interrupts = <RK_PA2 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&usbc0_int>;
+		vbus-supply = <&vbus_typec>;
+
+		connector {
+			compatible = "usb-c-connector";
+			label = "USB-C";
+			data-role = "host";
+			power-role = "source";
+			source-pdos = <PDO_FIXED(5000, 900, PDO_FIXED_USB_COMM)>;
+		};
+	};
 };
 
 &i2s1 {
@@ -589,7 +632,8 @@
 	ep-gpios = <&gpio0 RK_PB4 GPIO_ACTIVE_HIGH>;
 	num-lanes = <4>;
 	pinctrl-names = "default";
-	pinctrl-0 = <&pcie_clkreqn_cpm>;
+	/* CLKREQ# is GPIO4_D0 on this board (as in the vendor tree); GPIO2_D2 is the USB-C VBUS switch */
+	pinctrl-0 = <&pcie_clkreqnb_cpm>;
 	vpcie0v9-supply = <&vcca_0v9>;
 	vpcie1v8-supply = <&vcca_1v8>;
 	vpcie3v3-supply = <&vcc3v3_sys>;
@@ -597,6 +641,16 @@
 };
 
 &pinctrl {
+	usb-typec {
+		usbc0_int: usbc0-int {
+			rockchip,pins = <1 RK_PA2 RK_FUNC_GPIO &pcfg_pull_up>;
+		};
+
+		vbus_typec_en: vbus-typec-en {
+			rockchip,pins = <2 RK_PD2 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+
 	headphone {
 		hp_det: hp-det {
 			rockchip,pins = <0 RK_PB5 RK_FUNC_GPIO &pcfg_pull_up>;
@@ -767,8 +821,9 @@
 };
 
 /*
- * Host mode only for now: the Type-C port is also the power input and its
- * FUSB302 PD controller is not described yet, so VBUS output stays off.
+ * USB-C: host mode, VBUS from vbus_typec through the FUSB302 (above). The
+ * Type-C PHY has no orientation information (no extcon), so SuperSpeed may
+ * work in one plug orientation only; USB 2.0 works in both.
  */
 &usbdrd3_0 {
 	status = "okay";

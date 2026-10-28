@@ -10,13 +10,13 @@ the stock device tree, and what was observed on the board.
 | Memory (NPU die) | 2 GB LPDDR3, its own |
 | Storage | 16 GB eMMC, microSD slot |
 | Ethernet | Gigabit, Realtek RTL8211F over RGMII |
-| Wi-Fi/Bluetooth | M.2 Key E connector, Realtek RTL8822B-class module (PCIe x1 + USB 2.0 for Bluetooth) |
+| Wi-Fi/Bluetooth | M.2 Key E connector, Realtek RTL8822CE module (Wi-Fi on PCIe x1, `rtw88_8822ce`; Bluetooth RTL8822CU on USB, `btusb`). Two U.FL (IPEX MHF1) antenna connectors on the module: **Wi-Fi and Bluetooth need antennas** (dual band 2.4 / 5 GHz); without them they reach only centimetres (Bluetooth audio drops, see TESTING.md) |
 | PMIC | RK809 (with audio codec), plus two FAN53555-type regulators for CPU big cluster and GPU |
 | Power | 12-19 V DC adapter (Quick Start Guide) |
 | Video | HDMI, DisplayPort over USB-C, MIPI DSI0, CSI0, CSI1/DSI1 (4 lanes each, see [MIPI.md](MIPI.md)) |
 | Mini PCIe slot | for a 4G LTE modem (USB 2.0 host0 lines) with a nano-SIM holder wired to it; **no modem is fitted** |
 | RTC | RK809 built-in RTC (`rtc0`), `RTC_BATTERY` header for a backup battery |
-| USB-C controller | FUSB302 on I2C8, address 0x22 (no driver bound yet) |
+| USB-C controller | FUSB302 on I2C8, address 0x22, interrupt GPIO1_A2 (`fcs,fusb302`, TCPM): a 5 V source and USB host. VBUS goes through a TI TPS2553 power switch (current limit about 1.5 A, short-circuit and thermal protection). **The GPIO that enables it depends on the board revision**: GPIO2_D2 on revision 1.02 (ADC channel 5 at about 1.85 V; the vendor tree calls it `vbus2-5v`), GPIO4_D1 on revision 1.01 (about 0.9 V, `vbus-5v`). **This image is made for revision 1.02** (see "Board revision" below): on 1.01 USB-C would give no power and GPIO2_D2 (there possibly the Bluetooth wake line, by a comment in the vendor tree) would be driven instead. PCIe CLKREQ# is GPIO4_D0 (`pcie_clkreqnb_cpm`), not GPIO2_D2 |
 | 40-pin header | see [GPIO.md](GPIO.md) |
 | Recovery header | J3 ("Recovery"): shorted at power-on enters maskrom |
 | USB-C | data port used for maskrom flashing |
@@ -61,3 +61,15 @@ and the GPU regulator (0x60) on I2C8. Not present: the MPU6500 accelerometer/gyr
 the AK8963 compass, the BQ25703 charger and the camera sensors (cameras are plug-in).
 Worth knowing about: the on-board FUSB302 and the 4 KiB EEPROM on I2C1 (an `at24`
 device, `/sys/bus/nvmem/devices/1-00501/nvmem`).
+
+## Board revision
+
+The image is made for and tested on **revision 1.02** of the board. The revision is set by a resistor divider on ADC channel 5 (the vendor U-Boot reads it):
+`cat /sys/bus/iio/devices/iio:device0/in_voltage5_raw` times 1.8066 gives millivolts.
+
+| ADC channel 5 | Revision | Known difference |
+|---|---|---|
+| 1700-1900 mV (raw about 1022) | 1.02 | USB-C VBUS switch on GPIO2_D2 (what this image uses) |
+| 800-1000 mV | 1.01 | USB-C VBUS switch on GPIO4_D1: USB-C gives no power with this image |
+| 1100-1300 mV, below 100 mV | 4, 3 (named so by the vendor U-Boot) | not seen; the vendor tree treats them like 1.02 |
+

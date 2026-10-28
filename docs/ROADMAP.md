@@ -14,7 +14,7 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 | GPU: OpenGL ES 3.1 (Panfrost), OpenCL 3.0 (Rusticl) | HDMI needed `cdn_dp` disabled, or no DRM card appeared |
 | Hardware video: H.264 / VP8 / JPEG encode, H.264 decode through `mpp_service` | 720p H.264 encode 52 fps, decode 116 fps; the image boots the `mpp` device tree |
 | GStreamer with `mpph264enc`, `mppvideodec`, ... | plugin built from a pinned commit |
-| Wi-Fi (RTL8822CE, PCIe), Bluetooth (USB), RK809 audio, RTC | link-level checks only, see below |
+| Wi-Fi (RTL8822CE, PCIe), Bluetooth (USB), RK809 audio, RTC | Wi-Fi and Bluetooth work (driver, firmware, scan, pairing through KDE, A2DP / HFP in PipeWire); **connect the two antennas** (U.FL on the module): without them the radio reaches only centimetres. Audio: see "hardware checks" below |
 | 40-pin header: GPIO, I2C6/7, SPI1/5, PWM0/1/3 | [GPIO.md](GPIO.md) |
 | NPU: TensorFlow Lite 2.21 on an open stack (TIM-VX, TFLite VX delegate), several models and programs, C++ and Python, `device` plans and `autotune()` | only Rockchip's firmware of the NPU die and the Vivante driver are closed; power-up needs the reference clock at 24 MHz; [NPU.md](NPU.md) |
 
@@ -152,11 +152,11 @@ test of the new NPU stack, the browser, then these checks).
 
 | Item | What to check |
 |---|---|
-| Wi-Fi | connect to an access point (WPA2 / WPA3), throughput with `iperf3`, reconnect after a reboot |
-| Bluetooth | pair a device (keyboard or headset), audio over A2DP |
-| Audio | RK809 at the 3.5 mm jack by ear (playback and the microphone), HDMI audio |
+| Wi-Fi | connect to an access point (WPA2 / WPA3), throughput with `iperf3`, reconnect after a reboot. 2026-10-28 without antennas: driver and firmware load, the scan sees 2.4 and 5 GHz networks (at most 44 % signal); works; a connection test with antennas remains |
+| Bluetooth | pair a device (keyboard or headset), audio over A2DP. 2026-10-28 without antennas: controller and firmware up, pairing through KDE works, PipeWire offers A2DP (SBC, SBC-XQ) and HFP (mSBC); works; the link dropped when audio streamed (AVDTP timeouts, then "Host is down") because no antennas were connected: to be repeated with antennas |
+| Audio | RK809 at the 3.5 mm jack by ear (playback and the microphone), HDMI audio. **2026-10-28:** headphones at the jack: right; headset microphone: fixed (it is the right channel of the codec: a mono source `Headset microphone` from it is the default source; the input volume was 0; the right microphone boost of the mainline `rk817` codec driver pointed at the left bit: `patches/linux/0003`, +30 dB); HDMI audio: the card was off (`hdmi-sound` is disabled in `rk3399-base.dtsi`, our DTS now enables it), the stream runs, not heard yet (a monitor without speakers) |
 | USB-A | a USB 3 disk in every port at SuperSpeed, a keyboard and a mouse |
-| USB-C | a device (host mode) in both orientations, power |
+| USB-C | a device (host mode) in both orientations, power. 2026-10-28: **works** after describing the FUSB302 (TCPM, a 5 V source and host) and its VBUS switch (TI TPS2553 on GPIO2_D2, board revision 1.02; the old PCIe CLKREQ# pin choice took GPIO2_D2 and was wrong): a flash drive through a USB-C 2.0 adapter, 35.5 MB/s read (the adapter's limit), plug orientation reported (`reverse`); USB 3 over USB-C not tested yet (needs a USB 3 Type-C device; without orientation for the Type-C PHY SuperSpeed may work in one orientation only). USB-A: a USB 3 flash drive at 5 Gbit/s, 96 MB/s read, a keyboard receiver on USB 2 |
 | Boot logo | replace the logo at boot with our own (no ASUS logo): U-Boot splash and / or the kernel's boot logo |
 | Suspend / resume | `systemctl suspend`, wake up (key, RTC alarm), the NPU, Wi-Fi, USB and the display after resume |
 
