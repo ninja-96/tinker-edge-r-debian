@@ -14,6 +14,7 @@
 #include <fcntl.h>
 #include <grp.h>
 #include <linux/usbdevice_fs.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -93,6 +94,32 @@ static int bulk(unsigned ep, void *buf, unsigned len, unsigned timeout_ms)
 	return ioctl(g_usb_fd, USBDEVFS_BULK, &bt);
 }
 
+/* the reply channel: one asynchronous bulk read, waited for in poll(). A blocking USBDEVFS_BULK without a timeout waits uninterruptibly in the
+ * kernel, and the freezer of system sleep cannot stop the daemon there: suspend then fails after 20 s ("1 tasks refusing to freeze"). A timeout
+ * would cancel transfers over and over (a 'stop endpoint' command each, which the xHCI of this SoC can hang on). The read stays submitted, poll()
+ * is an interruptible wait. Returns the bytes read, or -1 with errno (ENODEV: the NPU went away). */
+static int bulk_in(unsigned ep, void *buf, unsigned len)
+{
+	struct usbdevfs_urb urb;
+	memset(&urb, 0, sizeof urb);
+	urb.type = USBDEVFS_URB_TYPE_BULK; urb.endpoint = ep; urb.buffer = buf; urb.buffer_length = len;
+	if (ioctl(g_usb_fd, USBDEVFS_SUBMITURB, &urb) < 0) return -1;
+	for (;;) {
+		struct pollfd pf = { g_usb_fd, POLLOUT, 0 };
+		if (poll(&pf, 1, -1) < 0 && errno != EINTR) return -1;
+		void *done = nullptr;
+		if (ioctl(g_usb_fd, USBDEVFS_REAPURBNDELAY, &done) == 0) {
+			if (done != &urb) continue;
+			if (urb.status < 0) { errno = -urb.status; return -1; }
+			return urb.actual_length;
+		}
+		if (errno != EAGAIN && errno != EINTR) {   /* the device is gone: the read is given back when the file is closed */
+			int e = errno; ioctl(g_usb_fd, USBDEVFS_DISCARDURB, &urb); errno = e;
+			return -1;
+		}
+	}
+}
+
 static std::string read_sys(const std::string &path)
 {
 	std::string s; FILE *f = fopen(path.c_str(), "rb"); if (!f) return s;
@@ -153,7 +180,7 @@ static void usb_loop()
 		logf_("NPU connected");
 		rx.clear();
 		for (;;) {
-			int n = bulk(g_ep_in, buf.data(), buf.size(), 0);   /* no timeout: a cancelled transfer is a 'stop endpoint' command, and the xHCI of this SoC can hang on a storm of them */
+			int n = bulk_in(g_ep_in, buf.data(), buf.size());   /* no timeout, but freezable for system sleep (see bulk_in) */
 			if (n < 0) { if (errno == EINTR || errno == ETIMEDOUT) continue; logf_("NPU lost: %s", strerror(errno)); break; }
 			rx.insert(rx.end(), buf.begin(), buf.begin() + n);
 			size_t off = 0;
