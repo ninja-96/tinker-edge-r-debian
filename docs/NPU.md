@@ -99,7 +99,7 @@ Two details that cost a day to find, both fixed in the driver and the device tre
 | File | Origin |
 |---|---|
 | firmware `MiniLoaderAll.bin`, `uboot.img`, `trust.img`, `boot.img` in `/usr/share/npu_fw` | Rockchip, https://github.com/airockchip/RK3399Pro_npu at the commit in `sources.lock`, fetched and sha256-checked by `scripts/fetch-npu.sh`, binary only. **Closed**: Linux 4.4.185 with the `galcore` driver, the Vivante user libraries (SDK 6.4.6), BusyBox. `scripts/build-npu-boot.sh` changes two things in `boot.img`: the device tree (below) and the ramdisk (our files, below) |
-| `npu_server`, `libvx_delegate.so`, `libtim-vx.so` (inside `boot.img`, run on the NPU die) | built from source by `scripts/build-npu-open.sh` (TIM-VX `main` with the SDK 6.4.6 headers of v1.1.32, tflite-vx-delegate `main` with [our patch](../npu-open/patches), TensorFlow Lite 2.21.0 with XNNPACK and its dependencies, our `npu-open/server/`; all pinned in `sources.lock`), `-O3 -mcpu=cortex-a35`, in a Debian 11 container |
+| `npu_server`, `libvx_delegate.so`, `libtim-vx.so` (inside `boot.img`, run on the NPU die) | built from source by `scripts/build-npu-open.sh` (TIM-VX `main` with the SDK 6.4.6 headers of v1.1.32, tflite-vx-delegate `main` with [our patch](../npu-open/patches), LiteRT 2.3.2 (TensorFlow Lite) with XNNPACK and its dependencies, our `npu-open/server/`; all pinned in `sources.lock`), `-O3 -mcpu=cortex-a35`, in a Debian 11 container |
 | `npu-daemon` (`/usr/sbin`), `librk3399pro_npu.so.0`, `rk3399pro_npu.hpp`, the Python module's `_core` | built from `npu-open/host/` by `scripts/build-npu-host.sh` (C++17, pybind11 from Debian, `-O3 -mcpu=cortex-a72.cortex-a53`) |
 | `rkdeveloptool` with the `rs` command | `third_party/rkdeveloptool` plus `patches/rkdeveloptool/` (GPL-2.0+), built for arm64 by `scripts/build-rkdeveloptool-arm64.sh` |
 | `npu-load`, `npu-firmware.service`, `npu-daemon.service`, `60-tinker-npu.rules` | this repository, `overlay/` |
@@ -160,7 +160,7 @@ and its socket `/run/npu/npu.sock` belongs to `plugdev` too, so the default user
 
 ## Numbers (one Tinker Edge R)
 
-Our own models (release 0.4 numbers, the same on 0.4.1):
+Our own models (release 0.4 numbers, the same on 0.4.1; the small test model was re-run in the 0.5 self-test with LiteRT 2.3.2):
 
 | Model (224x224 unless noted) | Type | On the NPU | `exec` from Python |
 |---|---|---|---|
@@ -170,8 +170,8 @@ Our own models (release 0.4 numbers, the same on 0.4.1):
 | Inception V3 (299) | int8, per-channel | 52 ms | 69 ms |
 | a small test model (`npu-selftest`) | uint8 | 0.45 ms | 1.5 ms through the daemon (0.4: 1.8 ms) |
 
-[LiteRT community vision models](https://huggingface.co/collections/litert-community/vision-models) (2026-10-27, measured again on 2026-10-28 with the operator rewrites of main after 0.4.1: the same; random input of the model's shape; the reference is the
-same model on the CPU of the NPU die, TensorFlow Lite 2.21 with XNNPACK on two Cortex-A35; "cos" is the lowest cosine similarity of the outputs to it; `exec` times with the USB transfer):
+[LiteRT community vision models](https://huggingface.co/collections/litert-community/vision-models) (2026-10-27, measured again on 2026-10-28 with the operator rewrites of main after 0.4.1, and on LiteRT 2.3.2 (release 0.5): the same; random input of the
+model's shape; the reference is the same model on the CPU of the NPU die, LiteRT 2.3.2 with XNNPACK on two Cortex-A35; "cos" is the lowest cosine similarity of the outputs to it; `exec` times with the USB transfer):
 
 | Task | Model | Type | NPU (`device="npu"`) | CPU of the NPU die | cos on the NPU | `device="auto"` / `autotune()` |
 |---|---|---|---|---|---|---|
