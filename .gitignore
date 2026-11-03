@@ -33,3 +33,6 @@ rnd/
 docker/rknn-toolkit/pk.tgz
 __pycache__/
 *.pyc
+
+# Opencode
+AGENTS.md
