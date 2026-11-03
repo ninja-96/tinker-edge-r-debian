@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
-// Names of the TensorFlow Lite builtin operators (generated from tensorflow/compiler/mlir/lite/schema/schema.fbs of TensorFlow 2.21.0).
+// Names of the TensorFlow Lite builtin operators (generated from tflite/converter/schema/schema.fbs of LiteRT 2.3.2; the list is identical to the
+// one of TensorFlow 2.21.0, it ends at STABLEHLO_CASE).
 #pragma once
 
 namespace rk3399pro_npu {

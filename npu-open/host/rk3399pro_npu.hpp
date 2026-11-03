@@ -3,7 +3,7 @@
 //
 // rk3399pro_npu: TensorFlow Lite models on the NPU of the RK3399Pro (ASUS Tinker Edge R), C++ API.
 //
-// The NPU die runs our server (npu_server: TIM-VX, the TFLite VX delegate, TensorFlow Lite 2.21). Several models can be loaded at once and
+// The NPU die runs our server (npu_server: TIM-VX, the TFLite VX delegate, LiteRT 2.3.2). Several models can be loaded at once and
 // used by several programs: a model stays on the NPU until it is stopped, and opening the same .tflite file again attaches to the loaded
 // model (it is identified by the sha256 of the file). Programs reach the NPU through the daemon npu-daemon (/run/npu/npu.sock, group plugdev);
 // without the daemon (or with NPU_DIRECT=1) one program at a time talks to the NPU over USB itself.

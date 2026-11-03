@@ -32,7 +32,7 @@ board (Debian 13, Python 3.13)                                                  
   graph, the library keeps it per plan; `LOAD_NBG` then needs no TFLite on the NPU (0.04-0.3 s). Models with a float input or output are not cached (their graph uses float16 inside).
 * **Board side** (`host/`): `npu_daemon.cc` holds the USB channel (usbfs) and passes the messages of any number of programs (it replaces their tags with its own); `rk3399pro_npu.hpp` /
   `rk3399pro_npu.cc` is the C++ library (connection to the daemon or straight to USB, models, attach, memory check, compiled-graph cache, `device` plans, `autotune`, sha256 in
-  `sha256.h`, operator names in `op_names.h`, generated from the TFLite 2.21 schema); `python_core.cc` is its Python binding (`rk3399pro_npu._core`, pybind11); `python/rk3399pro_npu`
+  `sha256.h`, operator names in `op_names.h`, generated from the schema of LiteRT 2.3.2); `python_core.cc` is its Python binding (`rk3399pro_npu._core`, pybind11); `python/rk3399pro_npu`
   is the Python package around it.
 * **USB rules found:** write the FunctionFS descriptors **before** the USB controller is bound (our `S50usbdevice` in the NPU ramdisk; the gadget of this firmware is unbound and bound
   at every disconnect, so the server reads the ep0 events and writes the descriptors again after UNBIND); OUT reads are multiples of 1024 bytes (AIO, four armed 64 KiB reads); the
@@ -44,7 +44,7 @@ board (Debian 13, Python 3.13)                                                  
 ## Known problems
 
 * **`async_exec` can hang the USB bus** (see docs/NPU.md); `exec` never hung.
-* Operators: [OPERATORS.md](OPERATORS.md): 68 of 87 single-operator models run entirely on the NPU with the right result, the others keep an operator on the CPU; none is wrong.
+* Operators: [OPERATORS.md](OPERATORS.md): all 87 single-operator models run entirely on the NPU with the right result (LiteRT 2.3.2, measured 2026-10-28); none is wrong.
 * A TIM-VX unit test of `main` crashes (`Stack` with int32); a model that hits it crashes only its own engine.
 
 ## Layout
