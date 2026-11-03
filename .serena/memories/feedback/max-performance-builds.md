@@ -1,0 +1,5 @@
+Build everything our scripts compile (kernel, mpp, GStreamer plugin, tools, any new components) for maximum performance on the RK3399 (Cortex-A72/A53): `-O2`/`-O3` where the project allows it, `-mcpu=cortex-a72.cortex-a53`, release builds, no debug info. (NPU die builds: `-O3 -mcpu=cortex-a35`, see mem:project/tinker-edge-r.)
+
+**Why:** the user's goal is to give the 2022-era board a second life with current software at the best speed; they asked to keep this as a rule ("все, что собираем, собираем с максимальной производительностью, кроме некоторых частей, но мы уже обсуждали").
+
+**How to apply:** use the flags already in `scripts/build-kernel.sh` (`KCFLAGS=-mcpu=cortex-a72.cortex-a53`) and `scripts/build-mpp.sh` (`-O3` plus `-mcpu`) for new build scripts too. Agreed exceptions: U-Boot and TF-A keep their own size-oriented flags (bootloaders); the Linux kernel stays at `-O2` because mainline has no `-O3`; Debian packages are prebuilt and not recompiled. Related: mem:project/tinker-edge-r.

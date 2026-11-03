@@ -1,0 +1,4 @@
+Release 0.5, order set by the user on 2026-10-28 (updated the same day): (1) NPU work incl. the cost-model autotune (done, pushed 35c5a7b); (2) hardware checks, fix what fails: Wi-Fi, Bluetooth, audio, USB-A, USB-C, replace the boot logo (own logo, never ASUS), suspend/resume; (3) Chromium moved to 0.6 (2026-10-28); (4) the user runs `tests/npu/autotune-log.sh` alone and sends the log; from it + `rnd/verisilicon/models/tune05/ANALYSIS.md` we improve autotune, smoke test, regression at the very end, then release.
+
+**Why:** the user wants these verified on the real board before 0.5 is published ("если надо - все поправить").
+**How to apply:** don't publish 0.5 until each item is checked; recorded in docs/ROADMAP.md "Release 0.5: hardware checks before the release". Related: mem:project/releases-roadmap, mem:feedback/release-update-rule, mem:feedback/wifi-bt-firmware.

@@ -1,0 +1,5 @@
+When the project starts using anything from outside (a repository, a library, a tool, a firmware file, a dataset), add in the same change: (1) a link to where it comes from in the README section "Upstream and reference repositories" (and docs/LINKS.md), with its role in the project (built, downloaded, reference only); (2) its licence: SPDX id plus a link to the licence text in the upstream repo, and the licence text/NOTICE entry in `NOTICE.md` and, if it ends up in the image, in `/usr/share/doc/tinker-edge-r/licenses/`. Check the licence from the upstream tree (LICENSE/COPYING files), not from memory; GitHub's API often says NOASSERTION.
+
+**Why:** the user noticed (2026-10-27, during the 0.4 release) that the upstream list lacked the new sources (TIM-VX, tflite-vx-delegate, TensorFlow) and had no licences at all, and asked to make adding links and licence links/texts a standing rule.
+
+**How to apply:** at the end of any task that adds a dependency, grep README.md, docs/LINKS.md, NOTICE.md, sources.lock for it; add what is missing. Related: mem:project/releases-roadmap.
