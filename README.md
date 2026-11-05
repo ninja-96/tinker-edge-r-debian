@@ -28,7 +28,7 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 
 | Area | Works | Tested on a board | Details |
 |---|---|---|---|
-| Boot: DRAM init, U-Boot, extlinux, Linux 6.18.59 from the eMMC | ✅ yes | ✅ yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
+| Boot: DRAM init, U-Boot, extlinux, Linux 6.18.60 from the eMMC | ✅ yes | ✅ yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
 | Flashing over USB, backup, restore, kernel update | ✅ yes | ✅ yes | read-back verification |
 | Ethernet, SSH, mDNS name, NTP | ✅ yes | ✅ yes | gigabit link; 500 Mbit/s measured, the limit of the internet line it was measured on |
 | CPU (6 cores, cpufreq), RAM 4 GB | ✅ yes | ✅ yes | `stress-ng` 8 + 10 min, `memtester` full pass, 47 C at full load; 933 MHz not benchmarked against 800 |
@@ -50,7 +50,7 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 | Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
 | Python for the header: libgpiod, smbus2, spidev | ✅ yes | 🟡 partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
 | Boot logo | ✅ yes | ⬜ not yet | the white Debian swirl centred on black in U-Boot, the kernel and Plymouth, at any resolution |
-| Suspend and resume | ⚠️ partly | 🟡 partly | deep sleep and an RTC wake-up work, the NPU is put to sleep with the board and keeps its models; a USB keyboard or mouse does not wake the board |
+| Suspend and resume | ❌ not working | ❌ not working | the system suspends but does not wake from the RTC alarm (2026-11-05: an `rtcwake -m mem -s 90` left the board asleep until a reset), so it is not usable; **keep the board powered on**; a USB keyboard or mouse does not wake it either |
 | DisplayPort over USB-C | ❌ no | | mainline has no Type-C DP glue for this SoC; the USB-C port is a USB host only ([OPEN.md](docs/OPEN.md)) |
 | GPU inference engines | ❌ no | | Arm NN (`CpuAcc`, `GpuAcc`) is planned ([ROADMAP.md](docs/ROADMAP.md)) |
 | MIPI DSI display, MIPI CSI cameras | ❌ no | | drivers are built, no panel or camera is described in the device tree ([MIPI.md](docs/MIPI.md)) |

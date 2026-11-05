@@ -155,13 +155,13 @@ test of the new NPU stack, then these checks; the browser moved to 0.6).
 | USB-A | a USB 3 disk in every port at SuperSpeed, a keyboard and a mouse |
 | USB-C | a device (host mode) in both orientations, power. 2026-10-28: **works** after describing the FUSB302 (TCPM, a 5 V source and host) and its VBUS switch (TI TPS2553 on GPIO2_D2, board revision 1.02; the old PCIe CLKREQ# pin choice took GPIO2_D2 and was wrong): a flash drive through a USB-C 2.0 adapter, 35.5 MB/s read (the adapter's limit), plug orientation reported (`reverse`); USB 3 over USB-C not tested yet (needs a USB 3 Type-C device; without orientation for the Type-C PHY SuperSpeed may work in one orientation only). USB-A: a USB 3 flash drive at 5 Gbit/s, 96 MB/s read, a keyboard receiver on USB 2 |
 | Boot logo | replace the logo at boot with our own (no ASUS logo): U-Boot splash and / or the kernel's boot logo |
-| Suspend / resume | `systemctl suspend`, wake up (key, RTC alarm), the NPU, Wi-Fi, USB and the display after resume |
+| Suspend / resume | `systemctl suspend`, wake up (key, RTC alarm), the NPU, Wi-Fi, USB and the display after resume. **2026-11-05: not working** — the system suspends (a model stays loaded on the NPU) but the RTC alarm does not wake it (an `rtcwake -m mem -s 90` left the board asleep until a reset; the RTC itself keeps the time). Blocked: find why the rk808 alarm does not raise the wake interrupt. Until then the board is kept powered on |
 
 ### Release 0.5: kernel update
 
 | Item | Notes |
 |---|---|
-| Newer Linux 6.18 | **done (2026-10-28): 6.18.59** (`sources.lock`, patches apply, booted on the board). Decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26; confirmed by the maintainer as the one to include), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
+| Newer Linux 6.18 | **done: 6.18.59 (2026-10-28), 0.5 ships 6.18.60 (2026-11-05)** (`sources.lock`, patches apply, booted on the board). Decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26; confirmed by the maintainer as the one to include), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
 
 ### Release 0.6: memory controller
 
