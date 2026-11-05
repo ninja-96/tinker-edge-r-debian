@@ -35,7 +35,7 @@ depend on any of these at build time except the open upstream sources listed und
 
 | What | Link | Pinned in |
 |---|---|---|
-| Linux 6.18.59 | https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.59.tar.xz | `sources.lock` (sha256) |
+| Linux 6.18.60 | https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.18.60.tar.xz | `sources.lock` (sha256) |
 | U-Boot v2026.10 | https://github.com/u-boot/u-boot | `sources.lock` |
 | TF-A v2.15.0 (only for the open BL31) | https://github.com/ARM-software/arm-trusted-firmware | `sources.lock` |
 | Debian 13 "trixie" packages | https://deb.debian.org/debian | `scripts/build-rootfs.sh` |
