@@ -1,0 +1,18 @@
+How a release of this project is made (done for v0.5.0 on 2026-11-05; docs/RELEASING.md is the source of truth, this is the practical form).
+
+Fixed order (RELEASING.md steps 1-8):
+1. `scripts/check-updates.sh --apply` -> newest 6.18.x in sources.lock (version + sha256 from kernel.org); `scripts/fetch-sources.sh`. Debian: always rebuild the rootfs (`./run.sh scripts/build-rootfs.sh`) - it comes from the live archive.
+2. Kernel: `./run.sh scripts/build-kernel.sh` must apply patches/linux, kernel-mods, config fragment and build. A new kernel series is a separate decision.
+3. Other pinned sources in sources.lock: only note new releases in the notes, change only on purpose.
+4. Links and licences: new sources get a row in docs/LINKS.md + README "Upstream" + NOTICE.md + /usr/share/doc/.../licenses/; links opened.
+5. Build: `scripts/make-image.sh` or its stages (build-rootfs, build-kernel, build-mpp, build-gst-rockchip, build-uboot, fetch-npu + build-npu-open, build-npu-boot, build-npu-host, build-rkdeveloptool-arm64, build-flash-tools, build-image-mainline-uboot). Stages with unchanged sources may be reused from a warm out/; changed ones are rebuilt. Then `xz -T0 -9 -k out/tinker-edge-r-debian13.img` (delete the old .xz first), `sha256sum out/tinker-edge-r-debian13.img > out/tinker-edge-r-debian13.img.sha256`, packages.txt comes from the rootfs build.
+6. Flash (maskrom: J3 shorted at power-on, USB-C to the PC; `scripts/backup-emmc.sh` once, `scripts/flash-emmc.sh --backup emmc-backup.img`), `scripts/test-board.sh` must give RESULT: PASS; skipped phases are named in the notes.
+7. Release notes: out/release-notes-vX.Y.Z.md (gitignored, local only). Format (compare v0.3.0 / v0.4.0 / v0.4.1): a first paragraph naming the release and the bold headline; "What is new in X.Y"; "Works (checked on a real board, date, test-board.sh gives RESULT: PASS: N passed, N skipped, N failed, N second phases)" with the counts and the interesting numbers; "Measured (one Tinker Edge R, ...)" table; "Known problems"; "Not tested yet"; "Install" block (clone, sha256sum -c, xz -dk, build-flash-tools, maskrom, backup, flash; user debian/password debian, first login forces a change; erases the eMMC); "SHA-256 of the unpacked image" (of the .img, NOT of the .xz); "Licences and sources" with the written source offer (valid >= 3 years, per the GPL/LGPL/MPL parts, referencing sources.lock at the tag).
+8. Publish ONLY on the maintainer's word: commit + push main, `git tag vX.Y.Z`, push the tag, then
+   `gh release create vX.Y.Z --title "vX.Y.Z: <short headline>" --notes-file out/release-notes-vX.Y.Z.md --latest out/tinker-edge-r-debian13.img.xz out/tinker-edge-r-debian13.img.sha256 out/packages.txt`.
+   The GitHub release body = the full notes; assets are always these three (the image is added as an asset, as the maintainer confirmed for 0.5). No pull requests are used: releases are tags on main + GitHub releases (the repo has 0 PRs).
+   Commit style around a release: the kernel bump ("Linux 6.18.60 ..."), status doc updates (README/ROADMAP/LINKS), "add memory" for the serena memories; terse subjects, English.
+
+v0.5.0 specifics (2026-11-05): Linux 6.18.60, Debian 13.7, image SHA-256 7eeccd0b392be567d032c41dd09a97992020247e65a4077b3313f1ecedc80b6a, published at https://github.com/ninja-96/tinker-edge-r-debian/releases/tag/v0.5.0. Suspend/resume shipped as NOT working: the system suspends but the RTC alarm does not wake the board (rtcwake -m mem -s 90 left it asleep until a reset; the RTC keeps the time); README/ROADMAP/notes say keep the board powered on.
+
+Related: mem:project/05-release-plan-2026-10-30, mem:project/releases-roadmap, mem:feedback/release-update-rule.
