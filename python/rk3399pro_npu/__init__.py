@@ -203,6 +203,8 @@ class Model:
             if a.dtype != t.dtype:
                 if np.issubdtype(a.dtype, np.floating) and t.scale and t.dtype in (np.uint8, np.int8, np.int16):
                     a = t.quantize(a)
+                elif np.issubdtype(a.dtype, np.integer) and np.issubdtype(t.dtype, np.integer):
+                    a = np.clip(a, np.iinfo(t.dtype).min, np.iinfo(t.dtype).max).astype(t.dtype)   # C casting wraps silently: clip
                 else:
                     a = a.astype(t.dtype)
             out.append(np.ascontiguousarray(a))

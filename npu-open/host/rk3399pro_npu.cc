@@ -626,7 +626,7 @@ std::vector<uint8_t> Model::load(const std::vector<uint8_t> &data, const LoadOpt
 	uint32_t nbg_len; memcpy(&nbg_len, r.data.data() + tail, 4);
 	if (!cache.empty()) {
 		mkdirs(cache);
-		if (nbg_len && !from_cache_ && !nbg_path.empty() && r.data.size() >= tail + 4 + nbg_len) {
+		if (nbg_len && !from_cache_ && !nbg_path.empty() && lr.n_inputs <= 16 && lr.n_outputs <= 16 && r.data.size() >= tail + 4 + nbg_len) {   // LOAD_NBG on the die is capped at 16 tensors per side
 			std::vector<uint8_t> f(8 + (tail - sizeof lr) + nbg_len);   // u32 n_in, u32 n_out, the tensors, the graph: the payload of LOAD_NBG
 			memcpy(f.data(), &lr.n_inputs, 4); memcpy(f.data() + 4, &lr.n_outputs, 4);
 			memcpy(f.data() + 8, r.data.data() + sizeof lr, tail - sizeof lr);
@@ -856,19 +856,20 @@ std::vector<TuneResult> Model::autotune(const std::vector<std::vector<uint8_t>> 
 	// one candidate: loaded, run once (the result), then `runs` times (the time); g: the graph of this load (with the CPU profile when `profile`)
 	auto trial = [&](const Plan &p, const char *suffix, std::vector<std::vector<uint8_t>> *outs, GraphInfo *g, bool profile) {
 		TuneResult r; r.plan = p.tag();
+		Model *m = nullptr;
 		try {
 			LoadOptions o = base; o.key_suffix = suffix; o.name = "autotune"; o.strict = false; o.profile = profile;
 			if (g) o.use_cache = false;   // the graph needs a load through TensorFlow Lite, not the compiled graph
 			if (p.cpu) o.device = "cpu"; else { o.device = "npu"; o.split = p.split; o.split_ratio = p.ratio; o.split_max_error = p.err; o.cpu_ops = p.deny; o.cpu_nodes = p.nodes; }
-			Model m(data_, o);
-			std::vector<std::vector<uint8_t>> y = m.exec(x, 600);
+			m = new Model(data_, o);
+			std::vector<std::vector<uint8_t>> y = m->exec(x, 600);
 			auto t0 = std::chrono::steady_clock::now();
-			for (int i = 0; i < runs; i++) m.exec(x, 600);
+			for (int i = 0; i < runs; i++) m->exec(x, 600);
 			r.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count() / runs;
-			if (g) *g = m.graph();
+			if (g) *g = m->graph();
 			if (outs) *outs = y;
-			m.stop();
 		} catch (Error &e) { r.error = e.what(); }
+		if (m) { try { m->stop(); } catch (...) {} delete m; }   // a failed trial must not leave its engine on the NPU
 		return r;
 	};
 	std::vector<TuneResult> res;
