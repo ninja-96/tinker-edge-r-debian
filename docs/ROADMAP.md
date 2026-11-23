@@ -88,22 +88,24 @@ TrustZone only hosts BL31 for PSCI).
 
 Why: on the KDE desktop the browser uses a lot of CPU and plays video in software (reported 2026-10-25).
 
-What is known: Debian's arm64 Chromium is built with `use_v4l2_codec=true`, `use_vaapi=true` and
-`proprietary_codecs=true` (from the Debian packaging, `debian/rules`), so the V4L2 and VA-API decoder code is compiled in.
-What is not known: whether it drives the RK3399 decoders. Candidate paths, to be tried on the board in this order:
+Research (2026-11-05): Chromium's own V4L2 stateless decoder was removed upstream — `media/filters/v4l2` is gone and the
+`use_v4l2_codec` build flag no longer exists (checked on `main` and on the Debian 150 tag), so the original path A is dead;
+hardware decode in the browser goes through VA-API only (Debian's build has `use_vaapi=true`, the VA-API video decoder
+delegates for H.264/H.265/AV1/VP8/VP9 are in `media/gpu/vaapi`). For the mainline `rkvdec` the VA-API driver is
+`libva-v4l2-request`; the maintained fork (dongioia, active, H.265/VP9 on the mainline request API) is pinned in `sources.lock`.
 
-| Path | What it needs | Risk |
-|---|---|---|
-| A. Chromium's V4L2 stateless decoder on the mainline `rkvdec` (H.264, VP9) and `hantro` (VP8, MPEG-2) | the `base` device tree (the `mpp` variant turns these drivers off); Chromium feature flags; `/dev/video*` and `/dev/media*` permissions | the stateless path is built for ChromeOS; on desktop Linux it may not be reachable |
-| B. VA-API through `libva-v4l2-request` (exposes the same stateless decoders as VA-API), used by Chromium (`use_vaapi`) and Firefox | the `base` device tree; a maintained fork of `libva-v4l2-request` built for arm64 | the project is old and unmaintained |
-| C. Hybrid device tree | keep the mainline `rkvdec` for the browser and give only the encoder (VEPU) to `mpp_service`, so that browser decoding and GStreamer encoding both work | mpp then loses H.265/VP9 decoding through GStreamer; needs a new DTB variant |
-| D. Own Chromium with `libv4l-rkmpp` | patched `libv4l2` and a Chromium with the author's patches (written for old Chromium versions, must be rebased) | cross build of order 100 GB and hours; last resort |
+| Item | Status |
+|---|---|
+| `chromium` in the image, always current | done (2026-11-05): installed from the live Debian archive in `scripts/build-rootfs.sh` — the newest version at every build; `scripts/check-updates.sh` reports when the archive is ahead of `out/rootfs.tar`; updated at every release together with the kernel and LiteRT (docs/RELEASING.md, step 1) |
+| Device tree variant `-browser` (the new default) | done (2026-11-05): hybrid — the VDU decoder (mainline `rkvdec`, V4L2 stateless) goes to the browser, the VPU encoder and the mpp VPU decoder stay with `mpp_service`, so GStreamer keeps its H.264/VP8/JPEG encoding and H.264 decoding; mpp loses only the H.265/VP9 decode it used to provide; `-full` remains the fallback (`tinker-boot-select`) |
+| The `v4l2_request` VA-API driver | done (2026-11-05): the dongioia fork (MIT/LGPL-2.1) built by `scripts/build-v4l2-request.sh`; the driver lands in `/usr/lib/<multiarch>/dri/` |
+| Chromium configuration | done (2026-11-05): `LIBVA_DRIVER_NAME=v4l2_request` in `overlay/etc/chromium.d/00-hwvideo.sh` (no feature flags needed: the VA-API VDA is picked automatically when the driver is present); udev rules give the regular user (group `video`) the `/dev/video*` / `/dev/media*` nodes; without the driver Chromium falls back to software decode |
+| Board test | done (2026-11-05): the "Browser hardware decode" phase of `scripts/test-board.sh` — `vainfo` must list the `v4l2_request` profiles, and while a 720p H.264 clip plays in headless Chromium some browser process must hold the codec device open (`/dev/video*` or `/dev/dma_heap*` in `/proc/*/fd`) |
+| Image size | +768 MiB: `ROOTFS_MIB` 1792 -> 2560 (`scripts/build-image-mainline-uboot.sh`) |
 
-Plan: (1) run `scripts/diag-desktop.sh` to see whether KWin renders on Panfrost at all (a software compositor would explain
-the CPU load by itself); (2) install `chromium` on the board and test A and B with the `base` device tree, judging by
-`chrome://gpu` and `chrome://media-internals`; (3) decide between C and D only if A and B fail; (4) put the working
-browser and its configuration (flags in `/etc/chromium.d/`) into the image, with a test in `scripts/test-board.sh` (a clip
-that must be played with hardware decoding). Image size grows by about 300 MB (`ROOTFS_MIB`).
+**Board check remains** (2026-11-05): flash the image with the `-browser` variant and run `scripts/test-board.sh` — the phases
+"VA-API driver (v4l2_request)" and "Chromium hardware decode" must be PASS. If the fork does not work on the RK3399 (it is
+developed for the RK3588), the fallbacks are the original Bootlin `libva-v4l2-request` or a port of the fork.
 
 ### Release 0.4.1: TensorFlow Lite 2.21, several models, autotune
 
@@ -161,7 +163,7 @@ test of the new NPU stack, then these checks; the browser moved to 0.6).
 
 | Item | Notes |
 |---|---|
-| Newer Linux 6.18 | **done: 6.18.59 (2026-10-28), 0.5 ships 6.18.60 (2026-11-05)** (`sources.lock`, patches apply, booted on the board). Decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26; confirmed by the maintainer as the one to include), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the 0.5 build, not the number written here |
+| Newer Linux 6.18 | **done: 6.18.59 (2026-10-28), 0.5 ships 6.18.60 (2026-11-05), 0.6 ships 6.18.65 (2026-11-23)** (`sources.lock`, patches apply, booted on the board). Decision (2026-10-27): 0.5 ships the latest release of the 6.18 long-term series. Releases 0.1-0.4 use **6.18.56**; kernel.org lists **6.18.59** (2026-10-26; confirmed by the maintainer as the one to include), and mainline is 7.3 (stable 7.2.13, not long-term). Steps: bump `LINUX_VERSION` and `LINUX_SHA256` in `sources.lock`, check that `patches/linux/*.patch` and `kernel-mods/` still apply, rebuild, run `scripts/test-board.sh` ([KERNEL.md](KERNEL.md)). Take the newest 6.18.x at the time of the build, not the number written here |
 
 ### Release 0.6: memory controller
 

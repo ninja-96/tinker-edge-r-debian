@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * ASUS Tinker Edge R: hybrid video codecs for the browser (release 0.6).
+ *
+ * The default image used to hand every video block to Rockchip's mpp_service
+ * (the -mpp variant). Chromium, however, can only reach the mainline V4L2
+ * stateless decoders (rkvdec / hantro); its own V4L2 decoder was removed
+ * upstream and it decodes through VA-API, which we serve with the
+ * v4l2_request driver (scripts/build-v4l2-request.sh) on the mainline rkvdec.
+ *
+ * This variant splits the hardware so both work at once:
+ *   - the VDU decoder (rkvdec, ff660000) goes to the mainline driver, so the
+ *     browser gets hardware decoding (H.264, HEVC, VP9, AV1);
+ *   - the VPU encoder (vepu, ff650000) and the mpp VPU decoder (vdpu) stay
+ *     with mpp_service, so GStreamer keeps its H.264/VP8/JPEG encoding and
+ *     H.264 decoding.
+ * GStreamer loses only the H.265/VP9 decode that the mpp rkvdec node used to
+ * provide. The mainline hantro encoder (&vpu) is off: the mpp vepu owns its
+ * register range. Include after the board DTS.
+ *
+ * The assigned-clocks lines raise the codec clocks (the BSP driver did this in
+ * C; without them aclk stays low and the codec is a few times slower).
+ */
+
+/ {
+	mpp_srv: mpp-srv {
+		compatible = "rockchip,mpp-service";
+		rockchip,taskqueue-count = <2>;
+		rockchip,resetgroup-count = <2>;
+		status = "okay";
+	};
+
+	vepu: vepu@ff650000 {
+		compatible = "rockchip,vpu-encoder-v2";
+		reg = <0x0 0xff650000 0x0 0x400>;
+		interrupts = <GIC_SPI 114 IRQ_TYPE_LEVEL_HIGH 0>;
+		interrupt-names = "irq_enc";
+		clocks = <&cru ACLK_VCODEC>, <&cru HCLK_VCODEC>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		assigned-clocks = <&cru ACLK_VCODEC>;
+		assigned-clock-rates = <400000000>;
+		resets = <&cru SRST_H_VCODEC>, <&cru SRST_A_VCODEC>;
+		reset-names = "shared_video_h", "shared_video_a";
+		iommus = <&vpu_mmu>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
+		power-domains = <&power RK3399_PD_VCODEC>;
+		status = "okay";
+	};
+
+	vdpu: vdpu@ff650400 {
+		compatible = "rockchip,vpu-decoder-v2";
+		reg = <0x0 0xff650400 0x0 0x400>;
+		interrupts = <GIC_SPI 113 IRQ_TYPE_LEVEL_HIGH 0>;
+		interrupt-names = "irq_dec";
+		clocks = <&cru ACLK_VCODEC>, <&cru HCLK_VCODEC>;
+		clock-names = "aclk_vcodec", "hclk_vcodec";
+		assigned-clocks = <&cru ACLK_VCODEC>;
+		assigned-clock-rates = <400000000>;
+		resets = <&cru SRST_H_VCODEC>, <&cru SRST_A_VCODEC>;
+		reset-names = "shared_video_h", "shared_video_a";
+		iommus = <&vpu_mmu>;
+		rockchip,srv = <&mpp_srv>;
+		rockchip,taskqueue-node = <0>;
+		rockchip,resetgroup-node = <0>;
+		power-domains = <&power RK3399_PD_VCODEC>;
+		status = "okay";
+	};
+};
+
+/* The mainline hantro encoder shares the VPU register range with the mpp vepu. */
+&vpu {
+	status = "disabled";
+};
+
+/* The mainline rkvdec (V4L2 stateless, ff660000, enabled in the board DTS)
+ * drives the browser decode. */
+&vdec {
+	status = "okay";
+};

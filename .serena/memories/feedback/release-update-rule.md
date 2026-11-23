@@ -2,6 +2,8 @@ When a release is made, the first thing to do is run `scripts/check-updates.sh -
 
 **LiteRT (user rule 2026-11-05): at EVERY release — including patch releases — also update LiteRT to the latest release (tag).** Latest tag checked via the GitHub API (see `mem:project/05-litert-migration-state`). At 0.5 the latest was v2.3.2; re-check for each release.
 
+**Chromium (user rule 2026-11-05): Chromium is in the image from release 0.6 and must be the newest from the Debian archive at every build and every release.** It is installed by `scripts/build-rootfs.sh`, so a rootfs rebuild picks it up automatically; `scripts/check-updates.sh` reports a stale Chromium when `out/rootfs.tar` differs from the trixie archive.
+
 **Why:** the user's standing rule (2026-10-27): "делаем релиз - ты сразу проверяешь debian и linux kernel и автоматически обновляешь их до последней версии". It came with the note that 0.5 must carry 6.18.59 (0.1-0.4 shipped 6.18.56).
 
 **Not for patch releases:** a patch release (x.y.z with z > 0, e.g. 0.4.1) keeps the kernel and Debian of its base release; the user said so for 0.4.1 (2026-10-27: "тут не надо обновлять, обновим в 0.5", "только при мажорном и минорном обновлении, не при патче"). LiteRT is the exception: it is updated at every release, including patches.

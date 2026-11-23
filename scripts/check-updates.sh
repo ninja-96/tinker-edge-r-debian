@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# The first step of every release: are the Linux kernel and Debian up to date?
+# The first step of every release: are the Linux kernel, LiteRT (sources.lock) and
+# Debian/Chromium up to date?
 #   scripts/check-updates.sh            report only
 #   scripts/check-updates.sh --apply    write the newest kernel of the same long-term series into sources.lock (version and sha256)
 # Kernel: the newest release of the series in sources.lock (6.18.x) on kernel.org, taken from releases.json; the sha256 comes from kernel.org's sha256sums.asc.
 # Debian: the point release of trixie in the archive (dists/trixie/Release) against the one in out/rootfs.tar. The root file system is built from the live
-# archive (mmdebstrap), so "updating Debian" means rebuilding it: ./run.sh scripts/build-rootfs.sh (see docs/RELEASING.md). Exit status 1 = something is out of date.
+# archive (mmdebstrap), so "updating Debian" means rebuilding it: ./run.sh scripts/build-rootfs.sh (see docs/RELEASING.md).
+# Chromium: installed from the live Debian archive into the root file system; "up to date" = the newest chromium of the archive is already in out/rootfs.tar
+# (rebuilt together with Debian). Exit status 1 = something is out of date.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 LOCK=${SOURCES_LOCK:-sources.lock}
@@ -47,5 +50,20 @@ if [ "$have" != "$arch_ver" ] || [ -z "${built:-}" ] || [ "$(date -d "$built" +%
     stale=1
 else
     echo "debian: out/rootfs.tar is current"
+fi
+
+if [ -f out/rootfs.tar ]; then
+    # no early exit in the awk: it would SIGPIPE curl/tar and pipefail would kill the script
+    arch_chromium=$(curl -fsS -m 90 https://deb.debian.org/debian/dists/trixie/main/binary-arm64/Packages.xz \
+        | xz -dc | awk '/^Package: /{f = ($0 == "Package: chromium")} f && /^Version:/{print $2}')
+    have_chromium=$(tar -xOf out/rootfs.tar ./var/lib/dpkg/status 2>/dev/null \
+        | awk '/^Package: /{f = ($0 == "Package: chromium")} f && /^Version:/{print $2}')
+    echo "chromium: $arch_chromium in the archive; out/rootfs.tar has ${have_chromium:-none} (installed from the archive at the root file system build)"
+    if [ -n "$arch_chromium" ] && [ "$arch_chromium" != "$have_chromium" ]; then
+        echo "chromium: rebuild the root file system (./run.sh scripts/build-rootfs.sh) so that the image has the newest chromium"
+        stale=1
+    else
+        echo "chromium: out/rootfs.tar is current"
+    fi
 fi
 exit $stale

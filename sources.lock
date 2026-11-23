@@ -2,9 +2,9 @@
 # Downloaded by the build: Linux, U-Boot, Rockchip mpp (source, Apache-2.0) and TF-A on demand. Entries marked
 # 'provenance' are NOT downloaded: the files are in the repository, these record
 # where they came from.
-LINUX_VERSION=6.18.60
+LINUX_VERSION=6.18.65
 KERNEL_LOCALVERSION=-tinker-edge-r   # kernel release becomes <LINUX_VERSION><this>
-LINUX_SHA256=3c2f44ef6acc021a7ad444d9a2e6ec1ef488ff09368793d0004a6080f69d621e
+LINUX_SHA256=c92606f956f09dc50b5a0e2af9e86763fce27ada1647de97f8d1ac8cfc95801d
 
 UBOOT_REPO=https://github.com/u-boot/u-boot.git
 UBOOT_TAG=v2026.10
@@ -38,6 +38,13 @@ RKDEVELOPTOOL_REV=304f073752fd25c854e1bcf05d8e7f925b1f4e14
 GST_ROCKCHIP_REPO=https://github.com/JeffyCN/mirrors.git
 GST_ROCKCHIP_BRANCH=gstreamer-rockchip
 GST_ROCKCHIP_REV=ebc758a13d425d34858a98dbcdb4a4bd702daa0f
+
+# The v4l2_request VA-API driver for the mainline rkvdec (scripts/build-v4l2-request.sh):
+# serves Chromium's hardware video decode (release 0.6). The dongioia fork of the
+# Bootlin backend adds H.265/VP9 on the mainline stateless request API.
+V4L2_REQUEST_REPO=https://github.com/dongioia/libva-v4l2-request.git
+V4L2_REQUEST_BRANCH=rk3588-vp9
+V4L2_REQUEST_REV=ed4bc90a8c979c83790013297850960c73a3d2f1
 
 # The open NPU stack (release 0.4.1): built by scripts/build-npu-open.sh for the NPU die. TIM-VX and the TFLite VX delegate are taken from their
 # main branches; TIM-VX is built with the SDK headers of v1.1.32 (Vivante 6.4.6 = the driver in Rockchip's firmware): the headers of newer

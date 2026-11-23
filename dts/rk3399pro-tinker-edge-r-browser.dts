@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * ASUS Tinker Edge R: hybrid video codecs (mainline rkvdec for the browser +
+ * mpp encoder for GStreamer) + NPU. The default image variant (release 0.6).
+ */
+#include "rk3399pro-tinker-edge-r.dts"
+#include "rk3399pro-tinker-edge-r-browser.dtsi"
+#include "rk3399pro-tinker-edge-r-npu.dtsi"
+
+/ {
+	model = "ASUS Tinker Edge R (Browser)";
+};

@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 ./run.sh scripts/build-kernel.sh                  # Linux 6.18  -> out/Image, out/*.dtb, out/modules
 ./run.sh scripts/build-mpp.sh                      # Rockchip mpp -> out/mpp
 ./run.sh scripts/build-gst-rockchip.sh             # GStreamer plugins -> out/gst-rockchip
+./run.sh scripts/build-v4l2-request.sh             # v4l2_request VA-API driver (browser decode) -> out/v4l2-request
 ./run.sh scripts/build-uboot.sh                   # U-Boot      -> out/u-boot-rockchip-ddrblob.bin
 ./scripts/fetch-npu.sh                              # firmware of the NPU die (Rockchip, pinned, sha256 checked)
 ./scripts/build-npu-open.sh                        # TIM-VX, TFLite VX delegate, LiteRT 2.3.2, npu_server for the NPU die -> out/npu-open (Docker)

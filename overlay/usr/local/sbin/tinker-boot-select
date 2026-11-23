@@ -1,10 +1,11 @@
 #!/bin/bash
 # Choose the device tree variant used at the next boot.
-#   tinker-boot-select [base|mpp|npu|full]      (no argument: show variants and the current one)
-#   base  mainline V4L2 video drivers, no NPU      (safe default)
-#   mpp   Rockchip mpp_service video codec service
-#   npu   NPU power sequencing driver
-#   full  mpp + npu
+#   tinker-boot-select [base|mpp|npu|full|browser] (no argument: show variants and the current one)
+#   base    mainline V4L2 video drivers, no NPU
+#   mpp     Rockchip mpp_service video codec service
+#   npu     NPU power sequencing driver
+#   full    mpp + npu
+#   browser mpp encoder/VPU decoder + the mainline rkvdec for the browser + NPU (default since release 0.6)
 # Works with the extlinux boot (/boot/extlinux/extlinux.conf); the previous file is
 # kept as extlinux.conf.prev. For the legacy Android boot.img layout it repacks the
 # "boot" partition instead.

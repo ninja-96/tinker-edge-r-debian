@@ -42,6 +42,12 @@ if [ -d "$O/gst-rockchip/usr" ]; then
     cp -a --no-preserve=ownership "$O/gst-rockchip/usr/." "$W/usr/"
 fi
 
+# v4l2_request VA-API driver (built by build-v4l2-request.sh): hardware video decode
+# of the browser through the mainline rkvdec (the -browser device tree variant)
+if [ -d "$O/v4l2-request/usr" ]; then
+    cp -a --no-preserve=ownership "$O/v4l2-request/usr/." "$W/usr/"
+fi
+
 # Comfortable Tab completion in the shell: bash-completion (installed in the rootfs) covers
 # commands such as apt, systemctl, ssh, git; here the readline switches that Debian ships
 # commented out in /etc/inputrc are turned on: show all matches at once on the first Tab,
@@ -72,6 +78,9 @@ cp blobs/rockchip/LICENSE "$DOC/licenses/Rockchip-rkbin-LICENSE"
 cp blobs/README.md "$DOC/blobs-README.md"
 [ -d downloads/mpp/LICENSES ] && cp -a --no-preserve=ownership downloads/mpp/LICENSES "$DOC/licenses/mpp"
 [ -f downloads/gst-rockchip/COPYING ] && cp downloads/gst-rockchip/COPYING "$DOC/licenses/gst-rockchip-COPYING"
+for f in COPYING COPYING.MIT COPYING.LGPL; do
+    [ -f "downloads/libva-v4l2-request/$f" ] && cp "downloads/libva-v4l2-request/$f" "$DOC/licenses/v4l2-request-$f"
+done
 dpkg-query --admindir="$W/var/lib/dpkg" -W -f='${Package}\t${Version}\t${Architecture}\t${Source}\n' | sort > "$DOC/packages.txt"
 cp "$DOC/packages.txt" "$O/packages.txt"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"

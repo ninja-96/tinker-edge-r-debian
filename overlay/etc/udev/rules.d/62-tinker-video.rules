@@ -1,0 +1,6 @@
+# V4L2/Media devices of the mainline video codecs (rkvdec, hantro) and the mpp
+# service: the browser decodes through the v4l2_request VA-API driver on the
+# mainline rkvdec (device tree variant -browser), GStreamer through mpp_service.
+# The regular user (in the video group) runs both without root.
+KERNEL=="video[0-9]*", MODE="0660", GROUP="video"
+KERNEL=="media[0-9]*", MODE="0660", GROUP="video"

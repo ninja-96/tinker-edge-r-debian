@@ -860,6 +860,20 @@
 };
 
 /*
+ * The mainline rkvdec (V4L2 stateless decoder, ff660000): the browser decodes
+ * through it with the v4l2_request VA-API driver. The -mpp/-full variants turn
+ * it off again (mpp_service owns the hardware); the -browser variant keeps it
+ * and adds the mpp encoder. The assigned clocks raise the VDU clocks to the
+ * rate the BSP driver set in C.
+ */
+&vdec {
+	assigned-clocks = <&cru ACLK_VDU>, <&cru SCLK_VDU_CA>,
+			  <&cru SCLK_VDU_CORE>;
+	assigned-clock-rates = <400000000>, <400000000>, <400000000>;
+	status = "okay";
+};
+
+/*
  * 40-pin header (3.3 V). Functions as in the ASUS pin table (docs/GPIO.md):
  *   pins 3, 5     I2C6  (/dev/i2c-6)       pins 27, 28   I2C7 (/dev/i2c-7)
  *   pins 13-18    SPI5  (/dev/spidev5.0)   pins 19-24    SPI1 (/dev/spidev1.0)

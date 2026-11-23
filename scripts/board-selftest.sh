@@ -150,6 +150,49 @@ else
     res "H.264 encode (mpp)" SKIP "needs the -mpp device tree: sudo tinker-boot-select mpp, reboot"
 fi
 
+# Browser hardware decode: the mainline rkvdec (V4L2 stateless) through the
+# v4l2_request VA-API driver, as the browser (-browser device tree variant) uses it.
+need v4l2-ctl v4l-utils
+if v4l2-ctl --list-devices 2>/dev/null | grep -qi 'rkvdec'; then
+    need vainfo libva-utils
+    vi=$(LIBVA_DRIVER_NAME=v4l2_request vainfo 2>&1)
+    if echo "$vi" | grep -q 'v4l2_request' && echo "$vi" | grep -qi 'H264'; then
+        res "VA-API driver (v4l2_request)" PASS "driver up, H.264 in the profile list: $(echo "$vi" | grep -c 'Profile') profile(s)"
+    else
+        res "VA-API driver (v4l2_request)" FAIL "$(echo "$vi" | tail -2 | tr '\n' ' ')"
+    fi
+    need ffmpeg ffmpeg
+    if command -v chromium >/dev/null && command -v ffmpeg >/dev/null; then
+        clip=$W/clip.mp4
+        ffmpeg -v error -y -f lavfi -i testsrc2=size=1280x720:rate=30 -frames:v 90 -c:v libx264 -pix_fmt yuv420p "$clip"
+        printf '<video src="file://%s" loop autoplay muted></video>\n' "$clip" > "$W/clip.html"
+        timeout 45 chromium --headless --no-sandbox --disable-gpu-sandbox \
+            --autoplay-policy=no-user-gesture-required "file://$W/clip.html" > "$W/chromium.log" 2>&1 &
+        crpid=$!
+        sleep 10
+        hit=""
+        for i in $(seq 1 25); do
+            for p in $(pgrep -f 'chromium' 2>/dev/null); do
+                f=$(ls -l /proc/$p/task/*/fd 2>/dev/null | grep -o '/dev/\(video\|dma_heap\)[0-9]*' | sort -u | tr '\n' ' ')
+                [ -n "$f" ] && hit="pid $p: $f"
+            done
+            [ -n "$hit" ] && break
+            sleep 1
+        done
+        kill "$crpid" 2>/dev/null; wait "$crpid" 2>/dev/null
+        if [ -n "$hit" ]; then
+            res "Chromium hardware decode" PASS "playing 720p H.264, the codec device was opened: $hit"
+        else
+            res "Chromium hardware decode" FAIL "no /dev/video* or /dev/dma_heap* fd in any chromium process (software decode?): $(tail -3 "$W/chromium.log" | tr '\n' ' ')"
+        fi
+        rm -f "$clip"
+    else
+        res "Chromium hardware decode" SKIP "chromium or ffmpeg missing"
+    fi
+else
+    res "Browser hardware decode" SKIP "no mainline rkvdec device (boot the -browser variant: sudo tinker-boot-select browser, reboot)"
+fi
+
 hdr "40-pin header"
 # pin:gpiochip:line:name  (plain GPIO pins; docs/GPIO.md)
 for e in 7:2:25:GPIO2_D1 11:2:19:GPIO2_C3 12:3:24:GPIO3_D0 22:3:28:GPIO3_D4 29:3:30:GPIO3_D6 31:3:29:GPIO3_D5 \

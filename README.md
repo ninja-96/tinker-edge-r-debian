@@ -28,13 +28,14 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 
 | Area | Works | Tested on a board | Details |
 |---|---|---|---|
-| Boot: DRAM init, U-Boot, extlinux, Linux 6.18.60 from the eMMC | ✅ yes | ✅ yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
+| Boot: DRAM init, U-Boot, extlinux, Linux 6.18.65 from the eMMC | ✅ yes | ✅ yes | many reboots; DRAM at 933 MHz ([fallback to 800](docs/BOOT.md)) |
 | Flashing over USB, backup, restore, kernel update | ✅ yes | ✅ yes | read-back verification |
 | Ethernet, SSH, mDNS name, NTP | ✅ yes | ✅ yes | gigabit link; 500 Mbit/s measured, the limit of the internet line it was measured on |
 | CPU (6 cores, cpufreq), RAM 4 GB | ✅ yes | ✅ yes | `stress-ng` 8 + 10 min, `memtester` full pass, 47 C at full load; 933 MHz not benchmarked against 800 |
 | eMMC (HS200) | ✅ yes | ✅ yes | read 164 MB/s, write 26-52 MB/s; root grows to the whole eMMC on the first boot |
 | GPU: OpenGL ES 3.1, OpenGL 3.1 (Panfrost), OpenCL 3.0 (Rusticl) | ✅ yes | ✅ yes | OpenCL kernels give correct results |
 | Hardware video: H.264 / VP8 / JPEG encode, H.264 decode (`mpp`), GStreamer plugins | ✅ yes | ✅ yes | 720p H.264 encode 54 fps, decode 116 fps |
+| Browser (Chromium) with hardware video decoding | ✅ built | 🟡 to be checked on the board | the mainline `rkvdec` (V4L2 stateless) through the `v4l2_request` VA-API driver, the `-browser` device tree (release 0.6, [ROADMAP.md](docs/ROADMAP.md)) |
 | HDMI picture | ✅ yes | ✅ yes | KDE Plasma on Wayland works; on X11 the frame rate drops from 60 to 30 while windows move |
 | HDMI audio | ✅ yes | 🟡 partly | the stream runs; not heard yet (a monitor without speakers) |
 | Wi-Fi (RTL8822CE) | ✅ yes | 🟡 partly | driver, firmware, the scan sees 2.4 and 5 GHz networks; **connect the two antennas** (U.FL on the module); connection and throughput with antennas not measured yet |
@@ -45,7 +46,7 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 | USB-A ports | ✅ yes | ✅ yes | all three ports at 5 Gbit/s (USB 3), a flash drive reads 94-96 MB/s in each; a keyboard and a mouse |
 | USB-C port (devices plugged in: flash drive, hub) | ✅ yes, USB 2.0 | ✅ yes | flash drives and disks work at USB 2.0 speed (480 Mbit/s, 29-35 MB/s), in both plug orientations; the port gives 5 V to devices (FUSB302, TPS2553 switch, about 1.5 A); USB 3 over USB-C does not come up (to be looked at); board revision 1.02 ([HARDWARE.md](docs/HARDWARE.md#board-revision)) |
 | Boot from an SD card, swap file | ❔ not known | 🙋 needs you | `scripts/flash-sd.sh` |
-| NPU: LiteRT / TensorFlow Lite models (`.tflite`) from Python 3.13 and C++ (open stack: LiteRT 2.3.2 + TIM-VX + TFLite VX delegate on the NPU die, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU, int8 ResNet18 19 ms (27 times its CPU time), ResNet50 70 ms; several models at once, shared by several programs (`npu-daemon`), float models on the CPU of the NPU die by default, `autotune()` picks NPU / CPU / mixed per model; built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`full` device tree) |
+| NPU: LiteRT / TensorFlow Lite models (`.tflite`) from Python 3.13 and C++ (open stack: LiteRT 2.3.2 + TIM-VX + TFLite VX delegate on the NPU die, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU, int8 ResNet18 19 ms (27 times its CPU time), ResNet50 70 ms; several models at once, shared by several programs (`npu-daemon`), float models on the CPU of the NPU die by default, `autotune()` picks NPU / CPU / mixed per model; built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`browser` device tree) |
 | Power profiles `tinker-power` (powersave / normal / performance) | ✅ yes | ✅ yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
 | Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
 | Python for the header: libgpiod, smbus2, spidev | ✅ yes | 🟡 partly | import and a pin read tested; run with `sudo`; examples in [GPIO.md](docs/GPIO.md) |
@@ -76,12 +77,13 @@ cd tinker-edge-r-debian
 scripts/make-image.sh
 ```
 
-Result: `out/tinker-edge-r-debian13.img` (about 1.9 GB) and the flashing tools in `out/tools/`.
+Result: `out/tinker-edge-r-debian13.img` (about 2.6 GB) and the flashing tools in `out/tools/`.
 The script downloads the Linux and U-Boot sources and Debian packages, and builds
 everything inside a Docker container. Nothing from ASUS is downloaded and no Rockchip
 binary is downloaded: the few Rockchip binaries needed are in [`blobs/`](blobs/README.md).
 The Rockchip downloads are open-source code only: the `mpp` video library (Apache-2.0) and
-the GStreamer plugin (LGPL-2.1), pinned in `sources.lock`.
+the GStreamer plugin (LGPL-2.1); the browser's video decode uses the open
+`libva-v4l2-request` VA-API driver (MIT/LGPL-2.1), all pinned in `sources.lock`.
 
 A prebuilt image is attached to the [release](https://github.com/ninja-96/tinker-edge-r-debian/releases)
 as `tinker-edge-r-debian13.img.xz` with a `sha256` file. To use it instead of building:
@@ -146,7 +148,7 @@ a 2 GiB swap file.
 ## 🔌 Using the hardware
 
 ```sh
-# H.264 hardware encoding and decoding with GStreamer (the image boots the "full" device tree: mpp video and the NPU)
+# H.264 hardware encoding and decoding with GStreamer (the image boots the "browser" device tree: the mpp encoder/VPU decoder and the mainline rkvdec for the browser, plus the NPU)
 gst-launch-1.0 videotestsrc num-buffers=300 ! video/x-raw,format=NV12,width=1280,height=720,framerate=30/1 \
   ! mpph264enc ! h264parse ! filesink location=test.h264
 gst-launch-1.0 filesrc location=test.h264 ! h264parse ! mppvideodec ! fpsdisplaysink video-sink=fakesink sync=false
@@ -170,8 +172,11 @@ net.autotune()                                     # once: the fastest plan with
 net.close()                                        # the model stays loaded for other programs; net.stop() unloads it
 ```
 
-The default (`full`) and the `mpp` device trees turn off the mainline V4L2 decoders (`hantro`, `rkvdec`) because
-`mpp_service` owns the same hardware; `sudo tinker-boot-select base` switches back
+The video hardware is split by the device tree: the default (`-browser`) gives the VDU
+decoder (mainline `rkvdec`) to the browser (the `v4l2_request` VA-API driver) and keeps the
+VPU encoder and the mpp VPU decoder in `mpp_service` for GStreamer; `-full` / `-mpp` give
+every codec to `mpp_service` (no browser hardware decode); `base` uses the mainline V4L2
+decoders only (no encoder). `sudo tinker-boot-select <variant>` switches the boot
 ([docs/VIDEO.md](docs/VIDEO.md)).
 
 ## 🖥️ Desktop (KDE Plasma)
@@ -226,7 +231,7 @@ The ASUS TinkerOS image and everything taken from it are never published.
 |---|---|
 | `scripts/` | build, flash and test scripts (`make-image.sh` is the entry point) |
 | `docker/` | build environments (Debian 13 builder with QEMU; Debian 11 cross toolchain for the NPU die) |
-| `dts/` | device trees: base, `-mpp`, `-npu`, `-full` (default) |
+| `dts/` | device trees: base, `-mpp`, `-npu`, `-full`, `-browser` (default) |
 | `patches/` | patches to Linux and TF-A |
 | `kernel-mods/`, `u-boot-mods/` | new kernel and U-Boot files (`mpp_service` port, NPU power driver, board defconfig) |
 | `config/` | kernel configuration fragment |
@@ -260,6 +265,7 @@ sources of what ends up in the images are in [NOTICE.md](NOTICE.md) and inside t
 | [ARM-software/arm-trusted-firmware](https://github.com/ARM-software/arm-trusted-firmware) | open BL31 (`USE_TFA=1`, not yet tested on the board) | BSD-3-Clause ([license.rst](https://github.com/ARM-software/arm-trusted-firmware/blob/HEAD/license.rst)) |
 | [rockchip-linux/mpp](https://github.com/rockchip-linux/mpp) | media library for the video codecs | Apache-2.0 OR MIT, one header GPL-2.0 ([LICENSES/](https://github.com/rockchip-linux/mpp/tree/HEAD/LICENSES)) |
 | [JeffyCN/mirrors, branch gstreamer-rockchip](https://github.com/JeffyCN/mirrors/tree/gstreamer-rockchip) | GStreamer plugins for mpp | LGPL-2.0+ in the file headers ([COPYING](https://github.com/JeffyCN/mirrors/blob/gstreamer-rockchip/COPYING), the LGPL-2.1 text) |
+| [dongioia/libva-v4l2-request, branch rk3588-vp9](https://github.com/dongioia/libva-v4l2-request/tree/rk3588-vp9) | the `v4l2_request` VA-API driver: the browser's hardware video decode on the mainline `rkvdec` (a fork of [bootlin/libva-v4l2-request](https://github.com/bootlin/libva-v4l2-request)) | MIT in the source files, dual MIT/LGPL-2.1 per [COPYING](https://github.com/dongioia/libva-v4l2-request/blob/rk3588-vp9/COPYING) |
 | [rockchip-linux/rkdeveloptool](https://github.com/rockchip-linux/rkdeveloptool) | USB flashing tool; `third_party/rkdeveloptool` is a byte-identical copy of commit `304f0737`, plus our `rs` patch | GPL-2.0+ ([license.txt](https://github.com/rockchip-linux/rkdeveloptool/blob/HEAD/license.txt)) |
 | [rockchip-linux/rkbin](https://github.com/rockchip-linux/rkbin) | DRAM initialisation blob and BL31, copied unmodified to `blobs/rockchip/` (commit `3e288fe8`) | Rockchip binary licence ([LICENSE](https://github.com/rockchip-linux/rkbin/blob/HEAD/LICENSE), also `blobs/rockchip/LICENSE`) |
 | [airockchip/RK3399Pro_npu](https://github.com/airockchip/RK3399Pro_npu) | firmware of the NPU die (Linux 4.4.185, the Vivante driver and libraries), binary only; we change its device tree and ramdisk | Apache-2.0 ([LICENSE](https://github.com/airockchip/RK3399Pro_npu/blob/8858114555f1700e41e185b14ec3d266342f8059/LICENSE)); inside: GPL software, Vivante's closed libraries |
