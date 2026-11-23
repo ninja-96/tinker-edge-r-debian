@@ -16,8 +16,8 @@ T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 for f in MiniLoaderAll.bin uboot.img trust.img boot.img; do [ -f "$SRC/$f" ] || { echo "$SRC/$f missing: run scripts/fetch-npu.sh" >&2; exit 1; }; done
 for f in npu_server libvx_delegate.so libtim-vx.so; do [ -f "$BIN/$f" ] || { echo "$BIN/$f missing: run scripts/build-npu-open.sh" >&2; exit 1; }; done
 
-# an ASUS image (NPU_FW_SRC) already has the right regulators: the script then refuses it and the image is used as it is
-python3 scripts/npu-fw-tinker.py "$SRC/boot.img" "$T/boot-dtb.img" || cp "$SRC/boot.img" "$T/boot-dtb.img"
+# an ASUS image (NPU_FW_SRC) already has the right regulators: the script passes it through unchanged
+python3 scripts/npu-fw-tinker.py "$SRC/boot.img" "$T/boot-dtb.img"
 R=npu-open/tools/npu_ramdisk.py
 python3 $R "$T/boot-dtb.img" --extract "/etc/init.d/S50usbdevice=$T/S50.orig" --extract "/etc/init.d/S60NPU_init=$T/S60.orig" >/dev/null
 python3 npu-open/ramdisk/modify_init.py S50usbdevice "$T/S50.orig" "$T/S50.new"

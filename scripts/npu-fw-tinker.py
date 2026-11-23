@@ -57,7 +57,7 @@ def drop_node(text, name):
 
 def patch_dts(text):
     if "vdd-npu {" in text:
-        raise SystemExit("already a Tinker Edge R image")
+        return text   # already a Tinker Edge R image (or an ASUS one): pass it through unchanged
     text, _ = drop_node(text, "tcs452x@1c")
     text, _ = drop_node(text, "syr837@40")
     at = text.index("\ti2c@ff500000 {\n")
