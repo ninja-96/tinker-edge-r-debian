@@ -23,6 +23,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <condition_variable>
 #include <cstddef>
 #include <deque>
@@ -59,7 +60,7 @@
 #endif
 
 static volatile const char *g_rstate = "start", *g_wstate = "start";
-static volatile unsigned long g_rx, g_tx;
+static std::atomic<unsigned long> g_rx{0}, g_tx{0};
 static FILE *g_log;   /* our own log: stderr belongs to the TFLite delegate, which prints on every run */
 static void logf_(const char *fmt, ...)
 {
@@ -679,8 +680,10 @@ static void handle(int in_fd, Msg &m)
 		auto e = engine_get(m.h.model);
 		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU (stopped by another program?)"); break; }
 		npu_hdr rh; std::string et; bool ok;
-		{ std::lock_guard<std::mutex> lk(e->mu);
-		  if (e->pid <= 0) { reply_err(in_fd, m.h, "the model was stopped"); break; }
+		{ std::unique_lock<std::mutex> lk(e->mu);
+		  if (e->pid <= 0) {
+		    lk.unlock(); engine_remove(m.h.model);   /* the dead engine was left in the list: take it out (engine_remove takes e->mu itself) */
+		    reply_err(in_fd, m.h, "the model was stopped"); break; }
 		  ok = engine_call(*e, m.h, m.payload.data(), m.payload.size(), RUN_TIMEOUT_S, rh, out, et); if (ok) e->runs++; }
 		if (!ok) { engine_remove(m.h.model); reply_err(in_fd, m.h, et + " (the model is unloaded)"); break; }
 		if (rh.flags & NPU_FLAG_ERROR) reply_err(in_fd, m.h, std::string((const char *)out.data(), out.size())); else reply(in_fd, m.h, false, out.data(), out.size());
@@ -689,7 +692,8 @@ static void handle(int in_fd, Msg &m)
 		auto e = engine_get(m.h.model);
 		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU"); break; }
 		npu_hdr rh; std::string et; bool ok;
-		{ std::lock_guard<std::mutex> lk(e->mu); if (e->pid <= 0) { reply_err(in_fd, m.h, "the model was stopped"); break; }
+		{ std::unique_lock<std::mutex> lk(e->mu);
+		  if (e->pid <= 0) { lk.unlock(); engine_remove(m.h.model); reply_err(in_fd, m.h, "the model was stopped"); break; }
 		  ok = engine_call(*e, m.h, nullptr, 0, 30, rh, out, et); }
 		if (!ok) { engine_remove(m.h.model); reply_err(in_fd, m.h, et); break; }
 		if (rh.flags & NPU_FLAG_ERROR) reply_err(in_fd, m.h, std::string((const char *)out.data(), out.size())); else reply(in_fd, m.h, false, out.data(), out.size());
@@ -734,6 +738,10 @@ static void worker(int in_fd)
 		g_wstate = "handling a request";
 		if (m.h.type == NPU_LOAD || m.h.type == NPU_LOAD_NBG) {   /* minutes for a big model: the loaded models keep running meanwhile */
 			std::thread([in_fd](Msg mm) { std::lock_guard<std::mutex> lk(g_load_mu); handle(in_fd, mm); g_tx++; }, std::move(m)).detach();
+			continue;
+		}
+		if (m.h.type == NPU_RUN || m.h.type == NPU_OPS || m.h.type == NPU_GRAPH) {   /* a run can take up to RUN_TIMEOUT_S: the other models and the cheap requests are not stuck behind it */
+			std::thread([in_fd](Msg mm) { handle(in_fd, mm); g_tx++; }, std::move(m)).detach();
 			continue;
 		}
 		handle(in_fd, m);
