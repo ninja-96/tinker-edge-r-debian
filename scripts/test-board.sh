@@ -19,7 +19,7 @@ PASS=${BOARD_PASS:-debian}
 mkdir -p out
 LOG=out/test-$(date +%Y%m%d-%H%M%S).log
 
-CTL=$(mktemp -u -t tinker-ssh.XXXXXX)
+CTL=$(mktemp -t tinker-ssh.XXXXXX)
 SSH=(ssh -o ControlPath="$CTL" -o StrictHostKeyChecking=accept-new "$U@$HOST")
 cleanup() {
     ssh -o ControlPath="$CTL" -O exit "$U@$HOST" >/dev/null 2>&1 || true
@@ -43,7 +43,7 @@ fi
 scp -q -o ControlPath="$CTL" scripts/board-selftest.sh "$U@$HOST:/tmp/board-selftest.sh"
 echo "Test running, log: $LOG"
 set +e
-"${SSH[@]}" "echo '$PASS' | sudo -S -p '' env DURATION=$D IPERF_SERVER=$SRV bash /tmp/board-selftest.sh" 2>&1 | tee "$LOG"
+printf '%s\n' "$PASS" | "${SSH[@]}" "sudo -S -p '' env DURATION=$D IPERF_SERVER=$SRV bash /tmp/board-selftest.sh" 2>&1 | tee "$LOG"
 rc=${PIPESTATUS[0]}
 echo
 if [ "$rc" = 0 ]; then echo "Board test: PASS ($LOG)"; else echo "Board test: FAIL, exit $rc ($LOG)"; fi

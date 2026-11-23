@@ -33,6 +33,13 @@ else
     PACKAGES+=(firmware-realtek firmware-brcm80211 firmware-linux-free)
 fi
 
+# Skip the (slow, network) build when nothing it depends on changed. FORCE=1 rebuilds.
+STAMP="rootfs $(sha256sum scripts/build-rootfs.sh | cut -c1-16) FREE=$FREE"
+if [ "${FORCE:-0}" != 1 ] && [ -f "$OUTFILE" ] && [ -f "$OUTFILE.stamp" ] && [ "$(cat "$OUTFILE.stamp")" = "$STAMP" ]; then
+    echo "rootfs: up to date (FORCE=1 rebuilds)"
+    exit 0
+fi
+
 mmdebstrap --arch=arm64 --variant=minbase \
     --components="$COMPONENTS" \
     --include="$(IFS=,; echo "${PACKAGES[*]}")" \
@@ -57,5 +64,6 @@ mmdebstrap --arch=arm64 --variant=minbase \
         rm -rf "$1/var/lib/apt/lists/"*' \
     trixie "$OUTFILE" https://deb.debian.org/debian
 
-chown "${HOST_UID:-0}:${HOST_GID:-0}" "$OUTFILE"
+echo "$STAMP" > "$OUTFILE.stamp"
+chown "${HOST_UID:-0}:${HOST_GID:-0}" "$OUTFILE" "$OUTFILE.stamp"
 ls -lh "$OUTFILE"

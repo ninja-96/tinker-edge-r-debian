@@ -17,5 +17,8 @@ echo "${LINUX_SHA256}  $D/$tarball" | sha256sum -c -
 # U-Boot (tag)
 if [ ! -d "$D/u-boot/.git" ]; then
     git clone --depth 1 --branch "$UBOOT_TAG" "$UBOOT_REPO" "$D/u-boot"
+elif [ "$(git -C "$D/u-boot" rev-parse "refs/tags/$UBOOT_TAG^{commit}" 2>/dev/null || true)" != "$(git -C "$D/u-boot" rev-parse HEAD)" ]; then
+    git -C "$D/u-boot" fetch -q --depth 1 origin "$UBOOT_TAG"
+    git -C "$D/u-boot" checkout -q --force FETCH_HEAD
 fi
 echo "u-boot @ $(git -C "$D/u-boot" describe --tags)"

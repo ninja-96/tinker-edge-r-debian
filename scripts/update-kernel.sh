@@ -17,7 +17,7 @@ ls out/rk3399pro-tinker-edge-r*.dtb >/dev/null 2>&1 || die "no out/*.dtb"
 [ "$(ls out/modules/lib/modules | wc -l)" = 1 ] || die "expected exactly one release in out/modules/lib/modules"
 REL=$(ls out/modules/lib/modules)
 
-RS=; CTL=$(mktemp -u -t tinker-ssh.XXXXXX)
+RS=; CTL=$(mktemp -t tinker-ssh.XXXXXX)
 trap 'ssh -o ControlPath="$CTL" -O exit "$U@$HOST" >/dev/null 2>&1 || true; [ -z "$RS" ] || rm -f "$RS"' EXIT
 echo "Connecting to $U@$HOST (enter the SSH password once)..."
 ssh -o ControlMaster=yes -o ControlPath="$CTL" -o ControlPersist=yes -o StrictHostKeyChecking=accept-new -fN "$U@$HOST"
@@ -57,5 +57,5 @@ echo "Uploading..."
 ( cd out && tar -cf - Image rk3399pro-tinker-edge-r*.dtb "modules/lib/modules/$REL" ) \
     | "${SSH[@]}" "rm -rf /tmp/kupd && mkdir -p /tmp/kupd && tar -xf - -C /tmp/kupd"
 scp -q -o ControlPath="$CTL" "$RS" "$U@$HOST:/tmp/kupd/install.sh"
-"${SSH[@]}" "echo '$PASS' | sudo -S -p '' env REL=$REL sh /tmp/kupd/install.sh && rm -rf /tmp/kupd"
+printf '%s\n' "$PASS" | "${SSH[@]}" "sudo -S -p '' env REL=$REL sh /tmp/kupd/install.sh && rm -rf /tmp/kupd"
 echo "Done. Reboot the board:  ssh $U@$HOST sudo reboot"

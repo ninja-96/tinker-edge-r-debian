@@ -7,10 +7,13 @@
 # Run inside the builder container:  ./run.sh scripts/build-tfa.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
+. ./sources.lock
 T=downloads/tf-a
 if [ ! -d "$T/.git" ]; then
-    . ./sources.lock
     git clone --depth 1 --branch "$TFA_TAG" "$TFA_REPO" "$T"
+elif [ "$(git -C "$T" rev-parse "refs/tags/$TFA_TAG^{commit}" 2>/dev/null || true)" != "$(git -C "$T" rev-parse HEAD)" ]; then
+    git -C "$T" fetch -q --depth 1 origin "$TFA_TAG"
+    git -C "$T" checkout -q --force FETCH_HEAD
 fi
 for pt in "$PWD"/patches/tf-a/*.patch; do
     [ -e "$pt" ] || continue
