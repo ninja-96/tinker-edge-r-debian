@@ -186,7 +186,7 @@ static void usb_loop()
 			size_t off = 0;
 			while (rx.size() - off >= sizeof(npu_hdr)) {
 				npu_hdr h; memcpy(&h, rx.data() + off, sizeof h);
-				if (h.magic != NPU_MAGIC) { off++; continue; }   /* stray bytes of an earlier connection: look for the next header */
+				if (h.magic != NPU_MAGIC || h.len > MAX_MSG) { off++; continue; }   /* stray bytes or a corrupt header: look for the next one */
 				size_t total = sizeof h + h.len + ((h.flags & NPU_FLAG_PAD) ? 1 : 0);
 				if (rx.size() - off < total) break;
 				g_last_reply_us = now_us();
@@ -213,7 +213,12 @@ static void forward(const std::shared_ptr<Client> &cl, const npu_hdr &h, const s
 		if (!g_cv.wait_for(lk, std::chrono::seconds(10), [] { return g_usb_fd >= 0; })) {
 			lk.unlock(); cl->error(h.type, h.tag, "the NPU is not on the USB bus (is its firmware loaded? systemctl status npu-firmware)"); return;
 		}
-		if (h.type == NPU_RUN) { g_cv.wait(lk, [] { return g_runs < MAX_RUNS_IN_FLIGHT || g_usb_fd < 0; }); g_runs++; }
+		if (h.type == NPU_RUN) {
+			if (!g_cv.wait_for(lk, std::chrono::seconds(10), [] { return g_runs < MAX_RUNS_IN_FLIGHT || g_usb_fd < 0; })) {
+				lk.unlock(); cl->error(h.type, h.tag, "the NPU is busy with a slow run; try again"); return;
+			}
+			g_runs++;
+		}
 		busy = !g_pending.empty();
 		do dtag = g_tag = (g_tag + 1) & 0x7fffffff; while (!dtag || g_pending.count(dtag));
 		g_pending[dtag] = Pending{ cl, h.tag, h.type };
