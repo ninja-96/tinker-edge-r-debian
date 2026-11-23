@@ -14,7 +14,7 @@ die() { echo "error: $*" >&2; exit 1; }
 . "$(dirname "$0")/rockchip-usb.sh"
 SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
 [ -f "$IMG" ] && [ -f "$BACKUP" ] || die "need $IMG and $BACKUP"
-lsusb -d 2207: >/dev/null 2>&1 || die "no Rockchip USB device"
+check_usb
 
 load_loader
 tmp=$(mktemp -p build inspect.XXXXXX.img)

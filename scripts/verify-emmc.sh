@@ -13,7 +13,7 @@ die() { echo "error: $*" >&2; exit 1; }
 
 [ -f "$IMG" ] || die "image not found: $IMG"
 [ -x "$RKDT" ] && [ -f "$LOADER" ] || die "tools missing: ./run.sh scripts/build-flash-tools.sh"
-lsusb -d 2207: >/dev/null 2>&1 || die "no Rockchip USB device: put the board into maskrom mode"
+check_usb
 SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
 
 load_loader

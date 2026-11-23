@@ -1,5 +1,11 @@
-# Shared helper for flash-emmc.sh / backup-emmc.sh (sourced, not executed).
+# Shared helper for flash-emmc.sh / backup-emmc.sh / flash-at.sh / the eMMC check scripts (sourced, not executed).
 # Expects: RKDT, LOADER, SUDO, die().
+
+# Check that a Rockchip device is on the USB bus (and lsusb is installed).
+check_usb() {
+    command -v lsusb >/dev/null || die "lsusb (usbutils) is missing on this machine: install it"
+    lsusb -d 2207: >/dev/null 2>&1 || die "no Rockchip USB device (VID 2207) on the bus: put the board into maskrom mode (see docs/FLASHING.md)"
+}
 #
 # `rkdeveloptool ld` keeps printing "Maskrom" even while the downloaded loader
 # is running, and a second `db` into a running loader hangs. So the loader state

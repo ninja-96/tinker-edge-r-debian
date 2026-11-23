@@ -61,7 +61,7 @@ echo "Plan   : load loader -> write in ${CHUNK_MB} MiB pieces from MiB $START_MB
 if [ "$DRY" = 1 ]; then echo "(dry run: nothing executed)"; exit 0; fi
 
 if command -v lsusb >/dev/null && ! lsusb -d 2207: >/dev/null 2>&1; then
-    die "no Rockchip USB device (VID 2207) on the bus: put the board into maskrom mode and connect the USB-C data port (see docs/RECOVERY.md)"
+    die "no Rockchip USB device (VID 2207) on the bus: put the board into maskrom mode and connect the USB-C data port (see docs/FLASHING.md)"
 fi
 echo "Devices:"
 if ! devs=$($SUDO "$RKDT" ld 2>&1); then
@@ -69,7 +69,7 @@ if ! devs=$($SUDO "$RKDT" ld 2>&1); then
     die "rkdeveloptool failed (permissions? install out/tools/99-rk-rockusb.rules or run with sudo)"
 fi
 echo "$devs"
-echo "$devs" | grep -qi "DevNo=" || die "rkdeveloptool sees no device in maskrom/loader mode (see docs/RECOVERY.md)"
+echo "$devs" | grep -qi "DevNo=" || die "rkdeveloptool sees no device in maskrom/loader mode (see docs/FLASHING.md)"
 [ "$(echo "$devs" | grep -ci "DevNo=")" = 1 ] || die "more than one Rockchip device: unplug the others"
 
 if [ "$YES" != 1 ]; then

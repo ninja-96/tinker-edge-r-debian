@@ -3,7 +3,7 @@
 # (optionally) reset the board. For quick iterations on the loader or boot image.
 #   scripts/flash-at.sh <LBA> <file> [--no-reset]
 # e.g. U-Boot with the DDR blob:   scripts/flash-at.sh 64 out/u-boot-rockchip-ddrblob.bin
-# Board in maskrom or loader mode (see docs/RECOVERY.md).
+# Board in maskrom or loader mode (see docs/FLASHING.md).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 LBA=${1:?usage: $0 <LBA> <file> [--no-reset]}
@@ -16,10 +16,12 @@ die() { echo "error: $*" >&2; exit 1; }
 
 [ -f "$FILE" ] || die "$FILE not found"
 [ -x "$RKDT" ] && [ -f "$LOADER" ] || die "tools missing: ./run.sh scripts/build-flash-tools.sh"
-lsusb -d 2207:  >/dev/null 2>&1 || die "no Rockchip USB device: put the board into maskrom mode"
+check_usb
 SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
 size=$(stat -c %s "$FILE"); sectors=$(( (size + 511) / 512 ))
 echo "$FILE ($(numfmt --to=iec "$size"), $sectors sectors) -> LBA $LBA"
+read -r -p "Type the LBA ($LBA) to continue: " ans
+[ "$ans" = "$LBA" ] || die "aborted: $FILE was not written"
 
 load_loader
 piece=$(mktemp -t flashpiece.XXXXXX); back=$(mktemp -t flashback.XXXXXX)
