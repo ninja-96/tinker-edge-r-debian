@@ -12,6 +12,7 @@ R="$IMG?offset=$((ROOT_START * 512))"
 fail=0
 ok()  { echo "  ok   $*"; }
 bad() { echo "  FAIL $*"; fail=1; }
+command -v debugfs >/dev/null || { echo "debugfs (e2fsprogs) is missing: the rootfs checks would pass silently, install it and re-run" >&2; exit 2; }
 dbg() { debugfs -R "$1" "$R" 2>/dev/null; }
 
 echo "== bootloader"

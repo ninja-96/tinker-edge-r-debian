@@ -4,6 +4,9 @@
 # Needs Docker and the kernel already built (./run.sh scripts/build-kernel.sh).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# the open boot chain: open TF-A as BL31 and the open U-Boot (not the DDR-blob variant)
+export USE_TFA=1
+export UBOOT_BIN="$PWD/out/u-boot-rockchip.bin"
 ./scripts/fetch-sources.sh
 ./scripts/setup-binfmt.sh
 ./run.sh scripts/build-tfa.sh

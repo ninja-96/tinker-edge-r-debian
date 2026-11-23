@@ -33,6 +33,7 @@ TARFILE=$O/rootfs.tar; [ "$FREE" = 1 ] && TARFILE=$O/rootfs-free.tar
 # hangs on this board), else the all-open one.
 UBOOT_BIN=${UBOOT_BIN:-$O/u-boot-rockchip-ddrblob.bin}
 [ -f "$UBOOT_BIN" ] || UBOOT_BIN=$O/u-boot-rockchip.bin
+[ "$FREE" = 1 ] && [[ "$UBOOT_BIN" == *ddrblob* ]] && { echo "the free image must use the open U-Boot: set UBOOT_BIN=$O/u-boot-rockchip.bin" >&2; exit 1; }
 for f in "$UBOOT_BIN" $O/Image $O/$DTB "$TARFILE"; do
     [ -f "$f" ] || { echo "missing: $f" >&2; exit 1; }
 done
