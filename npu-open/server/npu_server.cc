@@ -784,7 +784,7 @@ int main(int argc, char **argv)
 		unsigned long lrx = 0, ltx = 0; int quiet = 0;
 		for (;;) {
 			sleep(1);
-			if (g_rx == lrx && g_tx == ltx) { if (++quiet == 3 || (quiet > 3 && quiet % 10 == 0)) logf_("quiet for %d s: rx %lu tx %lu, reader: %s, worker: %s", quiet, g_rx, g_tx, g_rstate, g_wstate); }
+			if (g_rx == lrx && g_tx == ltx) { if (++quiet == 3 || (quiet > 3 && quiet % 10 == 0)) logf_("quiet for %d s: rx %lu tx %lu, reader: %s, worker: %s", quiet, g_rx.load(), g_tx.load(), g_rstate, g_wstate); }
 			else { quiet = 0; lrx = g_rx; ltx = g_tx; }
 		}
 	}).detach();
