@@ -44,5 +44,56 @@ def convert(name, io_type, per_channel):
 
 qi, oi = convert("net_int8", tf.int8, True)
 qu, ou = convert("net_uint8", tf.uint8, False)
-np.savez("/w/expected.npz", in_int8=qi, out_int8=oi, in_uint8=qu, out_uint8=ou)
+
+# rewrite_ops.h: one small model per op the VX delegate rewrites before the graph is built (SLICE,
+# TILE, CEIL, COS, ROUND, comparisons, SELECT). Quantised where the converter allows it, float32
+# otherwise (the rewrite is dtype-independent). PRELU, LOG_SOFTMAX, CAST and the remaining
+# comparisons are not built here: they have no clean Keras spelling.
+def build_rewrite(fn):
+    inp = tf.keras.Input((8, 8), batch_size=1)
+    return tf.keras.Model(inp, fn(inp))
+
+REWRITE = [
+    ("slice",   lambda x: tf.slice(x, [0, 1, 1], [1, 6, 6])),
+    ("tile",    lambda x: tf.tile(x, [1, 2, 2])),
+    ("ceil",    lambda x: tf.math.ceil(x)),
+    ("cos",     lambda x: tf.math.cos(x)),
+    ("round",   lambda x: tf.math.round(x)),
+    ("greater", lambda x: tf.cast(tf.math.greater(x, 0.5), tf.float32)),
+    ("select",  lambda x: tf.where(tf.math.greater(x, 0.5), x, tf.zeros_like(x))),
+]
+XS = rng.uniform(0, 1, (8, 8)).astype(np.float32)
+def reps():
+    for _ in range(8):
+        yield [XS]
+
+def convert_rewrite(name, m):
+    try:
+        c = tf.lite.TFLiteConverter.from_keras_model(m)
+        c.optimizations = [tf.lite.Optimize.DEFAULT]; c.representative_dataset = reps
+        c.target_spec.supported_ops = [tf.lite.OpsSet.TFLITE_BUILTINS_INT8]
+        c.inference_input_type = tf.int8; c.inference_output_type = tf.int8
+        data = c.convert()
+    except Exception as e:
+        print("  %s: int8 conversion failed, float32 model: %s" % (name, str(e).splitlines()[0][:120]))
+        data = tf.lite.TFLiteConverter.from_keras_model(m).convert()
+    open("/w/%s.tflite" % name, "wb").write(data)
+    it = tf.lite.Interpreter(model_content=data); it.allocate_tensors()
+    i, o = it.get_input_details()[0], it.get_output_details()[0]
+    if i["dtype"] == np.float32:
+        q = XS
+    else:
+        s, z = i["quantization"]
+        q = np.clip(np.round(XS / s + z), np.iinfo(i["dtype"]).min, np.iinfo(i["dtype"]).max).astype(i["dtype"])
+    if len(i["shape"]) == 3:
+        q = q[None]
+    it.set_tensor(i["index"], q); it.invoke()
+    return q, it.get_tensor(o["index"])
+
+refs = {}
+for name, fn in REWRITE:
+    q, o = convert_rewrite(name, build_rewrite(fn))
+    refs["in_" + name], refs["out_" + name] = q, o
+    print("ok", name, o.ravel()[:3], o.dtype)
+np.savez("/w/expected.npz", in_int8=qi, out_int8=oi, in_uint8=qu, out_uint8=ou, **refs)
 print("ok", oi.ravel(), ou.ravel())

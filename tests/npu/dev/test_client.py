@@ -5,7 +5,6 @@ from rk3399pro_npu import NpuModel
 t = time.time()
 npu = NpuModel(sys.argv[1] if len(sys.argv) > 1 else "/tmp/mobilenet_v2_1.0_224_quant.tflite")
 print("loaded in %.1f s (server says %d ms, %d MB)" % (time.time() - t, npu.load_ms, npu.mem_used_kb // 1024))
-print("hello:", npu.hello)
 print("inputs:", npu.inputs); print("outputs:", npu.outputs)
 x = np.random.RandomState(0).randint(0, 255, npu.inputs[0].shape).astype(npu.inputs[0].dtype)
 y = npu.exec(x)[0]
