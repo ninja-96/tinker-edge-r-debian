@@ -44,7 +44,9 @@ scp -q -o ControlPath="$CTL" scripts/board-selftest.sh "$U@$HOST:/tmp/board-self
 echo "Test running, log: $LOG"
 set +e
 printf '%s\n' "$PASS" | "${SSH[@]}" "sudo -S -p '' env DURATION=$D IPERF_SERVER=$SRV bash /tmp/board-selftest.sh" 2>&1 | tee "$LOG"
-rc=${PIPESTATUS[0]}
+rc=${PIPESTATUS[1]}   # the ssh status (PIPESTATUS[0] is printf's, always 0)
+[ "${PIPESTATUS[2]}" = 0 ] || rc=1   # a log-write failure is not a passing run
+set -e
 echo
 if [ "$rc" = 0 ]; then echo "Board test: PASS ($LOG)"; else echo "Board test: FAIL, exit $rc ($LOG)"; fi
 exit "$rc"
