@@ -76,14 +76,16 @@ public:
 	{
 		std::lock_guard<std::mutex> lk(shared_mu_);
 		auto s = shared_cur_.lock();
-		if (s && !s->dead_) return s;
+		if (s && !s->dead_) { s->users_++; return s; }   // another user: the same connection, one more lease
 		s = std::shared_ptr<Link>(new Link());
 		shared_cur_ = s;
-		s->self_weak_ = s;
+		s->users_ = 1;
 		/* the reader keeps a strong reference to the Link for its whole life: a program that lets go of the connection in the middle of a
 		 * callback must not destroy the Link under it. The thread is detached: it can never outlive its own reference, so nothing has to
-		 * join it (~Link runs after the thread function finished, and just frees the descriptor) */
-		std::thread t([self = s] { self->read_loop(); self->reader_done_ = true; });
+		 * join it (~Link runs after the thread function finished, and just frees the descriptor). Its id is published under shared_mu_
+		 * before the thread starts: any thread that gets the Link from here (the only way to get one) sees it with no race */
+		std::thread t([self = s] { self->read_loop(); });
+		s->reader_tid_ = t.get_id();
 		t.detach();
 		return s;
 	}
@@ -94,21 +96,23 @@ public:
 		else if (usb_ >= 0) { unsigned ifc = iface_; ioctl(usb_, USBDEVFS_RELEASEINTERFACE, &ifc); close(usb_); usb_ = -1; }
 	}
 
-	/* a program let go of the connection; when this was the last external reference the reader is asked to finish (a new program opens a new
-	 * connection then; if a callback still runs, the Link outlives it through the reader's own reference and is closed there) */
+	/* a program let go of the connection (its lease, taken in shared()). When this was the last lease the connection is retired: a new
+	 * shared() gets a new one then; if a callback still runs, the Link outlives it through the reader's own reference and is closed there */
 	void user_left()
 	{
-		if (self_weak_.use_count() != 1 + (reader_done_ ? 0 : 1)) return;   // another model still holds the connection
 		std::lock_guard<std::mutex> lk(shared_mu_);
+		if (--users_ > 0) return;   // another user still holds the connection
 		if (shared_cur_.lock().get() == this) shared_cur_.reset();
 		closing_ = true;
 		if (sock_ >= 0) shutdown(sock_, SHUT_RDWR);
 		else if (usb_ >= 0) { try { std::string bye = "bye"; send(NPU_PING, bye.data(), bye.size(), 0, next_tag()); } catch (...) {} }
 	}
 
+	bool in_reader_thread() const { return std::this_thread::get_id() == reader_tid_; }
+
 	void submit(uint16_t type, const void *p, size_t n, uint32_t model, Cb cb)
 	{
-		if (std::this_thread::get_id() == reader_tid_)
+		if (in_reader_thread())
 			throw Error("an NPU request from the reply thread of this connection (an async_exec callback): it would wait for its own reply; do it in another thread");
 		uint32_t tag = next_tag();
 		{ std::lock_guard<std::mutex> lk(mu_); if (dead_) throw Error(dead_why_); pending_[tag] = std::move(cb); }
@@ -119,7 +123,7 @@ public:
 	struct Reply { std::vector<uint8_t> data; uint32_t model = 0; };
 	Reply call(uint16_t type, const void *p = nullptr, size_t n = 0, uint32_t model = 0, int timeout_s = 30)
 	{
-		if (std::this_thread::get_id() == reader_tid_)
+		if (in_reader_thread())
 			throw Error("an NPU request from the reply thread of this connection (an async_exec callback): it would wait for its own reply; do it in another thread");
 		struct Box { std::mutex mu; std::condition_variable cv; bool done = false; Reply r; std::string err; };
 		auto box = std::make_shared<Box>();
@@ -160,9 +164,8 @@ public:
 private:
 	int sock_ = -1, usb_ = -1;
 	unsigned ep_in_ = 0, ep_out_ = 0, iface_ = 0;
-	std::thread::id reader_tid_{};   // the reply thread (set in read_loop before anything is delivered)
-	std::atomic<bool> reader_done_{false};   // the reply thread finished: it no longer holds its reference to the Link
-	std::weak_ptr<Link> self_weak_;
+	std::thread::id reader_tid_{};   // the reply thread (published in shared() before the thread starts: no race with the first call)
+	int users_ = 0;                  // the external leases of the connection (Model::link_ and the free functions), guarded by shared_mu_
 	std::mutex mu_, wmu_;
 	std::unordered_map<uint32_t, Cb> pending_;
 	uint32_t tag_ = 0;
@@ -262,7 +265,6 @@ private:
 
 	void read_loop()
 	{
-		reader_tid_ = std::this_thread::get_id();
 		std::vector<uint8_t> buf(256 * 1024), rx;
 		size_t off = 0;
 		while (!closing_) {
@@ -319,12 +321,26 @@ static std::vector<ModelInfo> list_models(Link &l)
 	return v;
 }
 
-NpuInfo info() { return Link::shared()->hello(); }
-std::vector<ModelInfo> models() { auto l = Link::shared(); return list_models(*l); }
+/* a connection lease of the free functions: returned even when the call throws, so the last user always retires the connection */
+struct LinkLease { Link &l; explicit LinkLease(Link &x) : l(x) {} ~LinkLease() { l.user_left(); } };
+
+NpuInfo info()
+{
+	auto l = Link::shared();
+	LinkLease keep(*l);
+	return l->hello();
+}
+std::vector<ModelInfo> models()
+{
+	auto l = Link::shared();
+	LinkLease keep(*l);
+	return list_models(*l);
+}
 
 int stop(uint32_t id)
 {
 	auto l = Link::shared();
+	LinkLease keep(*l);
 	try { l->call(NPU_UNLOAD, nullptr, 0, id, 30); return 1; }
 	catch (Error &e) { if (std::string(e.what()).find("no such model") != std::string::npos) return 0; throw; }
 }
@@ -332,6 +348,7 @@ int stop(uint32_t id)
 int stop(const std::string &which)
 {
 	auto l = Link::shared();
+	LinkLease keep(*l);
 	auto ms = list_models(*l);
 	if (which == "all") { l->call(NPU_UNLOAD, nullptr, 0, NPU_ALL_MODELS, 60); return (int)ms.size(); }
 	int n = 0;
@@ -1096,6 +1113,8 @@ std::vector<std::vector<uint8_t>> Model::exec(const std::vector<std::vector<uint
 void Model::async_exec(const std::vector<const void *> &in, Done done)
 {
 	if (!link_) throw Error("this Model is closed");
+	if (link_->in_reader_thread())   // before the slots wait: a blocked callback must not also hold a slot and stop the replies of others
+		throw Error("an NPU request from the reply thread of this connection (an async_exec callback): it would wait for its own reply; do it in another thread");
 	std::vector<uint8_t> p = pack(in);
 	auto slots = slots_;
 	slots->acquire();
