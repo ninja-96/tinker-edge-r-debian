@@ -19,10 +19,12 @@ PASS=${BOARD_PASS:-debian}
 mkdir -p out
 LOG=out/test-$(date +%Y%m%d-%H%M%S).log
 
-CTL=$(mktemp -t tinker-ssh.XXXXXX)
+ctl_dir=$(mktemp -d)
+CTL=$ctl_dir/ssh
 SSH=(ssh -o ControlPath="$CTL" -o StrictHostKeyChecking=accept-new "$U@$HOST")
 cleanup() {
     ssh -o ControlPath="$CTL" -O exit "$U@$HOST" >/dev/null 2>&1 || true
+    rm -rf "$ctl_dir"
     [ -n "${IPERF_PID:-}" ] && kill "$IPERF_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -44,8 +46,9 @@ scp -q -o ControlPath="$CTL" scripts/board-selftest.sh "$U@$HOST:/tmp/board-self
 echo "Test running, log: $LOG"
 set +e
 printf '%s\n' "$PASS" | "${SSH[@]}" "sudo -S -p '' env DURATION=$D IPERF_SERVER=$SRV bash /tmp/board-selftest.sh" 2>&1 | tee "$LOG"
-rc=${PIPESTATUS[1]}   # the ssh status (PIPESTATUS[0] is printf's, always 0)
-[ "${PIPESTATUS[2]}" = 0 ] || rc=1   # a log-write failure is not a passing run
+result=("${PIPESTATUS[@]}")
+rc=${result[1]}
+if [ "$rc" = 0 ]; then rc=${result[2]}; fi
 set -e
 echo
 if [ "$rc" = 0 ]; then echo "Board test: PASS ($LOG)"; else echo "Board test: FAIL, exit $rc ($LOG)"; fi

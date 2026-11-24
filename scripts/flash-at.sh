@@ -16,6 +16,7 @@ die() { echo "error: $*" >&2; exit 1; }
 
 [ -f "$FILE" ] || die "$FILE not found"
 [ -x "$RKDT" ] && [ -f "$LOADER" ] || die "tools missing: ./run.sh scripts/build-flash-tools.sh"
+[[ "$LBA" =~ ^(0|[1-9][0-9]{0,9}|0[xX][[:xdigit:]]{1,8})$ ]] || die "expected a decimal or hexadecimal LBA"
 check_usb
 SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
 size=$(stat -c %s "$FILE"); sectors=$(( (size + 511) / 512 ))
@@ -24,24 +25,7 @@ read -r -p "Type the LBA ($LBA) to continue: " ans
 [ "$ans" = "$LBA" ] || die "aborted: $FILE was not written"
 
 load_loader
-piece=$(mktemp -t flashpiece.XXXXXX); back=$(mktemp -t flashback.XXXXXX)
-trap 'rm -f "$piece" "$back"' EXIT
-off=0; per=$((16 * 2048))
-while [ "$off" -lt "$sectors" ]; do
-    n=$per; [ $((off + n)) -gt "$sectors" ] && n=$((sectors - off))
-    dd if="$FILE" of="$piece" bs=512 skip="$off" count="$n" status=none
-    ok=0
-    for try in 1 2 3; do
-        out=$($SUDO "$RKDT" wl $((LBA + off)) "$piece" 2>&1) || true
-        echo "$out" | grep -qi fail || { ok=1; break; }
-        echo "  attempt $try failed at sector $((LBA + off))"; sleep 2
-    done
-    [ "$ok" = 1 ] || die "write failed at sector $((LBA + off))"
-    off=$((off + n))
-done
-echo "written $sectors sectors"
-$SUDO "$RKDT" rl "$LBA" "$sectors" "$back" >/dev/null
-cmp -n "$size" "$FILE" "$back" && echo "OK: LBA $LBA matches $FILE" || die "read-back differs: the board was NOT reset"
+write_and_verify "$FILE" "$LBA" 0 $((16 * 2048)) 0
 if [ "$RESET" = 1 ]; then
     echo "Resetting device..."; $SUDO "$RKDT" rd
     echo "Done. Disconnect USB-C, make sure J3 is open and power-cycle if the board does not start by itself."

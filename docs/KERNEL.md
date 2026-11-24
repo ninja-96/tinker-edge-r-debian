@@ -75,7 +75,9 @@ The script copies the kernel, device trees and modules over SSH. Before it write
 anything it checks that the new release is not already installed on the board: every
 kernel needs a unique release (`KERNEL_LOCALVERSION` in `sources.lock`), otherwise the
 script stops and says so. The modules of the new release are installed first — a failure
-there leaves the boot files untouched. The previous kernel and device trees stay in
+there leaves the boot files untouched. If publishing a boot file fails, the installer restores both entries and removes the
+new module directory so the same release can be retried. Keep power connected until
+the update finishes. The previous kernel and device trees stay in
 `/boot/Image.old` and `/boot/dtbs.old`, and the `previous` entry of `extlinux.conf` is
 regenerated from the current boot on every update: a rollback goes back to exactly the
 kernel, device tree and command line that ran before the last update. If the new kernel

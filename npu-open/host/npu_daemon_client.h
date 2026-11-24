@@ -6,6 +6,7 @@
 #pragma once
 
 #include <errno.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -31,8 +32,10 @@ static inline uint64_t reply_deliver_timeout_us()
 	// with these later reads, so two clients' first sends (each under its own wmu) cannot race
 	static const uint64_t us = [] {
 		const char *e = getenv("NPU_DAEMON_DELIVER_TIMEOUT_US");
-		uint64_t v = (e && *e) ? strtoul(e, nullptr, 10) : 0;
-		return v ? v : 10u * 1000 * 1000;
+		char *end = nullptr;
+		uint64_t v = (e && *e >= '0' && *e <= '9') ? strtoull(e, &end, 10) : 0;
+		// A negative poll timeout would block indefinitely.
+		return v && !*end && v <= uint64_t(INT_MAX) * 1000 ? v : uint64_t(10000000);
 	}();
 	return us;
 }
@@ -56,7 +59,7 @@ struct Client {
 			if (errno == EINTR) continue;
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				struct pollfd pf = { fd, POLLOUT, 0 };
-				int pr = poll(&pf, 1, (int)((deadline - now) / 1000));   // the remainder is computed after the deadline check above
+				int pr = poll(&pf, 1, (int)((deadline - now + 999) / 1000));   // the remainder is computed after the deadline check above
 				if (pr < 0) { if (errno == EINTR) continue; gone = true; break; }
 				if (pr == 0 || (pf.revents & (POLLERR | POLLHUP | POLLNVAL))) { gone = true; break; }
 				continue;

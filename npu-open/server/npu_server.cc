@@ -519,7 +519,7 @@ struct Engine {
 	npu_load_reply lr {};
 	bool from_nbg = false;
 	uint64_t loaded_us = 0;
-	uint32_t runs = 0;
+	std::atomic<uint32_t> runs{0};
 	std::string log;
 };
 static std::map<uint32_t, std::shared_ptr<Engine>> g_engines;
@@ -527,7 +527,24 @@ static std::mutex g_eng_mu, g_load_mu;
 static uint32_t g_next_id = 1;
 
 static std::shared_ptr<Engine> engine_get(uint32_t id) { std::lock_guard<std::mutex> lk(g_eng_mu); auto it = g_engines.find(id); return it == g_engines.end() ? nullptr : it->second; }
-static size_t engine_count() { std::lock_guard<std::mutex> lk(g_eng_mu); return g_engines.size(); }
+// Observe spontaneous exits without reaping the child: engine_kill owns waitpid.
+static bool engine_alive(const Engine &e)
+{
+	pid_t pid = e.pid.load();
+	if (pid <= 0) return false;
+	siginfo_t info{};
+	int rc;
+	do { rc = waitid(P_PID, pid, &info, WEXITED | WNOHANG | WNOWAIT); } while (rc < 0 && errno == EINTR);
+	return rc == 0 && info.si_pid == 0;
+}
+
+static size_t engine_count()
+{
+	std::lock_guard<std::mutex> lk(g_eng_mu);
+	size_t count = 0;
+	for (const auto &kv : g_engines) if (engine_alive(*kv.second)) ++count;
+	return count;
+}
 
 static void engine_kill(Engine &e)
 {
@@ -641,14 +658,22 @@ static void handle(int in_fd, Msg &m)
 		if (m.payload.size() < sizeof(npu_load_req)) { reply_err(in_fd, m.h, "short request (an older host library?)"); break; }
 		npu_load_req lq; memcpy(&lq, m.payload.data(), sizeof lq);
 		lq.key[sizeof lq.key - 1] = 0; lq.name[sizeof lq.name - 1] = 0;
-		{   /* the same model is loaded already (another program on the board loaded it, or two loaded it at once): attach */
+		// Reap engines that exited between requests before creating another one.
+		std::vector<uint32_t> stopped;
+		std::shared_ptr<Engine> match;
+		{
 			std::lock_guard<std::mutex> lk(g_eng_mu);
-			for (auto &kv : g_engines) if (lq.key[0] && kv.second->key == lq.key) {
-				npu_hdr rh = m.h; rh.model = kv.first;
-				std::vector<uint8_t> d = kv.second->desc; uint32_t one = 1; memcpy(d.data() + offsetof(npu_load_reply, attached), &one, 4);
-				reply(in_fd, rh, false, d.data(), d.size());
-				return;
+			for (auto &kv : g_engines) {
+				if (!engine_alive(*kv.second)) stopped.push_back(kv.first);
+				else if (lq.key[0] && kv.second->key == lq.key) match = kv.second;
 			}
+		}
+		for (auto id : stopped) engine_remove(id);
+		if (match && engine_alive(*match)) {
+			npu_hdr rh = m.h; rh.model = match->id;
+			std::vector<uint8_t> d = match->desc; uint32_t one = 1; memcpy(d.data() + offsetof(npu_load_reply, attached), &one, 4);
+			reply(in_fd, rh, false, d.data(), d.size());
+			break;
 		}
 		auto e = std::make_shared<Engine>();
 		{ std::lock_guard<std::mutex> lk(g_eng_mu); e->id = g_next_id++; }
@@ -708,23 +733,23 @@ static void handle(int in_fd, Msg &m)
 	case NPU_LIST: {
 		std::lock_guard<std::mutex> lk(g_eng_mu);
 		uint32_t n = 0;
-		for (auto &kv : g_engines) if (kv.second->pid > 0) n++;   /* a stopped engine (its process is gone) is out: it is removed at the next request to it */
-		out.resize(4 + n * sizeof(npu_model_entry)); memcpy(out.data(), &n, 4);
-		size_t off = 4;
+		out.resize(sizeof n);
 		for (auto &kv : g_engines) {
 			const Engine &e = *kv.second;
-			if (e.pid <= 0) continue;
+			if (!engine_alive(e)) continue;
 			npu_model_entry me; memset(&me, 0, sizeof me);
 			me.id = e.id; me.n_inputs = e.lr.n_inputs; me.n_outputs = e.lr.n_outputs; me.load_ms = e.lr.load_ms; me.mem_used_kb = e.lr.mem_used_kb;
 			me.runs = e.runs; me.age_s = (uint32_t)((now_us() - e.loaded_us) / 1000000); me.from_nbg = e.from_nbg;
 			snprintf(me.key, sizeof me.key, "%s", e.key.c_str()); snprintf(me.name, sizeof me.name, "%s", e.name.c_str()); snprintf(me.plan, sizeof me.plan, "%s", e.plan.c_str());
-			memcpy(out.data() + off, &me, sizeof me); off += sizeof me;
+			size_t off = out.size(); out.resize(off + sizeof me);
+			memcpy(out.data() + off, &me, sizeof me); n++;
 		}
+		memcpy(out.data(), &n, sizeof n);
 		reply(in_fd, m.h, false, out.data(), out.size()); break; }
 	case NPU_DESCRIBE: {
 		auto e = engine_get(m.h.model);
 		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU"); break; }
-		if (e->pid <= 0) { engine_remove(m.h.model); reply_err(in_fd, m.h, "the model was stopped"); break; }   /* a stopped engine is not attached to */
+		if (!engine_alive(*e)) { engine_remove(m.h.model); reply_err(in_fd, m.h, "the model was stopped"); break; }   /* a stopped engine is not attached to */
 		std::vector<uint8_t> d = e->desc; uint32_t one = 1; memcpy(d.data() + offsetof(npu_load_reply, attached), &one, 4);
 		reply(in_fd, m.h, false, d.data(), d.size()); break; }
 	case NPU_PING: reply(in_fd, m.h, false, m.payload.data(), m.payload.size()); break;

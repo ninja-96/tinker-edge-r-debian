@@ -25,32 +25,23 @@ fi
 echo "gst-rockchip @ $(g rev-parse --short HEAD)"
 
 # Skip the (slow, emulated) build when nothing it depends on changed. FORCE=1 rebuilds.
-STAMP="$GST_ROCKCHIP_REV $(sha256sum out/mpp/usr/lib/librockchip_mpp.so.0 | cut -c1-16) $(sha256sum scripts/build-gst-rockchip.sh | cut -c1-16)"
+STAMP="$GST_ROCKCHIP_REV $(sha256sum out/mpp/usr/lib/librockchip_mpp.so.0 | cut -c1-16) $(cat scripts/build-gst-rockchip.sh scripts/build-chroot.sh | sha256sum | cut -c1-16)"
 if [ "${FORCE:-0}" != 1 ] && [ -f out/gst-rockchip/.stamp ] && [ "$(cat out/gst-rockchip/.stamp)" = "$STAMP" ]; then
     echo "gst-rockchip: up to date (FORCE=1 rebuilds)"
     exit 0
 fi
 
 W=$ROOT/build/gst-chroot
-cleanup() {
-    for m in dev/pts dev sys proc; do umount "$W/$m" 2>/dev/null || true; done
-}
+. scripts/build-chroot.sh
 trap cleanup EXIT
-cleanup
-rm -rf "$W" out/gst-rockchip; mkdir -p "$W" out/gst-rockchip
-tar -xf out/rootfs.tar -C "$W"
+prepare_chroot
+rm -rf out/gst-rockchip; mkdir -p out/gst-rockchip
 cp -a out/mpp/usr/. "$W/usr/"
 mkdir -p "$W/tmp/gst-rockchip"
 tar -C "$D" --exclude=.git -cf - . | tar -C "$W/tmp/gst-rockchip" -xf -
-rm -f "$W/etc/resolv.conf"; cp /etc/resolv.conf "$W/etc/resolv.conf"
-mount -t proc proc "$W/proc"; mount --bind /sys "$W/sys"
-mount --bind /dev "$W/dev"; mount --bind /dev/pts "$W/dev/pts"
-
-chroot "$W" /bin/sh -e -c '
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y -qq --no-install-recommends build-essential meson ninja-build pkg-config \
+install_build_deps meson ninja-build pkg-config \
         libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgstreamer-plugins-bad1.0-dev libdrm-dev
+chroot "$W" /bin/sh -e -c '
     cd /tmp/gst-rockchip
     meson setup build --prefix=/usr --buildtype=release
     ninja -C build

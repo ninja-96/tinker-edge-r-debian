@@ -9,29 +9,22 @@ cd "$(dirname "$0")/.."
 ROOT=$PWD
 [ -f out/rootfs.tar ] || { echo "run build-rootfs.sh first" >&2; exit 1; }
 
-STAMP="$(cat third_party/rkdeveloptool/*.cpp third_party/rkdeveloptool/*.h patches/rkdeveloptool/*.patch scripts/build-rkdeveloptool-arm64.sh | sha256sum | cut -c1-32)"
+STAMP="$(cat third_party/rkdeveloptool/*.cpp third_party/rkdeveloptool/*.h patches/rkdeveloptool/*.patch scripts/build-chroot.sh scripts/build-rkdeveloptool-arm64.sh | sha256sum | cut -c1-32)"
 if [ "${FORCE:-0}" != 1 ] && [ -f out/rkdeveloptool-arm64/.stamp ] && [ "$(cat out/rkdeveloptool-arm64/.stamp)" = "$STAMP" ]; then
     echo "rkdeveloptool arm64: up to date (FORCE=1 rebuilds)"; exit 0
 fi
 
 W=$ROOT/build/rkd-chroot
-cleanup() { for m in dev/pts dev sys proc; do umount "$W/$m" 2>/dev/null || true; done; }
+. scripts/build-chroot.sh
 trap cleanup EXIT
-cleanup
-rm -rf "$W" out/rkdeveloptool-arm64; mkdir -p "$W" out/rkdeveloptool-arm64
-tar -xf out/rootfs.tar -C "$W"
+prepare_chroot
+rm -rf out/rkdeveloptool-arm64; mkdir -p out/rkdeveloptool-arm64
 mkdir -p "$W/tmp/rkd" "$W/tmp/patches"
 cp -a third_party/rkdeveloptool/. "$W/tmp/rkd/"
 cp patches/rkdeveloptool/*.patch "$W/tmp/patches/"
-rm -f "$W/etc/resolv.conf"; cp /etc/resolv.conf "$W/etc/resolv.conf"
-mount -t proc proc "$W/proc"; mount --bind /sys "$W/sys"
-mount --bind /dev "$W/dev"; mount --bind /dev/pts "$W/dev/pts"
-
-chroot "$W" /bin/sh -e -c '
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y -qq --no-install-recommends build-essential autoconf automake libtool pkg-config \
+install_build_deps autoconf automake libtool pkg-config \
         libusb-1.0-0-dev libudev-dev patch
+chroot "$W" /bin/sh -e -c '
     cd /tmp/rkd
     for p in /tmp/patches/*.patch; do patch -p1 -s < "$p"; done
     autoreconf -i >/dev/null 2>&1

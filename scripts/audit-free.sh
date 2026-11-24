@@ -17,7 +17,7 @@ command -v debugfs >/dev/null || incomplete "debugfs (e2fsprogs) is missing: ins
 
 echo "== bootloader"
 ub=out/u-boot-rockchip.bin
-if [ -f "$ub" ] && cmp -s -n "$(stat -c %s "$ub")" "$ub" <(dd if="$IMG" bs=512 skip=64 status=none); then
+if [ -s "$ub" ] && cmp -s -n "$(stat -c %s "$ub")" "$ub" "$IMG" 0 $((64 * 512)); then
     ok "sector 64 holds $ub (U-Boot with open TPL/SPL, built from source)"
 else
     bad "sector 64 is not out/u-boot-rockchip.bin (stock or unknown bootloader?)"
@@ -25,61 +25,37 @@ fi
 
 # the rootfs must answer at the builder's offset before any check: an empty
 # debugfs output would otherwise read as "everything absent" and a false "free"
-R=""
-# read_full <source> <path>: 0 when debugfs returns the whole file. A short read (fewer bytes
-# than the file declares) or a zeroed (truncated) block — which bash reads as empty after
-# dropping null bytes — both mean the mandatory data is not fully checked.
-read_full() {
-    local actual size content
-    actual=$(debugfs -R "cat $2" "$1" 2>/dev/null | wc -c)
-    size=$(debugfs -R "stat $2" "$1" 2>&1 | sed -n 's/^User:.*Size: \([0-9][0-9]*\).*/\1/p')
-    content=$(debugfs -R "cat $2" "$1" 2>/dev/null)
-    [ "${size:-0}" -gt 0 ] && [ "$actual" -lt "$size" ] && return 2   # a short read
-    [ "${size:-0}" -gt 0 ] && [ -z "$content" ] && return 2   # a zeroed block reads as empty
-    return 0
+scratch=$(mktemp -d) || incomplete "cannot create audit directory"
+trap 'rm -rf "$scratch"' EXIT
+# debugfs also reports filesystem errors on stderr with a successful exit status.
+dbg() {
+    LC_ALL=C debugfs -R "$1" "$R" 2>"$scratch/errors" || return 1
+    ! grep -qv '^debugfs [0-9]' "$scratch/errors"
 }
-try_root() {   # try_root <source>: 0 when the rootfs is readable and the required files exist in full
-    debugfs -R "cat /var/lib/dpkg/status" "$1" 2>/dev/null | grep -q '^Package:' || return 1
-    debugfs -R "cat /etc/apt/sources.list" "$1" 2>/dev/null | grep -q . || return 1
-    read_full "$1" /var/lib/dpkg/status || return 1
-    read_full "$1" /etc/apt/sources.list || return 1
+read_text() {
+    local size
+    size=$(dbg "stat $1" | sed -n 's/^User:.*Size: \([0-9][0-9]*\).*/\1/p') || return 1
+    dbg "cat $1" > "$scratch/text" || return 1
+    [ "$(wc -c < "$scratch/text")" = "$size" ] || return 1
+    # Package metadata and source lists cannot contain NUL (including partial zero blocks).
+    tr -d '\000' < "$scratch/text" | cmp -s "$scratch/text" -
+}
+try_root() {
     R=$1
+    read_text /var/lib/dpkg/status && grep -q '^Package:' "$scratch/text" &&
+        cp "$scratch/text" "$scratch/status" &&
+        read_text /etc/apt/sources.list && grep -q . "$scratch/text"
 }
-tmp=""
 try_root "$IMG?offset=$((ROOT_START * 512))" || {
-    # this debugfs cannot read the partition with the offset: extract it into a
-    # temporary file and read that (never a neighbouring out/rootfs.ext4)
-    tmp=$(mktemp "${TMPDIR:-/tmp}/audit-rootfs.XXXXXX")
-    trap '[ -n "$tmp" ] && rm -f "$tmp"' EXIT
-    echo "  note debugfs cannot read the partition with the offset: extracting it to $tmp"
-    dd if="$IMG" bs=512 skip="$ROOT_START" status=none of="$tmp" || incomplete "cannot read the root partition of $IMG at sector $ROOT_START"
-    try_root "$tmp" || incomplete "no readable ext4 rootfs at sector $ROOT_START of $IMG: /var/lib/dpkg/status and /etc/apt/sources.list must fully answer there"
+    echo "  note extracting the root partition for debugfs"
+    dd if="$IMG" bs=4M iflag=skip_bytes skip="$((ROOT_START * 512))" status=none of="$scratch/rootfs" || incomplete "cannot extract root partition"
+    try_root "$scratch/rootfs" || incomplete "cannot fully read mandatory package metadata at sector $ROOT_START"
 }
-dbg() { debugfs -R "$1" "$R" 2>/dev/null; }
-# stat_one <path> prints "present" | "absent" | "error" (error: the rootfs did not answer)
 stat_one() {
-    out=$(debugfs -R "stat $1" "$R" 2>&1)   # the "file not found" message of a missing path goes to stderr
-    if printf '%s\n' "$out" | grep -q '^Inode:'; then
-        echo present
-    elif printf '%s\n' "$out" | grep -qi 'no such file\|file not found'; then
-        echo absent
-    else
-        echo error
-    fi
-}
-# cat_root <path> prints the file content (possibly empty); 0 ok, 3 absent, 2 a read error
-# (a short read, or a zeroed (truncated) block that bash reads as empty: an existing file that
-# is not fully read is an incomplete check, not an empty or short one)
-cat_root() {
-    local st size actual content
-    st=$(stat_one "$1")
-    if [ "$st" = absent ]; then return 3; fi
-    if [ "$st" = error ]; then return 2; fi
-    actual=$(dbg "cat $1" | wc -c)
-    size=$(dbg "stat $1" | sed -n 's/^User:.*Size: \([0-9][0-9]*\).*/\1/p')
-    content=$(dbg "cat $1")
-    if [ "${size:-0}" -gt 0 ] && { [ "$actual" -lt "$size" ] || [ -z "$content" ]; }; then return 2; fi
-    printf '%s\n' "$content"
+    local out
+    if out=$(dbg "stat $1") && [[ "$out" = Inode:* ]]; then echo present
+    elif grep -qi 'file not found' "$scratch/errors"; then echo absent
+    else echo error; fi
 }
 
 echo "== closed files"
@@ -96,7 +72,7 @@ echo "== /lib/firmware"
 dbg "ls /lib/firmware" | tr -s ' \n' '\n' | grep -v -E '^[0-9]+$|^\(|^\.$|^\.\.$|^$' | head -20 | sed 's/^/       /'
 
 echo "== Debian packages from non-free/contrib"
-n=$(dbg "cat /var/lib/dpkg/status" | grep -c -E '^Section: (non-free|contrib)')
+n=$(grep -c -E '^Section: (non-free|contrib)' "$scratch/status")
 [ "$n" = 0 ] && ok "no non-free/contrib package sections" || bad "$n packages with non-free/contrib sections"
 
 echo "== apt sources"
@@ -105,12 +81,9 @@ echo "== apt sources"
 # *.sources (stanza by stanza, with line continuations and the Enabled field). Comments never
 # trigger; a file that answers to stat but not to cat is a read error (exit 2), not "free".
 check_apt_file() {   # check_apt_file <rootfs-path> <line|deb822>: 0 clean, 1 forbidden component
-    local c rc
-    c=$(cat_root "$1"); rc=$?
-    if [ "$rc" = 2 ]; then incomplete "cannot read $1 in the rootfs of $IMG (read error)"; fi
-    [ "$rc" = 3 ] && return 0
+    read_text "$1" || incomplete "cannot fully read $1 in the rootfs"
     case $2 in
-        line) printf '%s\n' "$c" | awk '
+        line) awk '
             { line = $0; sub(/\r$/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
               if (line == "" || line ~ /^#/) next
               sub(/#.*/, "", line); gsub(/[ \t]+$/, "", line)   # a trailing comment is not a component
@@ -118,9 +91,9 @@ check_apt_file() {   # check_apt_file <rootfs-path> <line|deb822>: 0 clean, 1 fo
               sub(/\[[^\]]*\]/, " ", line)   # the options group (it may contain spaces)
               n = split(line, t, /[ \t]+/)   # type uri suite components...
               for (i = 4; i <= n; i++) if (t[i] == "contrib" || t[i] == "non-free" || t[i] == "non-free-firmware") { bad = 1; break } }
-            END { if (bad) exit 1 }'
+            END { if (bad) exit 1 }' "$scratch/text"
             ;;
-        deb822) printf '%s\n' "$c" | awk '
+        deb822) awk '
             function flush(   n, t, i) {
                 if (enabled) {
                     n = split(comp, t, /[ \t]+/)
@@ -134,23 +107,25 @@ check_apt_file() {   # check_apt_file <rootfs-path> <line|deb822>: 0 clean, 1 fo
               if (line ~ /^[ \t]/) { if (lcur == "components") comp = comp " " line; next }   # a continued value
               col = index(line, ":")
               cur = substr(line, 1, col - 1); val = substr(line, col + 1)
-              gsub(/^[ \t]+|[ \t]+$/, "", cur); gsub(/^[ \t]+/, "", val)
+              gsub(/^[ \t]+|[ \t]+$/, "", cur); gsub(/^[ \t]+|[ \t]+$/, "", val)
               lcur = tolower(cur)   # APT reads field names case-insensitively (components: is Components:)
-              if (lcur == "enabled") enabled = (tolower(val) == "no") ? 0 : 1
+              if (lcur == "enabled") enabled = (tolower(val) ~ /^(no|false|off|0)$/) ? 0 : 1
               else if (lcur == "components") comp = val   # the field order in a stanza is free: the other fields leave comp as it is
             }
-            END { flush(); if (bad) exit 1 }'
+            END { flush(); if (bad) exit 1 }' "$scratch/text"
             ;;
     esac
 }
-src=$(cat_root /etc/apt/sources.list) || { [ $? = 2 ] && incomplete "cannot read /etc/apt/sources.list in the rootfs of $IMG (read error)"; }
-echo "$src" | sed 's/^/       /'
 check_apt_file /etc/apt/sources.list line || bad "non-free components configured in /etc/apt/sources.list"
 case $(stat_one "/etc/apt/sources.list.d") in
     absent) ok "/etc/apt/sources.list.d absent" ;;
     error)  incomplete "cannot stat /etc/apt/sources.list.d in the rootfs of $IMG (read error)" ;;
     present)
-        extra=$(dbg "ls /etc/apt/sources.list.d" | tr -s ' \n' '\n' | grep -v -E '^[0-9]+$|^\(|^\.$|^\.\.$|^$' || true)
+        extra=$(dbg "ls -p /etc/apt/sources.list.d" | awk -F/ '
+            $6 == "." { dot = 1 }
+            $6 == ".." { parent = 1 }
+            $6 ~ /^[A-Za-z0-9_.-]+\.(list|sources)$/ { print $6 }
+            END { if (!dot || !parent) exit 1 }') || incomplete "cannot list sources.list.d"
         if [ -z "$extra" ]; then
             ok "no extra apt sources"
         else

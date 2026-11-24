@@ -26,31 +26,22 @@ fi
 echo "libva-v4l2-request @ $(g rev-parse --short HEAD)"
 
 # Skip the (slow, emulated) build when nothing it depends on changed. FORCE=1 rebuilds.
-STAMP="$V4L2_REQUEST_REV $(sha256sum scripts/build-v4l2-request.sh | cut -c1-16)"
+STAMP="$V4L2_REQUEST_REV $(cat scripts/build-v4l2-request.sh scripts/build-chroot.sh | sha256sum | cut -c1-16)"
 if [ "${FORCE:-0}" != 1 ] && [ -f out/v4l2-request/.stamp ] && [ "$(cat out/v4l2-request/.stamp)" = "$STAMP" ]; then
     echo "v4l2-request: up to date (FORCE=1 rebuilds)"
     exit 0
 fi
 
 W=$ROOT/build/v4l2-chroot
-cleanup() {
-    for m in dev/pts dev sys proc; do umount "$W/$m" 2>/dev/null || true; done
-}
+. scripts/build-chroot.sh
 trap cleanup EXIT
-cleanup
-rm -rf "$W" out/v4l2-request; mkdir -p "$W" out/v4l2-request
-tar -xf out/rootfs.tar -C "$W"
+prepare_chroot
+rm -rf out/v4l2-request; mkdir -p out/v4l2-request
 mkdir -p "$W/tmp/v4l2-request"
 tar -C "$D" --exclude=.git -cf - . | tar -C "$W/tmp/v4l2-request" -xf -
-rm -f "$W/etc/resolv.conf"; cp /etc/resolv.conf "$W/etc/resolv.conf"
-mount -t proc proc "$W/proc"; mount --bind /sys "$W/sys"
-mount --bind /dev "$W/dev"; mount --bind /dev/pts "$W/dev/pts"
-
-chroot "$W" /bin/sh -e -c '
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq
-    apt-get install -y -qq --no-install-recommends build-essential meson ninja-build pkg-config \
+install_build_deps meson ninja-build pkg-config \
         libva-dev libdrm-dev
+chroot "$W" /bin/sh -e -c '
     cd /tmp/v4l2-request
     meson setup build --prefix=/usr --buildtype=release
     ninja -C build

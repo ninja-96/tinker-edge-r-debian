@@ -18,7 +18,7 @@ for name in names:
     out, ref = it.get_tensor(o["index"]), exp["out_" + name]
     diff = float(np.abs(out.astype(np.float32) - ref.astype(np.float32)).max())
     tol = 3 if ref.dtype == np.int8 else 1e-3
-    ok = diff <= tol
+    ok = out.shape == ref.shape and out.dtype == ref.dtype and diff <= tol
     print("%-10s %s  max difference %g (tolerance %g)" % (name, "ok  " if ok else "FAIL", diff, tol))
     fails += not ok
 print("OK: all %d references match" % len(names) if not fails else "FAIL: %d reference(s) do not match" % fails)

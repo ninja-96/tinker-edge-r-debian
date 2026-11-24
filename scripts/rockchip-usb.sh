@@ -46,3 +46,42 @@ load_loader() {
     done
     die "could not start the loader on the board. Power-cycle it into maskrom (unplug power and USB, J3 shorted, plug USB, then power), use a USB 2.0 port directly on the PC (no hub), and retry"
 }
+
+# Write a file in sector-aligned chunks, then verify the entire file (including any resumed prefix).
+write_and_verify() (
+    local file=$1 lba=$2 offset=$3 chunk=$4 skip_board_mib=$5
+    local size sectors scratch n sector try output
+    size=$(stat -c %s "$file")
+    sectors=$(( (size + 511) / 512 ))
+    (( chunk > 0 && offset >= 0 && offset <= sectors && size > 0 && lba + sectors <= 4294967296 )) || die "invalid write range"
+    scratch=$(mktemp -d)
+    trap 'rm -rf "$scratch"' EXIT
+    while (( offset < sectors )); do
+        n=$((sectors - offset)); if (( n > chunk )); then n=$chunk; fi
+        sector=$((lba + offset))
+        dd if="$file" of="$scratch/piece" bs=1M iflag=skip_bytes,count_bytes skip="$((offset * 512))" count="$((n * 512))" status=none
+        for try in 1 2 3; do
+            if output=$($SUDO "$RKDT" wl "$sector" "$scratch/piece" 2>&1) && [[ ${output,,} != *fail* ]]; then break; fi
+            echo "write attempt $try failed at sector $sector: $output" >&2
+            if (( try == 3 )); then
+                (( skip_board_mib )) && echo "Resume with --start-mb $((offset / 2048))" >&2
+                die "write failed at sector $sector"
+            fi
+            sleep 2
+        done
+        offset=$((offset + n))
+        echo "written $offset / $sectors sectors"
+    done
+    output=$($SUDO "$RKDT" rl "$lba" "$sectors" "$scratch/back" 2>&1) && [[ ${output,,} != *fail* ]] || die "read-back failed: $output"
+    [[ -f "$scratch/back" && $(stat -c %s "$scratch/back") -ge $size ]] || die "short read-back"
+    if (( skip_board_mib && size > 3 * 1048576 )); then
+        # MiB 3 of a full image is rewritten by the board itself.
+        cmp -n $((3 * 1048576)) "$file" "$scratch/back" || die "read-back differs before MiB 3"
+        if (( size > 4 * 1048576 )); then
+            cmp -i $((4 * 1048576)) -n $((size - 4 * 1048576)) "$file" "$scratch/back" || die "read-back differs after MiB 3"
+        fi
+    else
+        cmp -n "$size" "$file" "$scratch/back" || die "read-back differs"
+    fi
+    echo "read-back verified"
+)

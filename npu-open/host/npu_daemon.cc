@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "protocol.h"
+#include "npu_usb_channel.h"
 #include "npu_daemon_client.h"   // the client side (Client and the deadline-bounded send)
 
 static const int MAX_RUNS_IN_FLIGHT = 2;     /* RUN requests on the bus at once (the server queues a few; more only lengthens the queue) */
@@ -120,14 +121,8 @@ static bool usb_open()
 	if (dev.empty()) return false;
 	std::string raw;
 	{ FILE *f = fopen((dev + "/descriptors").c_str(), "rb"); if (!f) return false; char b[4096]; size_t n; while ((n = fread(b, 1, sizeof b, f)) > 0) raw.append(b, n); fclose(f); }
-	int iface = -1; std::vector<unsigned> eps; bool cur = false;
-	for (size_t i = 18; i + 2 <= raw.size();) {
-		unsigned len = (uint8_t)raw[i], typ = (uint8_t)raw[i + 1];
-		if (typ == 4 && i + 8 <= raw.size()) { cur = (uint8_t)raw[i + 5] == 0xff && (uint8_t)raw[i + 6] == 0x4e && (uint8_t)raw[i + 7] == 0x50; if (cur) iface = (uint8_t)raw[i + 2]; }
-		else if (typ == 5 && cur && i + 3 <= raw.size()) eps.push_back((uint8_t)raw[i + 2]);
-		i += len ? len : 1;
-	}
-	if (iface < 0 || eps.size() != 2) { logf_("the NPU does not offer the open channel: its firmware is not ours"); return false; }
+	unsigned iface, ep_in, ep_out;
+	if (!npu_usb_channel(raw, iface, ep_in, ep_out)) { logf_("the NPU does not offer the open channel: its firmware is not ours"); return false; }
 	int bus = atoi(read_sys(dev + "/busnum").c_str()), num = atoi(read_sys(dev + "/devnum").c_str());
 	char node[64]; snprintf(node, sizeof node, "/dev/bus/usb/%03d/%03d", bus, num);
 	int fd = open(node, O_RDWR | O_CLOEXEC);
@@ -135,8 +130,8 @@ static bool usb_open()
 	unsigned ifc = iface;
 	if (ioctl(fd, USBDEVFS_CLAIMINTERFACE, &ifc) < 0) { logf_("cannot claim the interface: %s", strerror(errno)); close(fd); return false; }
 	g_iface = ifc;
-	g_ep_out = (eps[0] & 0x80) ? eps[1] : eps[0];
-	g_ep_in = (eps[0] & 0x80) ? eps[0] : eps[1];
+	g_ep_out = ep_out;
+	g_ep_in = ep_in;
 	std::lock_guard<std::mutex> lk(g_mu);
 	g_usb_fd = fd;
 	g_cv.notify_all();

@@ -28,6 +28,7 @@
 #include <unordered_map>
 
 #include "protocol.h"
+#include "npu_usb_channel.h"
 #include "op_names.h"
 #include "sha256.h"
 
@@ -169,8 +170,8 @@ private:
 	std::mutex mu_, wmu_;
 	std::unordered_map<uint32_t, Cb> pending_;
 	uint32_t tag_ = 0;
-	volatile bool closing_ = false;
-	bool dead_ = false;
+	std::atomic<bool> closing_{false};
+	std::atomic<bool> dead_{false};
 	std::string dead_why_;
 
 	Link()
@@ -198,15 +199,8 @@ private:
 		auto devs = find_devices();
 		if (devs.empty()) throw Error("NPU (USB 2207:0019) not found; is the NPU firmware loaded (systemctl status npu-firmware)?");
 		std::string raw = read_file("/sys/bus/usb/devices/" + devs[0].sysfs + "/descriptors", false);
-		int iface = -1; std::vector<unsigned> eps; bool cur = false;
-		for (size_t i = 18; i + 2 <= raw.size();) {
-			unsigned len = (uint8_t)raw[i], typ = (uint8_t)raw[i + 1];
-			if (typ == 4 && i + 8 <= raw.size()) { cur = (uint8_t)raw[i + 5] == 0xff && (uint8_t)raw[i + 6] == 0x4e && (uint8_t)raw[i + 7] == 0x50; if (cur) iface = (uint8_t)raw[i + 2]; }
-			else if (typ == 5 && cur && i + 3 <= raw.size()) eps.push_back((uint8_t)raw[i + 2]);
-			i += len ? len : 1;
-		}
-		if (iface < 0 || eps.size() != 2) throw Error("the NPU does not offer the open channel (interface 0xff/0x4e/0x50): its firmware is not ours");
-		ep_out_ = (eps[0] & 0x80) ? eps[1] : eps[0]; ep_in_ = (eps[0] & 0x80) ? eps[0] : eps[1];
+		unsigned iface;
+		if (!npu_usb_channel(raw, iface, ep_in_, ep_out_)) throw Error("the NPU does not offer the open channel (interface 0xff/0x4e/0x50): its firmware is not ours");
 		char node[64]; snprintf(node, sizeof node, "/dev/bus/usb/%03d/%03d", devs[0].bus, devs[0].dev);
 		usb_ = open(node, O_RDWR | O_CLOEXEC);
 		if (usb_ < 0) {
@@ -272,11 +266,11 @@ private:
 			if (sock_ >= 0) {
 				n = recv(sock_, buf.data(), buf.size(), 0);
 				if (n < 0 && errno == EINTR) continue;
-				if (n <= 0) { if (!closing_) fail_all("the NPU daemon closed the connection"); return; }
+				if (n <= 0) { fail_all("the NPU daemon closed the connection"); return; }
 			} else {
 				n = bulk(ep_in_, buf.data(), 64 * 1024, 0);   // no timeout: a cancelled transfer is a 'stop endpoint' command and the xHCI of this SoC can hang on a storm of them
 				if (n < 0 && (errno == EINTR || errno == ETIMEDOUT)) continue;
-				if (n < 0) { if (!closing_) fail_all(std::string("USB read failed (") + strerror(errno) + ")"); return; }
+				if (n < 0) { fail_all(std::string("USB read failed (") + strerror(errno) + ")"); return; }
 			}
 			rx.insert(rx.end(), buf.begin(), buf.begin() + n);
 			while (rx.size() - off >= sizeof(npu_hdr)) {
@@ -298,6 +292,8 @@ private:
 			}
 			if (off) { rx.erase(rx.begin(), rx.begin() + off); off = 0; }
 		}
+		// Complete pending callbacks on the reader so Python releases their references with the GIL.
+		fail_all("the NPU connection was closed");
 	}
 };
 

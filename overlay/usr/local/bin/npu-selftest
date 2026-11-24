@@ -30,11 +30,15 @@ for name in ("slice", "tile", "ceil", "cos", "round", "greater", "select"):
     x, ref = exp["in_" + name], exp["out_" + name]
     m = None
     try:
-        m = npu.Model(os.path.join(DATA, name + ".tflite"), cache_dir=cache)
+        m = npu.Model(os.path.join(DATA, name + ".tflite"), device="npu", cache_dir=cache)
+        if m.attached:
+            m.close()
+            m = None
+            raise RuntimeError("fixture already loaded: stop it before testing the rewrite")
         out = m.exec(x)[0]
         diff = float(np.abs(out.astype(np.float32) - ref.astype(np.float32)).max())
         check("rewrite %s: result as TFLite on the CPU" % name,
-              diff <= (3 if ref.dtype == np.int8 else 1e-3), "max difference %g" % diff)
+              out.shape == ref.shape and out.dtype == ref.dtype and diff <= (3 if ref.dtype == np.int8 else 1e-3), "max difference %g" % diff)
     except Exception as e:
         check("rewrite %s" % name, False, str(e)[:200])
     finally:

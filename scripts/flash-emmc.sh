@@ -51,6 +51,7 @@ if [ "$SKIP" != 1 ]; then
     [ "$(stat -c %s "$BACKUP")" -gt $((100*1024*1024)) ] || die "backup file $BACKUP looks too small to be an eMMC image"
 fi
 
+[[ "$START_MB" =~ ^(0|[1-9][0-9]{0,6})$ && "$CHUNK_MB" =~ ^[1-9][0-9]{0,6}$ ]] || die "invalid start or chunk size"
 SUDO=""; [ "$(id -u)" = 0 ] || SUDO=sudo
 size=$(stat -c %s "$IMG")
 total_mb=$(( (size + 1048575) / 1048576 ))
@@ -81,57 +82,7 @@ fi
 
 load_loader
 
-# --- write in pieces
-tmp=$(mktemp -t flashpiece.XXXXXX)
-trap 'rm -f "$tmp"' EXIT
-mb=$START_MB
-while [ "$mb" -lt "$total_mb" ]; do
-    n=$CHUNK_MB; [ $((mb + n)) -gt "$total_mb" ] && n=$((total_mb - mb))
-    dd if="$IMG" of="$tmp" bs=1M skip="$mb" count="$n" status=none
-    sector=$((mb * 2048))
-    ok=0
-    for try in 1 2 3; do
-        out=$($SUDO "$RKDT" wl "$sector" "$tmp" 2>&1) || true
-        if ! echo "$out" | grep -qi "fail"; then ok=1; break; fi
-        echo "  piece at MiB $mb (sector $sector), attempt $try failed:"
-        echo "$out" | tr '\r' '\n' | grep -v '^$' | tail -3 | sed 's/^/    /'
-        sleep 2
-    done
-    if [ "$ok" != 1 ]; then
-        die "write failed at MiB $mb (sector $sector) after 3 attempts. Resume with: --start-mb $mb (the board is still in loader mode)"
-    fi
-    printf '\rwritten %d / %d MiB' $((mb + n)) "$total_mb"
-    mb=$((mb + n))
-done
-echo
-
-# --- read back and compare (MiB 3 is rewritten by the board itself)
-echo "Reading back to verify..."
-back=$(mktemp -t flashback.XXXXXX)
-trap 'rm -f "$tmp" "$back"' EXIT
-$SUDO "$RKDT" rl 0 $((total_mb * 2048)) "$back" >/dev/null
-python3 -I - "$back" "$IMG" <<'PY' || die "read-back does not match the image: the board was NOT reset. Re-run with --start-mb to repair, or send this output"
-import sys
-emmc, img = sys.argv[1], sys.argv[2]
-C = 1 << 20
-bad = []
-with open(emmc, "rb") as e, open(img, "rb") as i:
-    n = 0
-    while True:
-        di = i.read(C)
-        if not di:
-            break
-        if e.read(len(di)) != di:      # the last piece of the image may be shorter than 1 MiB
-            bad.append(n)
-        n += 1
-real = [m for m in bad if m != 3]
-print(f"compared {n} MiB; differing outside the board's own area: {len(real)}")
-if real:
-    print(f"first differing MiB: {real[0]}, last: {real[-1]}")
-    sys.exit(1)
-print("OK: the eMMC contains the image")
-PY
-
+write_and_verify "$IMG" 0 $((START_MB * 2048)) $((CHUNK_MB * 2048)) 1
 if [ "$RESET" = 1 ]; then
     echo "Resetting device..."
     $SUDO "$RKDT" rd
