@@ -17,6 +17,12 @@ if [ -z "${BL31:-}" ]; then
     else BL31=$PWD/blobs/rockchip/rk3399pro_bl31_v1.35.elf; fi
 fi
 [ -f "$BL31" ] || { echo "missing $BL31 (committed in blobs/, or scripts/build-tfa.sh for USE_TFA=1)" >&2; exit 1; }
+# binman looks up the file from the build directory (O=), where a repository-relative name is
+# not found: resolve it against the repository root (the script's directory) before make
+case "$BL31" in
+    /*) ;;
+    *) BL31="$PWD/$BL31" ;;
+esac
 echo "BL31: $BL31"
 
 B=$PWD/build/u-boot-obj
