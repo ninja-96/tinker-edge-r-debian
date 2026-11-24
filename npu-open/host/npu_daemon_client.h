@@ -27,12 +27,13 @@ static inline uint64_t now_us()
 /* default 10 s; NPU_DAEMON_DELIVER_TIMEOUT_US overrides it (tests) */
 static inline uint64_t reply_deliver_timeout_us()
 {
-	static uint64_t us = 0;
-	if (!us) {
+	// a const function-local static: the magic-static initialization runs once and synchronizes it
+	// with these later reads, so two clients' first sends (each under its own wmu) cannot race
+	static const uint64_t us = [] {
 		const char *e = getenv("NPU_DAEMON_DELIVER_TIMEOUT_US");
-		us = (e && *e) ? strtoul(e, nullptr, 10) : 10u * 1000 * 1000;
-		if (!us) us = 10u * 1000 * 1000;
-	}
+		uint64_t v = (e && *e) ? strtoul(e, nullptr, 10) : 0;
+		return v ? v : 10u * 1000 * 1000;
+	}();
 	return us;
 }
 

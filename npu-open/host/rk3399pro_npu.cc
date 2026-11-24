@@ -621,6 +621,10 @@ std::vector<uint8_t> Model::load(const std::vector<uint8_t> &data, const LoadOpt
 	for (auto &c : pt) if (c == ':' || c == ',') c = '_';
 	std::string nbg_path = cache.empty() || !plan.whole_npu() ? "" : cache + "/" + ck + "." + pt + ".nbg";
 	std::string nbg = nbg_path.empty() ? "" : read_file(nbg_path, false);
+	if (!nbg.empty() && nbg.size() >= 8) {   // an old cache may hold a graph the die cannot take (LOAD_NBG is capped at 16 tensors per side)
+		uint32_t ni, no; memcpy(&ni, nbg.data(), 4); memcpy(&no, nbg.data() + 4, 4);
+		if (ni > 16 || no > 16) { fprintf(stderr, "the cached graph of %s has %u inputs / %u outputs, the die takes at most 16 per side: ignoring it\n", ck.c_str(), ni, no); nbg.clear(); }
+	}
 	auto num = [&](const std::string &k) { return meta.count(k) ? atof(meta[k].c_str()) : -1.0; };
 	// memory: what this model took last time with this plan (+10 %, +16 MB), or the estimate of the server
 	double m_nbg = num(plan_ + ".nbg_mem_kb"), m_tfl = num(plan_ + ".tflite_mem_kb");
@@ -1065,7 +1069,7 @@ choose:
 		Plan p = Plan::parse(res[0].plan);
 		if (p.cpu) o.device = "cpu"; else { o.device = "npu"; o.split = p.split; o.split_ratio = p.ratio; o.split_max_error = p.err; o.cpu_ops = p.deny; o.cpu_nodes = p.nodes; o.strict = false; }
 		std::vector<uint8_t> d = data_;
-		link_.reset();
+		close();   // let go of the connection lease the common way (a bare reset would leave it held: the old connection never sees EOF)
 		attached_ = from_cache_ = false;
 		init(d, o, name_);
 		opt_.device = "auto";
@@ -1113,7 +1117,7 @@ std::vector<std::vector<uint8_t>> Model::exec(const std::vector<std::vector<uint
 void Model::async_exec(const std::vector<const void *> &in, Done done)
 {
 	if (!link_) throw Error("this Model is closed");
-	if (link_->in_reader_thread())   // before the slots wait: a blocked callback must not also hold a slot and stop the replies of others
+	if (link_->in_reader_thread())   // issue-6: only this reader can deliver the pending reply that frees the next slot.
 		throw Error("an NPU request from the reply thread of this connection (an async_exec callback): it would wait for its own reply; do it in another thread");
 	std::vector<uint8_t> p = pack(in);
 	auto slots = slots_;
