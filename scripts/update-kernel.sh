@@ -4,6 +4,9 @@
 # "previous" (select it on the serial console / keyboard at the U-Boot menu if the new
 # one does not boot). Details: docs/KERNEL.md
 #   scripts/update-kernel.sh [HOST]        HOST defaults to tinker-edge-r.local
+# The update is published only after the whole new set (modules, kernel, device trees) is
+# staged and verified: a failed attempt leaves both boot entries as they were, and the same
+# release can be retried. A release already installed on the board is still refused.
 # SSH_USER (debian) and BOARD_PASS (debian, for sudo on the board) can be set.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -30,44 +33,56 @@ cat > "$RS" <<'EOS'
 set -eu
 cd /tmp/kupd
 CONF=/boot/extlinux/extlinux.conf
-[ -f "$CONF" ] || { echo "no $CONF: not an extlinux image" >&2; exit 1; }
+[ -f "$CONF" ] || { echo "error: no $CONF: not an extlinux image" >&2; exit 1; }
 
-# before writing to /boot or /lib/modules: the upload is complete and the release is new
+STAGE=/tmp/kupd/stage
+MODDEST=/lib/modules/$REL
+
+# remove only what this attempt created: the staging and, on a failed attempt, the module
+# directory of this REL (the preflight below proves nothing with that release was installed)
+cleanup() {
+    rm -rf "$STAGE" /boot/Image.new /boot/dtbs.new
+    if [ -e "$MODDEST" ]; then rm -rf "$MODDEST"; fi
+}
+fail() { cleanup; echo "error: $*" >&2; exit 1; }
+
+# --- preflight: everything is checked before the first write to /boot or /lib/modules ---
 [ -f Image ] && ls rk3399pro-tinker-edge-r*.dtb >/dev/null && [ -d "modules/lib/modules/$REL" ] \
-    || { echo "incomplete upload (Image, *.dtb or modules/lib/modules/$REL)" >&2; exit 1; }
-if [ -e "/lib/modules/$REL" ]; then
-    echo "error: /lib/modules/$REL is already installed on the board: the new kernel was built with the same release as an installed one." >&2
-    echo "bump KERNEL_LOCALVERSION in sources.lock so every kernel has a unique release, rebuild (./run.sh scripts/build-kernel.sh) and retry." >&2
-    exit 1
-fi
+    || fail "incomplete upload (Image, *.dtb or modules/lib/modules/$REL)"
+[ ! -e "$MODDEST" ] || fail "/lib/modules/$REL is already installed on the board: the new kernel was built with the same release as an installed one. Bump KERNEL_LOCALVERSION in sources.lock so every kernel has a unique release, rebuild (./run.sh scripts/build-kernel.sh) and retry."
 
-# keep the current kernel and device trees as the fallback
-cp -a /boot/Image /boot/Image.old
-rm -rf /boot/dtbs.old; cp -a /boot/dtbs /boot/dtbs.old
+# the 'previous' entry is regenerated from the 'label tinker' block; it must be complete and
+# point at a device tree that is still on the board (checked before any file is replaced)
+fdt=$(awk '/^label /{lbl=$2} lbl=="tinker" && /^ *fdt /{sub(/^ *fdt /,""); print; exit}' "$CONF")
+app=$(awk '/^label /{lbl=$2} lbl=="tinker" && /^ *append /{sub(/^ *append /,""); print; exit}' "$CONF")
+[ -n "$fdt" ] && [ -n "$app" ] || fail "no fdt/append in the 'label tinker' block of $CONF: the file is not an extlinux config of this image"
+base=${fdt##*/}
+[ -f "/boot/dtbs/$base" ] || fail "the current device tree /boot/dtbs/$base (the 'tinker' entry of $CONF) is missing: the board state is unexpected"
 
-# the modules first: if this fails, the boot files are still untouched
-install -d "/lib/modules/$REL"
-cp -a "modules/lib/modules/$REL/." "/lib/modules/$REL/"
-depmod "$REL"
+# --- stage the new release and verify it: a broken set never reaches the board ---
+rm -rf "$STAGE"
+install -d "$STAGE/lib/modules/$REL" || fail "cannot create $STAGE"
+cp -a "modules/lib/modules/$REL/." "$STAGE/lib/modules/$REL/" || fail "cannot stage the modules of $REL"
+depmod -b "$STAGE" "$REL" || fail "depmod of the staged $REL modules failed (incomplete or broken modules): the board is untouched"
 
-# the new kernel and device trees, staged before the switch
-install -m 0644 Image /boot/Image.new
-rm -rf /boot/dtbs.new; mkdir -p /boot/dtbs.new
-cp -a rk3399pro-tinker-edge-r*.dtb /boot/dtbs.new/
-mv -f /boot/Image.new /boot/Image
-cp -a /boot/dtbs.new/. /boot/dtbs/
+# the new kernel and device trees, staged in /boot before anything is switched
+install -m 0644 Image /boot/Image.new || fail "cannot write /boot/Image.new"
 rm -rf /boot/dtbs.new
+mkdir -p /boot/dtbs.new || fail "cannot create /boot/dtbs.new"
+cp -a rk3399pro-tinker-edge-r*.dtb /boot/dtbs.new/ || fail "cannot stage the device trees"
+
+# --- publish: the fallback set is snapshotted from the current state only after the new
+# set is staged and verified, so a failure above leaves both old entries exactly as they were ---
+cp -a /boot/dtbs.new/. /boot/dtbs/ || fail "cannot install the new device trees into /boot/dtbs"
+cp -a /boot/Image /boot/Image.old || fail "cannot save the current kernel as /boot/Image.old"
+rm -rf /boot/dtbs.old
+cp -a /boot/dtbs /boot/dtbs.old || fail "cannot save the current device trees as /boot/dtbs.old"
+mv -f /boot/Image.new /boot/Image || fail "cannot switch /boot/Image to the new kernel"
+cp -a "$STAGE/lib/modules/$REL/." "$MODDEST/" || fail "cannot install the modules of $REL into /lib/modules"
 
 # regenerate the fallback entry from the tinker block as left: after a rollback the board
 # boots exactly the kernel, device tree and command line of the previous installation
-fdt=$(awk '/^label /{lbl=$2} lbl=="tinker" && /^ *fdt /{sub(/^ *fdt /,""); print; exit}' "$CONF")
-app=$(awk '/^label /{lbl=$2} lbl=="tinker" && /^ *append /{sub(/^ *append /,""); print; exit}' "$CONF")
-if [ -z "$fdt" ] || [ -z "$app" ]; then
-    echo "no fdt/append in the 'label tinker' block of $CONF: the file is not an extlinux config of this image" >&2
-    exit 1
-fi
-base=${fdt##*/}
-tmp=$(mktemp "$(dirname "$CONF")/.extlinux.conf.XXXXXX")
+tmp=$(mktemp "$(dirname "$CONF")/.extlinux.conf.XXXXXX") || fail "cannot create a temp file next to $CONF"
 awk '
     /^label previous/ { skip = 1; next }
     skip && /^label / { skip = 0 }
@@ -76,12 +91,14 @@ awk '
 ' "$CONF" > "$tmp"
 printf '\nlabel previous\n    kernel /boot/Image.old\n    fdt /boot/dtbs.old/%s\n    append %s\n' "$base" "$app" >> "$tmp"
 if [ "$(grep -c '^label previous' "$tmp")" != 1 ] || [ "$(grep -c '^label tinker' "$tmp")" != 1 ]; then
-    rm -f "$tmp"; echo "refusing to write $CONF: the result must have exactly one 'previous' and one 'tinker' entry" >&2; exit 1
+    rm -f "$tmp"
+    fail "refusing to write $CONF: the result must have exactly one 'previous' and one 'tinker' entry"
 fi
-cp -f -- "$CONF" "$CONF.prev"
+cp -f -- "$CONF" "$CONF.prev" || fail "cannot back up $CONF"
 chmod --reference="$CONF" "$tmp"; chown --reference="$CONF" "$tmp"
-mv -f -- "$tmp" "$CONF"
+mv -f -- "$tmp" "$CONF" || fail "cannot replace $CONF"
 sync
+rm -rf "$STAGE" /boot/Image.new /boot/dtbs.new
 echo "installed $REL; reboot to use it"
 EOS
 
