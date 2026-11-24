@@ -38,6 +38,7 @@
 #include <vector>
 
 #include "protocol.h"
+#include "npu_daemon_client.h"   // the client side (Client and the deadline-bounded send)
 
 static const int MAX_RUNS_IN_FLIGHT = 2;     /* RUN requests on the bus at once (the server queues a few; more only lengthens the queue) */
 /* A request sent right after a reply while other requests are in flight (pipelining, as async_exec or several programs do) was seen to hang
@@ -45,48 +46,14 @@ static const int MAX_RUNS_IN_FLIGHT = 2;     /* RUN requests on the bus at once 
  * never hung: the pause is made only when another request is on its way. */
 static int g_gap_us = 300;
 static const size_t MAX_MSG = 96u << 20;
-/* a client that does not read its reply this long (stopped, clogged buffer) is disconnected: its reply is dropped and the
- * other clients keep getting theirs (the delivery below runs on the one USB thread of the daemon) */
-static const uint64_t REPLY_DELIVER_TIMEOUT_MS = 10 * 1000;
 
 static void logf_(const char *fmt, ...)
 {
 	va_list a; va_start(a, fmt); vfprintf(stderr, fmt, a); fputc('\n', stderr); fflush(stderr); va_end(a);
 }
-static uint64_t now_us() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (uint64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000; }
 
-/* ---------------- a client (a program on the board) ---------------- */
-struct Client {
-	int fd;
-	std::mutex wmu;
-	bool gone = false;
-	explicit Client(int f) : fd(f) {}
-	void send(const npu_hdr &h, const void *p, size_t n)
-	{
-		std::lock_guard<std::mutex> lk(wmu);
-		if (gone) return;
-		const uint8_t *q[2] = { (const uint8_t *)&h, (const uint8_t *)p }; size_t len[2] = { sizeof h, n };
-		uint64_t deadline = now_us() + REPLY_DELIVER_TIMEOUT_MS * 1000;   /* one whole reply, partial writes and EINTR included */
-		for (int i = 0; i < 2; i++) while (len[i]) {
-			uint64_t left = deadline - now_us();
-			if (!left) { gone = true; break; }
-			struct pollfd pf = { fd, POLLOUT, 0 };
-			int pr = poll(&pf, 1, (int)(left / 1000));
-			if (pr < 0) { if (errno == EINTR) continue; gone = true; break; }
-			if (pr == 0) { if (now_us() >= deadline) { gone = true; break; } continue; }
-			if (pf.revents & (POLLERR | POLLHUP | POLLNVAL)) { gone = true; break; }
-			ssize_t w = ::send(fd, q[i], len[i], MSG_NOSIGNAL);
-			if (w < 0) { if (errno == EINTR || errno == EAGAIN) continue; gone = true; break; }
-			q[i] += w; len[i] -= w;
-		}
-		if (gone) shutdown(fd, SHUT_RDWR);   /* wake the thread that reads this connection; the close stays with its owner in client_loop */
-	}
-	void error(uint16_t type, uint32_t tag, const std::string &t)
-	{
-		npu_hdr h = { NPU_MAGIC, type, NPU_FLAG_ERROR, tag, 0, (uint32_t)t.size() };
-		send(h, t.data(), t.size());
-	}
-};
+/* ---------------- a client (a program on the board): the Client struct with the deadline-bounded send() lives in npu_daemon_client.h, so a
+ * test can exercise it on a plain socketpair ---------------- */
 
 /* ---------------- the USB side ---------------- */
 struct Pending { std::shared_ptr<Client> cl; uint32_t tag; uint16_t type; };
