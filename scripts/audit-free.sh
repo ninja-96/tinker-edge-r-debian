@@ -53,6 +53,18 @@ stat_one() {
         echo error
     fi
 }
+# cat_root <path> prints the file content (possibly empty); 0 ok, 3 absent, 2 a read error
+# (the file answers to stat but not to cat: an existing file that cannot be read is an
+# incomplete check, not an empty one)
+cat_root() {
+    st=$(stat_one "$1")
+    if [ "$st" = absent ]; then return 3; fi
+    if [ "$st" = error ]; then return 2; fi
+    content=$(dbg "cat $1")
+    size=$(dbg "stat $1" | sed -n 's/^User:.*Size: \([0-9][0-9]*\).*/\1/p')
+    if [ "${size:-0}" -gt 0 ] && [ -z "$content" ]; then return 2; fi
+    printf '%s\n' "$content"
+}
 
 echo "== closed files"
 for f in /usr/bin/upgrade_tool /usr/bin/npu_transfer_proxy /usr/lib/aarch64-linux-gnu/librknn_api.so \
@@ -72,9 +84,69 @@ n=$(dbg "cat /var/lib/dpkg/status" | grep -c -E '^Section: (non-free|contrib)')
 [ "$n" = 0 ] && ok "no non-free/contrib package sections" || bad "$n packages with non-free/contrib sections"
 
 echo "== apt sources"
-src=$(dbg "cat /etc/apt/sources.list")
+# forbidden components (contrib, non-free, non-free-firmware) in the active records of the apt
+# sources: the one-line format of /etc/apt/sources.list and *.list, and the deb822 format of
+# *.sources (stanza by stanza, with line continuations and the Enabled field). Comments never
+# trigger; a file that answers to stat but not to cat is a read error (exit 2), not "free".
+check_apt_file() {   # check_apt_file <rootfs-path> <line|deb822>: 0 clean, 1 forbidden component
+    local c rc
+    c=$(cat_root "$1"); rc=$?
+    if [ "$rc" = 2 ]; then incomplete "cannot read $1 in the rootfs of $IMG (read error)"; fi
+    [ "$rc" = 3 ] && return 0
+    case $2 in
+        line) printf '%s\n' "$c" | awk '
+            { line = $0; sub(/\r$/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
+              if (line == "" || line ~ /^#/) next
+              if (line !~ /^(deb|deb-src)[ \t]/) next
+              sub(/\[[^\]]*\]/, " ", line)   # the options group (it may contain spaces)
+              n = split(line, t, /[ \t]+/)   # type uri suite components...
+              for (i = 4; i <= n; i++) if (t[i] == "contrib" || t[i] == "non-free" || t[i] == "non-free-firmware") { bad = 1; break } }
+            END { if (bad) exit 1 }'
+            ;;
+        deb822) printf '%s\n' "$c" | awk '
+            function flush(   n, t, i) {
+                if (enabled) {
+                    n = split(comp, t, /[ \t]+/)
+                    for (i = 1; i <= n; i++) if (t[i] == "contrib" || t[i] == "non-free" || t[i] == "non-free-firmware") { bad = 1; break }
+                }
+                enabled = 1; comp = ""; cur = "" }
+            BEGIN { enabled = 1 }
+            { line = $0; sub(/\r$/, "", line)
+              if (line ~ /^[ \t]*#/) next                    # a comment line
+              if (line ~ /^[ \t]*$/) { flush(); next }      # a blank line: the stanza is over
+              if (line ~ /^[ \t]/) { if (cur == "Components") comp = comp " " line; next }   # a continued value
+              col = index(line, ":")
+              cur = substr(line, 1, col - 1); val = substr(line, col + 1)
+              gsub(/^[ \t]+|[ \t]+$/, "", cur); gsub(/^[ \t]+/, "", val)
+              if (cur == "Enabled") enabled = (tolower(val) == "no") ? 0 : 1
+              else if (cur == "Components") comp = val   # the field order in a stanza is free: the other fields leave comp as it is
+            }
+            END { flush(); if (bad) exit 1 }'
+            ;;
+    esac
+}
+src=$(cat_root /etc/apt/sources.list) || { [ $? = 2 ] && incomplete "cannot read /etc/apt/sources.list in the rootfs of $IMG (read error)"; }
 echo "$src" | sed 's/^/       /'
-echo "$src" | grep -q -E 'contrib|non-free' && bad "non-free components configured" || ok "components: main only"
+check_apt_file /etc/apt/sources.list line || bad "non-free components configured in /etc/apt/sources.list"
+case $(stat_one "/etc/apt/sources.list.d") in
+    absent) ok "/etc/apt/sources.list.d absent" ;;
+    error)  incomplete "cannot stat /etc/apt/sources.list.d in the rootfs of $IMG (read error)" ;;
+    present)
+        extra=$(dbg "ls /etc/apt/sources.list.d" | tr -s ' \n' '\n' | grep -v -E '^[0-9]+$|^\(|^\.$|^\.\.$|^$' || true)
+        if [ -z "$extra" ]; then
+            ok "no extra apt sources"
+        else
+            for f in $extra; do
+                case $f in
+                    *.list)    check_apt_file "/etc/apt/sources.list.d/$f" line ;;
+                    *.sources) check_apt_file "/etc/apt/sources.list.d/$f" deb822 ;;
+                    *) continue ;;
+                esac
+                if [ $? = 0 ]; then ok "no non-free components in $f"; else bad "non-free components configured in $f"; fi
+            done
+        fi
+        ;;
+esac
 
 echo
 [ "$fail" = 0 ] && echo "RESULT: free" || echo "RESULT: NOT free"
