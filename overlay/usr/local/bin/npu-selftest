@@ -1,6 +1,6 @@
 #!/usr/bin/python3
-"""Self-test of the NPU with TensorFlow Lite: chip, two small models against the results of TFLite on the CPU, speed, the compiled-graph cache,
-two models at once, attaching to a loaded model (also from another process), stopping models, a broken model (the NPU must stay usable).
+"""Self-test of the NPU with TensorFlow Lite: chip, two small models against the results of TFLite on the CPU, the seven rewrite-op models,
+speed, the compiled-graph cache, two models at once, attaching to a loaded model (also from another process), stopping models, a broken model (the NPU must stay usable).
     npu-selftest [-n RUNS]
 Prints one line per check and ends with 'OK ...' (exit 0) or 'FAIL ...' (exit 1). The test models are stopped at the end."""
 import hashlib, os, subprocess, sys, tempfile, time
@@ -24,6 +24,23 @@ except npu.NpuError as e:
 check("chip 8000/7100/45080001", i["chip_ok"], "driver %s, memory %d MB free, %d model(s) loaded" % (i["driver"], i["mem_avail_kb"] // 1024, i["models"]))
 exp = np.load(os.path.join(DATA, "expected.npz"))
 cache = tempfile.mkdtemp(prefix="npu-selftest-")
+# rewrite_ops.h: the ops the VX delegate rewrites before the graph is built, one model each
+# (tests/npu/make_models.py); checked against the CPU results in expected.npz like the nets below
+for name in ("slice", "tile", "ceil", "cos", "round", "greater", "select"):
+    x, ref = exp["in_" + name], exp["out_" + name]
+    m = None
+    try:
+        m = npu.Model(os.path.join(DATA, name + ".tflite"), cache_dir=cache)
+        out = m.exec(x)[0]
+        diff = float(np.abs(out.astype(np.float32) - ref.astype(np.float32)).max())
+        check("rewrite %s: result as TFLite on the CPU" % name,
+              diff <= (3 if ref.dtype == np.int8 else 1e-3), "max difference %g" % diff)
+    except Exception as e:
+        check("rewrite %s" % name, False, str(e)[:200])
+    finally:
+        if m is not None:
+            try: m.stop()
+            except Exception: pass
 paths = {k: os.path.join(DATA, "net_%s.tflite" % k) for k in ("int8", "uint8")}
 keys = {k: hashlib.sha256(open(p, "rb").read()).hexdigest() for k, p in paths.items()}
 for k in keys.values():                      # left over from an earlier run: start clean

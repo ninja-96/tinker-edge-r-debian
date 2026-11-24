@@ -113,7 +113,7 @@ else
 fi
 cp docs/NPU.md npu-open/OPERATORS.md "$DOC/"
 mkdir -p "$W/usr/share/tinker-edge-r/npu-selftest"
-cp tests/npu/net_int8.tflite tests/npu/net_uint8.tflite tests/npu/expected.npz "$W/usr/share/tinker-edge-r/npu-selftest/"   # for /usr/local/bin/npu-selftest
+cp tests/npu/{net_int8,net_uint8,slice,tile,ceil,cos,round,greater,select}.tflite tests/npu/expected.npz "$W/usr/share/tinker-edge-r/npu-selftest/"   # for /usr/local/bin/npu-selftest (the 7 rewrite models are checked against their CPU references too)
 if [ "${FREE:-0}" != 1 ]; then
     if [ -f "$O/npu_fw/boot.img" ]; then
         mkdir -p "$W/usr/share/npu_fw"; cp "$O"/npu_fw/{MiniLoaderAll.bin,uboot.img,trust.img,boot.img} "$W/usr/share/npu_fw/"
