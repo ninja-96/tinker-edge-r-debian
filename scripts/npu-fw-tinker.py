@@ -109,11 +109,17 @@ def main(src, dst):
     kernel, ramdisk = img[kofs:kofs + ksz], img[rofs:rofs + rsz]
     second = img[sofs:sofs + ssz]
     entries = rsce_dtb(second)
+    dtbs = [(name, data) for name, data in entries if name == "rk-kernel.dtb"]
+    if len(dtbs) != 1:
+        raise SystemExit("boot.img has %d rk-kernel.dtb RSCE entr%s, want exactly one (entries: %s)"
+                         % (len(dtbs), "y" if len(dtbs) == 1 else "ies", ", ".join(n for n, _ in entries)))
     new = []
+    patched = None
     for name, data in entries:
         if name == "rk-kernel.dtb":
             text = dtc(["-I", "dtb", "-O", "dts"], data).decode()
             data = dtc(["-I", "dts", "-O", "dtb"], patch_dts(text).encode())
+            patched = data
         new.append((name, data))
     second2 = rsce_build(second, new)
     sha = hashlib.sha1()
@@ -126,7 +132,7 @@ def main(src, dst):
     out = bytes(hdr) + kernel.ljust(up(ksz), b"\0") + ramdisk.ljust(up(rsz), b"\0") + second2.ljust(up(len(second2)), b"\0")
     out += b"\0" * (len(img) - len(out)) if len(img) > len(out) else b""
     open(dst, "wb").write(out)
-    print("%s: device tree %d -> %d bytes, image %d bytes" % (dst, len(rsce_dtb(second)[0][1]), len(new[0][1]), len(out)))
+    print("%s: device tree %d -> %d bytes, image %d bytes" % (dst, len(dtbs[0][1]), len(patched), len(out)))
 
 
 if __name__ == "__main__":
