@@ -4,3 +4,5 @@
 **Проблема.** Quirk «потеря записи >32 МБ на RK3399Pro» (docs/FLASHING.md) правится в одном файле и пропускается в других.
 **Отложено.** Чистый dedup-рефакторинг: цикл записи/read-back в rockchip-usb.sh, chroot-обвязку в общий скрипт; требует полный цикл backup → flash → verify на плате.
 **Запись истории:** Отложена, 2026-11-24. (lsusb-guard при этом вынесен в check_usb — см. 28.)
+
+**Сверка всех карточек, 2026-11-24, f86b309.** Циклы записи и read-back остались в flash-at.sh и flash-emmc.sh; независимые chroot-обвязки сохранились в build-gst-rockchip.sh и build-v4l2-request.sh. Условие возврата — тестовый цикл backup, flash и verify после объединения.
