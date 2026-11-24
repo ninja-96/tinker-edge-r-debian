@@ -511,7 +511,7 @@ static int engine_main(int fd)
 /* one engine per model; the table is guarded by g_eng_mu, every engine by its own mutex (one request at a time on its socket) */
 struct Engine {
 	uint32_t id = 0;
-	pid_t pid = -1;
+	std::atomic<pid_t> pid{-1};   /* dead while <= 0; LIST and DESCRIBE read it without e->mu: they must not wait for a RUN in progress */
 	int fd = -1;
 	std::mutex mu;
 	std::string key, name, plan;
@@ -707,11 +707,13 @@ static void handle(int in_fd, Msg &m)
 		reply(in_fd, m.h, false, nullptr, 0); break; }
 	case NPU_LIST: {
 		std::lock_guard<std::mutex> lk(g_eng_mu);
-		uint32_t n = g_engines.size();
+		uint32_t n = 0;
+		for (auto &kv : g_engines) if (kv.second->pid > 0) n++;   /* a stopped engine (its process is gone) is out: it is removed at the next request to it */
 		out.resize(4 + n * sizeof(npu_model_entry)); memcpy(out.data(), &n, 4);
 		size_t off = 4;
 		for (auto &kv : g_engines) {
 			const Engine &e = *kv.second;
+			if (e.pid <= 0) continue;
 			npu_model_entry me; memset(&me, 0, sizeof me);
 			me.id = e.id; me.n_inputs = e.lr.n_inputs; me.n_outputs = e.lr.n_outputs; me.load_ms = e.lr.load_ms; me.mem_used_kb = e.lr.mem_used_kb;
 			me.runs = e.runs; me.age_s = (uint32_t)((now_us() - e.loaded_us) / 1000000); me.from_nbg = e.from_nbg;
@@ -722,6 +724,7 @@ static void handle(int in_fd, Msg &m)
 	case NPU_DESCRIBE: {
 		auto e = engine_get(m.h.model);
 		if (!e) { reply_err(in_fd, m.h, "no such model on the NPU"); break; }
+		if (e->pid <= 0) { engine_remove(m.h.model); reply_err(in_fd, m.h, "the model was stopped"); break; }   /* a stopped engine is not attached to */
 		std::vector<uint8_t> d = e->desc; uint32_t one = 1; memcpy(d.data() + offsetof(npu_load_reply, attached), &one, 4);
 		reply(in_fd, m.h, false, d.data(), d.size()); break; }
 	case NPU_PING: reply(in_fd, m.h, false, m.payload.data(), m.payload.size()); break;
@@ -740,7 +743,8 @@ static void worker(int in_fd)
 			std::thread([in_fd](Msg mm) { std::lock_guard<std::mutex> lk(g_load_mu); handle(in_fd, mm); g_tx++; }, std::move(m)).detach();
 			continue;
 		}
-		if (m.h.type == NPU_RUN || m.h.type == NPU_OPS || m.h.type == NPU_GRAPH) {   /* a run can take up to RUN_TIMEOUT_S: the other models and the cheap requests are not stuck behind it */
+		if (m.h.type == NPU_RUN || m.h.type == NPU_OPS || m.h.type == NPU_GRAPH || m.h.type == NPU_UNLOAD) {   /* a run can take up to RUN_TIMEOUT_S and an unload waits for it
+			(the model's mutex): the other models and the cheap requests are not stuck behind either */
 			std::thread([in_fd](Msg mm) { handle(in_fd, mm); g_tx++; }, std::move(m)).detach();
 			continue;
 		}
