@@ -71,11 +71,17 @@ scripts/update-kernel.sh                # or: scripts/update-kernel.sh <host or 
 ssh debian@tinker-edge-r.local sudo reboot
 ```
 
-The script copies the kernel, device trees and modules over SSH. The previous kernel
-and device trees stay in `/boot/Image.old` and `/boot/dtbs.old`, and `extlinux.conf`
-gets a second entry `previous`. If the new kernel does not boot, choose `previous` at the
-U-Boot menu (serial console, press a key within 2 seconds), or write the image again over
-USB, see [FLASHING.md](FLASHING.md). Old modules are kept in `/lib/modules/`.
+The script copies the kernel, device trees and modules over SSH. Before it writes
+anything it checks that the new release is not already installed on the board: every
+kernel needs a unique release (`KERNEL_LOCALVERSION` in `sources.lock`), otherwise the
+script stops and says so. The modules of the new release are installed first — a failure
+there leaves the boot files untouched. The previous kernel and device trees stay in
+`/boot/Image.old` and `/boot/dtbs.old`, and the `previous` entry of `extlinux.conf` is
+regenerated from the current boot on every update: a rollback goes back to exactly the
+kernel, device tree and command line that ran before the last update. If the new kernel
+does not boot, choose `previous` at the U-Boot menu (serial console, press a key within
+2 seconds), or write the image again over USB, see [FLASHING.md](FLASHING.md). Modules
+of older kernels are kept in `/lib/modules/`.
 
 Check the result: `uname -r` shows the new release, then run
 `scripts/test-board.sh` ([TESTING.md](TESTING.md)).
