@@ -26,9 +26,23 @@ fi
 # the rootfs must answer at the builder's offset before any check: an empty
 # debugfs output would otherwise read as "everything absent" and a false "free"
 R=""
-try_root() {   # try_root <source>: 0 when the rootfs is readable and the required files exist
+# read_full <source> <path>: 0 when debugfs returns the whole file. A short read (fewer bytes
+# than the file declares) or a zeroed (truncated) block — which bash reads as empty after
+# dropping null bytes — both mean the mandatory data is not fully checked.
+read_full() {
+    local actual size content
+    actual=$(debugfs -R "cat $2" "$1" 2>/dev/null | wc -c)
+    size=$(debugfs -R "stat $2" "$1" 2>&1 | sed -n 's/^User:.*Size: \([0-9][0-9]*\).*/\1/p')
+    content=$(debugfs -R "cat $2" "$1" 2>/dev/null)
+    [ "${size:-0}" -gt 0 ] && [ "$actual" -lt "$size" ] && return 2   # a short read
+    [ "${size:-0}" -gt 0 ] && [ -z "$content" ] && return 2   # a zeroed block reads as empty
+    return 0
+}
+try_root() {   # try_root <source>: 0 when the rootfs is readable and the required files exist in full
     debugfs -R "cat /var/lib/dpkg/status" "$1" 2>/dev/null | grep -q '^Package:' || return 1
     debugfs -R "cat /etc/apt/sources.list" "$1" 2>/dev/null | grep -q . || return 1
+    read_full "$1" /var/lib/dpkg/status || return 1
+    read_full "$1" /etc/apt/sources.list || return 1
     R=$1
 }
 tmp=""
@@ -39,7 +53,7 @@ try_root "$IMG?offset=$((ROOT_START * 512))" || {
     trap '[ -n "$tmp" ] && rm -f "$tmp"' EXIT
     echo "  note debugfs cannot read the partition with the offset: extracting it to $tmp"
     dd if="$IMG" bs=512 skip="$ROOT_START" status=none of="$tmp" || incomplete "cannot read the root partition of $IMG at sector $ROOT_START"
-    try_root "$tmp" || incomplete "no readable ext4 rootfs at sector $ROOT_START of $IMG: /var/lib/dpkg/status and /etc/apt/sources.list must answer there"
+    try_root "$tmp" || incomplete "no readable ext4 rootfs at sector $ROOT_START of $IMG: /var/lib/dpkg/status and /etc/apt/sources.list must fully answer there"
 }
 dbg() { debugfs -R "$1" "$R" 2>/dev/null; }
 # stat_one <path> prints "present" | "absent" | "error" (error: the rootfs did not answer)
@@ -54,15 +68,17 @@ stat_one() {
     fi
 }
 # cat_root <path> prints the file content (possibly empty); 0 ok, 3 absent, 2 a read error
-# (the file answers to stat but not to cat: an existing file that cannot be read is an
-# incomplete check, not an empty one)
+# (a short read, or a zeroed (truncated) block that bash reads as empty: an existing file that
+# is not fully read is an incomplete check, not an empty or short one)
 cat_root() {
+    local st size actual content
     st=$(stat_one "$1")
     if [ "$st" = absent ]; then return 3; fi
     if [ "$st" = error ]; then return 2; fi
-    content=$(dbg "cat $1")
+    actual=$(dbg "cat $1" | wc -c)
     size=$(dbg "stat $1" | sed -n 's/^User:.*Size: \([0-9][0-9]*\).*/\1/p')
-    if [ "${size:-0}" -gt 0 ] && [ -z "$content" ]; then return 2; fi
+    content=$(dbg "cat $1")
+    if [ "${size:-0}" -gt 0 ] && { [ "$actual" -lt "$size" ] || [ -z "$content" ]; }; then return 2; fi
     printf '%s\n' "$content"
 }
 
@@ -97,6 +113,7 @@ check_apt_file() {   # check_apt_file <rootfs-path> <line|deb822>: 0 clean, 1 fo
         line) printf '%s\n' "$c" | awk '
             { line = $0; sub(/\r$/, "", line); gsub(/^[ \t]+|[ \t]+$/, "", line)
               if (line == "" || line ~ /^#/) next
+              sub(/#.*/, "", line); gsub(/[ \t]+$/, "", line)   # a trailing comment is not a component
               if (line !~ /^(deb|deb-src)[ \t]/) next
               sub(/\[[^\]]*\]/, " ", line)   # the options group (it may contain spaces)
               n = split(line, t, /[ \t]+/)   # type uri suite components...
@@ -109,17 +126,18 @@ check_apt_file() {   # check_apt_file <rootfs-path> <line|deb822>: 0 clean, 1 fo
                     n = split(comp, t, /[ \t]+/)
                     for (i = 1; i <= n; i++) if (t[i] == "contrib" || t[i] == "non-free" || t[i] == "non-free-firmware") { bad = 1; break }
                 }
-                enabled = 1; comp = ""; cur = "" }
+                enabled = 1; comp = ""; lcur = "" }
             BEGIN { enabled = 1 }
             { line = $0; sub(/\r$/, "", line)
               if (line ~ /^[ \t]*#/) next                    # a comment line
               if (line ~ /^[ \t]*$/) { flush(); next }      # a blank line: the stanza is over
-              if (line ~ /^[ \t]/) { if (cur == "Components") comp = comp " " line; next }   # a continued value
+              if (line ~ /^[ \t]/) { if (lcur == "components") comp = comp " " line; next }   # a continued value
               col = index(line, ":")
               cur = substr(line, 1, col - 1); val = substr(line, col + 1)
               gsub(/^[ \t]+|[ \t]+$/, "", cur); gsub(/^[ \t]+/, "", val)
-              if (cur == "Enabled") enabled = (tolower(val) == "no") ? 0 : 1
-              else if (cur == "Components") comp = val   # the field order in a stanza is free: the other fields leave comp as it is
+              lcur = tolower(cur)   # APT reads field names case-insensitively (components: is Components:)
+              if (lcur == "enabled") enabled = (tolower(val) == "no") ? 0 : 1
+              else if (lcur == "components") comp = val   # the field order in a stanza is free: the other fields leave comp as it is
             }
             END { flush(); if (bad) exit 1 }'
             ;;
