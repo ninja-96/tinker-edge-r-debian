@@ -37,12 +37,14 @@ CONF=/boot/extlinux/extlinux.conf
 
 STAGE=/tmp/kupd/stage
 MODDEST=/lib/modules/$REL
+MODDEST_CREATED=0   # set when this attempt creates the module dir, so cleanup never removes a pre-existing one
 
-# remove only what this attempt created: the staging and, on a failed attempt, the module
-# directory of this REL (the preflight below proves nothing with that release was installed)
+# remove only what this attempt created: the staging and, if this attempt created the module
+# dir (it does not exist when a collision is refused), that dir. A pre-existing /lib/modules/$REL
+# is an installed release and must survive a failed attempt
 cleanup() {
     rm -rf "$STAGE" /boot/Image.new /boot/dtbs.new
-    if [ -e "$MODDEST" ]; then rm -rf "$MODDEST"; fi
+    if [ "$MODDEST_CREATED" = 1 ]; then rm -rf "$MODDEST"; fi
 }
 fail() { cleanup; echo "error: $*" >&2; exit 1; }
 
@@ -71,13 +73,15 @@ rm -rf /boot/dtbs.new
 mkdir -p /boot/dtbs.new || fail "cannot create /boot/dtbs.new"
 cp -a rk3399pro-tinker-edge-r*.dtb /boot/dtbs.new/ || fail "cannot stage the device trees"
 
-# --- publish: the fallback set is snapshotted from the current state only after the new
-# set is staged and verified, so a failure above leaves both old entries exactly as they were ---
-cp -a /boot/dtbs.new/. /boot/dtbs/ || fail "cannot install the new device trees into /boot/dtbs"
+# --- publish: the fallback set is snapshotted from the CURRENT (old) state before it is
+# replaced, so a failure above leaves both old entries exactly as they were and the
+# "previous" entry keeps the old kernel and the old device trees ---
 cp -a /boot/Image /boot/Image.old || fail "cannot save the current kernel as /boot/Image.old"
 rm -rf /boot/dtbs.old
-cp -a /boot/dtbs /boot/dtbs.old || fail "cannot save the current device trees as /boot/dtbs.old"
+cp -a /boot/dtbs /boot/dtbs.old || fail "cannot save the device trees as /boot/dtbs.old"
+cp -a /boot/dtbs.new/. /boot/dtbs/ || fail "cannot install the new device trees into /boot/dtbs"
 mv -f /boot/Image.new /boot/Image || fail "cannot switch /boot/Image to the new kernel"
+MODDEST_CREATED=1
 cp -a "$STAGE/lib/modules/$REL/." "$MODDEST/" || fail "cannot install the modules of $REL into /lib/modules"
 
 # regenerate the fallback entry from the tinker block as left: after a rollback the board
