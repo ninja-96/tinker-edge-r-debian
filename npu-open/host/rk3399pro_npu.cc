@@ -71,30 +71,45 @@ public:
 	using Cb = std::function<void(std::vector<uint8_t> &&data, uint32_t model, const std::string &err)>;
 	std::string via;
 
+	static std::mutex shared_mu_; static std::weak_ptr<Link> shared_cur_;   // the current connection of this process
 	static std::shared_ptr<Link> shared()
 	{
-		static std::mutex mu; static std::weak_ptr<Link> cur;
-		std::lock_guard<std::mutex> lk(mu);
-		auto s = cur.lock();
+		std::lock_guard<std::mutex> lk(shared_mu_);
+		auto s = shared_cur_.lock();
 		if (s && !s->dead_) return s;
 		s = std::shared_ptr<Link>(new Link());
-		cur = s;
+		shared_cur_ = s;
+		s->self_weak_ = s;
+		/* the reader keeps a strong reference to the Link for its whole life: a program that lets go of the connection in the middle of a
+		 * callback must not destroy the Link under it. The thread is detached: it can never outlive its own reference, so nothing has to
+		 * join it (~Link runs after the thread function finished, and just frees the descriptor) */
+		std::thread t([self = s] { self->read_loop(); self->reader_done_ = true; });
+		t.detach();
 		return s;
 	}
 
 	~Link()
 	{
+		if (sock_ >= 0) { close(sock_); sock_ = -1; }
+		else if (usb_ >= 0) { unsigned ifc = iface_; ioctl(usb_, USBDEVFS_RELEASEINTERFACE, &ifc); close(usb_); usb_ = -1; }
+	}
+
+	/* a program let go of the connection; when this was the last external reference the reader is asked to finish (a new program opens a new
+	 * connection then; if a callback still runs, the Link outlives it through the reader's own reference and is closed there) */
+	void user_left()
+	{
+		if (self_weak_.use_count() != 1 + (reader_done_ ? 0 : 1)) return;   // another model still holds the connection
+		std::lock_guard<std::mutex> lk(shared_mu_);
+		if (shared_cur_.lock().get() == this) shared_cur_.reset();
 		closing_ = true;
-		if (sock_ >= 0) { shutdown(sock_, SHUT_RDWR); if (reader_.joinable()) reader_.join(); close(sock_); }
-		else if (usb_ >= 0) {
-			try { std::string bye = "bye"; send(NPU_PING, bye.data(), bye.size(), 0, next_tag()); } catch (...) {}   // the answer wakes the reader, which then ends
-			if (reader_.joinable()) reader_.join();
-			unsigned ifc = iface_; ioctl(usb_, USBDEVFS_RELEASEINTERFACE, &ifc); close(usb_);
-		} else if (reader_.joinable()) reader_.join();
+		if (sock_ >= 0) shutdown(sock_, SHUT_RDWR);
+		else if (usb_ >= 0) { try { std::string bye = "bye"; send(NPU_PING, bye.data(), bye.size(), 0, next_tag()); } catch (...) {} }
 	}
 
 	void submit(uint16_t type, const void *p, size_t n, uint32_t model, Cb cb)
 	{
+		if (std::this_thread::get_id() == reader_tid_)
+			throw Error("an NPU request from the reply thread of this connection (an async_exec callback): it would wait for its own reply; do it in another thread");
 		uint32_t tag = next_tag();
 		{ std::lock_guard<std::mutex> lk(mu_); if (dead_) throw Error(dead_why_); pending_[tag] = std::move(cb); }
 		try { send(type, p, n, model, tag); }
@@ -104,6 +119,8 @@ public:
 	struct Reply { std::vector<uint8_t> data; uint32_t model = 0; };
 	Reply call(uint16_t type, const void *p = nullptr, size_t n = 0, uint32_t model = 0, int timeout_s = 30)
 	{
+		if (std::this_thread::get_id() == reader_tid_)
+			throw Error("an NPU request from the reply thread of this connection (an async_exec callback): it would wait for its own reply; do it in another thread");
 		struct Box { std::mutex mu; std::condition_variable cv; bool done = false; Reply r; std::string err; };
 		auto box = std::make_shared<Box>();
 		uint32_t tag = next_tag();
@@ -143,7 +160,9 @@ public:
 private:
 	int sock_ = -1, usb_ = -1;
 	unsigned ep_in_ = 0, ep_out_ = 0, iface_ = 0;
-	std::thread reader_;
+	std::thread::id reader_tid_{};   // the reply thread (set in read_loop before anything is delivered)
+	std::atomic<bool> reader_done_{false};   // the reply thread finished: it no longer holds its reference to the Link
+	std::weak_ptr<Link> self_weak_;
 	std::mutex mu_, wmu_;
 	std::unordered_map<uint32_t, Cb> pending_;
 	uint32_t tag_ = 0;
@@ -169,7 +188,6 @@ private:
 			open_usb();
 			via = "usb";
 		}
-		reader_ = std::thread([this] { read_loop(); });
 	}
 
 	void open_usb()
@@ -244,6 +262,7 @@ private:
 
 	void read_loop()
 	{
+		reader_tid_ = std::this_thread::get_id();
 		std::vector<uint8_t> buf(256 * 1024), rx;
 		size_t off = 0;
 		while (!closing_) {
@@ -279,6 +298,9 @@ private:
 		}
 	}
 };
+
+std::mutex Link::shared_mu_;
+std::weak_ptr<Link> Link::shared_cur_;
 
 // ---------------------------------------------------------------- module functions
 static std::vector<ModelInfo> list_models(Link &l)
@@ -493,7 +515,7 @@ void Model::init(const std::vector<uint8_t> &data, const LoadOptions &opt, const
 		if (!attached_) desc = load(data, opt);
 		parse_desc(desc);
 	} catch (...) {
-		link_.reset();
+		auto l = link_; link_.reset(); l->user_left();   // the failed load was our reference to the connection
 		throw;
 	}
 }
@@ -1094,7 +1116,13 @@ void Model::async_exec(const std::vector<const void *> &in, Done done)
 	} catch (...) { slots->release(); throw; }
 }
 
-void Model::close() { link_.reset(); }
+void Model::close()
+{
+	auto l = link_;
+	if (!l) return;
+	link_.reset();
+	l->user_left();   // when this was the last user of the connection the reader is asked to finish
+}
 
 uint32_t Model::last_invoke_us() const { return slots_ ? slots_->last_us.load() : 0; }
 
@@ -1102,9 +1130,9 @@ void Model::stop()
 {
 	if (!link_) throw Error("this Model is closed");
 	auto l = link_;
-	link_.reset();
 	try { l->call(NPU_UNLOAD, nullptr, 0, id_, 30); }
-	catch (Error &e) { if (std::string(e.what()).find("no such model") == std::string::npos) throw; }   // gone already (stopped by another program, or its engine died)
+	catch (Error &e) { if (std::string(e.what()).find("no such model") == std::string::npos) throw; }   // gone already (stopped by another program, or its engine died); otherwise the model stays loaded and usable
+	close();   // the model is off the NPU now (or already was): let go of the connection
 }
 
 }  // namespace rk3399pro_npu

@@ -219,9 +219,12 @@ class Model:
         return self._m.exec(self._prepare(x), int(timeout))
 
     def async_exec(self, x, callback):
-        """EXPERIMENTAL. Queue a run and return at once; callback(outputs, error) is called from a helper thread when the result is there
-        (outputs as exec() returns them and error None, or None and the error text). At most max_inflight runs of this model are on their way
-        (the call waits for a free slot).
+        """EXPERIMENTAL. Queue a run and return at once; callback(outputs, error) is called from the helper (reader) thread of the connection when
+        the result is there (outputs as exec() returns them and error None, or None and the error text). At most max_inflight runs of this model are
+        on their way (the call waits for a free slot).
+
+        The callback runs on that reader thread: a synchronous NPU request from it (exec, stop, close, on this or any Model) raises NpuError — do
+        the work in another thread.
 
         A request sent right after a reply while others are in flight (as pipelining does) was seen to hang the USB transfer, and with it the xHCI of
         the board: a pause of async_gap_us (default 300 us) before each request avoids it. exec() is not affected."""

@@ -166,12 +166,14 @@ public:
 	// The same with vectors: returns the outputs.
 	std::vector<std::vector<uint8_t>> exec(const std::vector<std::vector<uint8_t>> &in, int timeout_s = 30);
 
-	// EXPERIMENTAL. Queue a run and return at once; done(outputs, error) is called from the reader thread (error empty on success).
+	// EXPERIMENTAL. Queue a run and return at once; done(outputs, error) is called from the reader thread of the connection (error empty on
+	// success). Do not make a synchronous NPU request from it (exec, stop, close would throw Error: it would wait for its own reply).
 	// Waits while max_inflight runs of this model are on their way.
 	using Done = std::function<void(std::vector<std::vector<uint8_t>> &&outputs, const std::string &error)>;
 	void async_exec(const std::vector<const void *> &in, Done done);
 
-	void close();                     // let go of the model: it stays loaded on the NPU (for this or other programs)
+	void close();                     // let go of the model: it stays loaded on the NPU (for this or other programs); the shared connection to the
+	                                   // NPU is closed when the last user lets go of it (the next program opens a new one)
 	void stop();                      // unload it from the NPU (for every program) and close
 
 private:
