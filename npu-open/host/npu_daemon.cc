@@ -45,6 +45,9 @@ static const int MAX_RUNS_IN_FLIGHT = 2;     /* RUN requests on the bus at once 
  * never hung: the pause is made only when another request is on its way. */
 static int g_gap_us = 300;
 static const size_t MAX_MSG = 96u << 20;
+/* a client that does not read its reply this long (stopped, clogged buffer) is disconnected: its reply is dropped and the
+ * other clients keep getting theirs (the delivery below runs on the one USB thread of the daemon) */
+static const uint64_t REPLY_DELIVER_TIMEOUT_MS = 10 * 1000;
 
 static void logf_(const char *fmt, ...)
 {
@@ -63,11 +66,20 @@ struct Client {
 		std::lock_guard<std::mutex> lk(wmu);
 		if (gone) return;
 		const uint8_t *q[2] = { (const uint8_t *)&h, (const uint8_t *)p }; size_t len[2] = { sizeof h, n };
+		uint64_t deadline = now_us() + REPLY_DELIVER_TIMEOUT_MS * 1000;   /* one whole reply, partial writes and EINTR included */
 		for (int i = 0; i < 2; i++) while (len[i]) {
+			uint64_t left = deadline - now_us();
+			if (!left) { gone = true; break; }
+			struct pollfd pf = { fd, POLLOUT, 0 };
+			int pr = poll(&pf, 1, (int)(left / 1000));
+			if (pr < 0) { if (errno == EINTR) continue; gone = true; break; }
+			if (pr == 0) { if (now_us() >= deadline) { gone = true; break; } continue; }
+			if (pf.revents & (POLLERR | POLLHUP | POLLNVAL)) { gone = true; break; }
 			ssize_t w = ::send(fd, q[i], len[i], MSG_NOSIGNAL);
-			if (w < 0) { if (errno == EINTR) continue; gone = true; return; }
+			if (w < 0) { if (errno == EINTR || errno == EAGAIN) continue; gone = true; break; }
 			q[i] += w; len[i] -= w;
 		}
+		if (gone) shutdown(fd, SHUT_RDWR);   /* wake the thread that reads this connection; the close stays with its owner in client_loop */
 	}
 	void error(uint16_t type, uint32_t tag, const std::string &t)
 	{
