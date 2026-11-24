@@ -12,6 +12,7 @@ fi
 
 # --privileged: rootfs creation needs mount/chroot/mknod inside the container.
 TTY=(); [ -t 0 ] && TTY=(-it)
+# issue-8: forward FORCE_PW_CHANGE so the rootfs cache key and the first-login policy use the caller's value.
 exec docker run --rm "${TTY[@]}" --privileged \
     -v "$PWD":/work -w /work \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
