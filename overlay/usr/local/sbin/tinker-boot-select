@@ -18,7 +18,12 @@ variants() { ls "$DT" | sed 's/^rk3399pro-tinker-edge-r-\?//; s/\.dtb$//; s/^$/b
 
 if [ $# -ne 1 ]; then
     echo "variants:"; variants | sed 's/^/  /'
-    [ -f "$CONF" ] && echo "current: $(grep -m1 -E '^\s*fdt ' "$CONF" | sed 's#.*/rk3399pro-tinker-edge-r-\?##; s/\.dtb//; s/^$/base/')"
+    if [ -f "$CONF" ]; then
+        # the active entry is the "tinker" block: the "previous" one (rollback) keeps its own fdt
+        cur=$(awk '/^label /{lbl=$2} lbl=="tinker" && $0 ~ /^[ \t]*fdt[ \t]/{sub(/^[ \t]*fdt[ \t]+/,""); print; exit}' "$CONF" \
+              | sed 's#.*/rk3399pro-tinker-edge-r-\?##; s/\.dtb$//; s/^$/base/')
+        [ -n "$cur" ] && echo "current: $cur"
+    fi
     exit 0
 fi
 v=$1
@@ -26,8 +31,14 @@ case "$v" in base) f=$DT/rk3399pro-tinker-edge-r.dtb ;; *) f=$DT/rk3399pro-tinke
 [ -f "$f" ] || { echo "no such variant: $v" >&2; exit 1; }
 
 if [ -f "$CONF" ]; then
-    cp -f "$CONF" "$CONF.prev"
-    sed -i -E "s#^(\s*fdt\s+).*#\1$f#" "$CONF"
+    dir=$(dirname "$CONF")
+    tmp=$(mktemp "$dir/.extlinux.conf.XXXXXX")
+    # change only the fdt line of the "label tinker" block: the "previous" entry (the rollback) must keep its own kernel, fdt and append
+    awk -v f="$f" '/^label /{lbl=$2} lbl=="tinker" && $0 ~ /^[ \t]*fdt[ \t]/{match($0,/^[ \t]*/); $0=substr($0,1,RLENGTH) "fdt " f; changed++} {print} END{exit (changed==1)?0:1}' \
+        "$CONF" > "$tmp" || { rm -f "$tmp"; echo "no single 'label tinker' with an 'fdt' line in $CONF" >&2; exit 1; }
+    cp -f -- "$CONF" "$CONF.prev"
+    chmod --reference="$CONF" "$tmp"; chown --reference="$CONF" "$tmp"
+    mv -f -- "$tmp" "$CONF"
     echo "extlinux now uses '$v' ($f). Previous: $CONF.prev. Reboot to apply."
     exit 0
 fi
