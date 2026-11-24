@@ -20,7 +20,8 @@ if [ $# -ne 1 ]; then
     echo "variants:"; variants | sed 's/^/  /'
     if [ -f "$CONF" ]; then
         # the active entry is the "tinker" block: the "previous" one (rollback) keeps its own fdt
-        cur=$(awk '/^label /{lbl=$2} lbl=="tinker" && $0 ~ /^[ \t]*fdt[ \t]/{sub(/^[ \t]*fdt[ \t]+/,""); print; exit}' "$CONF" \
+        # U-Boot's get_token skips leading whitespace, so an indented "label" line is a block boundary
+        cur=$(awk '/^[ \t]*label[ \t]/{lbl=$2} lbl=="tinker" && $0 ~ /^[ \t]*fdt[ \t]/{sub(/^[ \t]*fdt[ \t]+/,""); print; exit}' "$CONF" \
               | sed 's#.*/rk3399pro-tinker-edge-r-\?##; s/\.dtb$//; s/^$/base/')
         [ -n "$cur" ] && echo "current: $cur"
     fi
@@ -33,8 +34,9 @@ case "$v" in base) f=$DT/rk3399pro-tinker-edge-r.dtb ;; *) f=$DT/rk3399pro-tinke
 if [ -f "$CONF" ]; then
     dir=$(dirname "$CONF")
     tmp=$(mktemp "$dir/.extlinux.conf.XXXXXX")
-    # change only the fdt line of the "label tinker" block: the "previous" entry (the rollback) must keep its own kernel, fdt and append
-    awk -v f="$f" '/^label /{lbl=$2} lbl=="tinker" && $0 ~ /^[ \t]*fdt[ \t]/{match($0,/^[ \t]*/); $0=substr($0,1,RLENGTH) "fdt " f; changed++} {print} END{exit (changed==1)?0:1}' \
+    # U-Boot's get_token skips leading whitespace, so an indented "label" line is a block boundary:
+    # only the fdt of the real "tinker" block is changed, the "previous" rollback keeps its own
+    awk -v f="$f" '/^[ \t]*label[ \t]/{lbl=$2} lbl=="tinker" && $0 ~ /^[ \t]*fdt[ \t]/{match($0,/^[ \t]*/); $0=substr($0,1,RLENGTH) "fdt " f; changed++} {print} END{exit (changed==1)?0:1}' \
         "$CONF" > "$tmp" || { rm -f "$tmp"; echo "no single 'label tinker' with an 'fdt' line in $CONF" >&2; exit 1; }
     cp -f -- "$CONF" "$CONF.prev"
     chmod --reference="$CONF" "$tmp"; chown --reference="$CONF" "$tmp"
