@@ -34,11 +34,21 @@ else
 fi
 
 # Skip the (slow, network) build when nothing it depends on changed. FORCE=1 rebuilds.
-STAMP="rootfs $(sha256sum scripts/build-rootfs.sh | cut -c1-16) FREE=$FREE"
-if [ "${FORCE:-0}" != 1 ] && [ -f "$OUTFILE" ] && [ -f "$OUTFILE.stamp" ] && [ "$(cat "$OUTFILE.stamp")" = "$STAMP" ]; then
+# The key covers every effective (non-secret) parameter: a different host name, user or
+# first-login-password-change policy is a different archive. A non-default password never
+# uses the cache and does not publish a stamp: the built archive would carry that
+# password and must not be served to a later default build.
+PASS_DEFAULT=debian
+PWC=${FORCE_PW_CHANGE:-1}
+STAMP="rootfs $(sha256sum scripts/build-rootfs.sh | cut -c1-16) FREE=$FREE HOST=$HOSTNAME_ USER=$USER_ PWC=$PWC"
+if [ "$PASS_" != "$PASS_DEFAULT" ]; then
+    echo "rootfs: non-default password: building without the cache (and invalidating it)"
+    rm -f "$OUTFILE.stamp"
+elif [ "${FORCE:-0}" != 1 ] && [ -f "$OUTFILE" ] && [ -f "$OUTFILE.stamp" ] && [ "$(cat "$OUTFILE.stamp")" = "$STAMP" ]; then
     echo "rootfs: up to date (FORCE=1 rebuilds)"
     exit 0
 fi
+rm -f "$OUTFILE.stamp"   # published again only after the build succeeds
 
 mmdebstrap --arch=arm64 --variant=minbase \
     --components="$COMPONENTS" \
@@ -64,6 +74,7 @@ mmdebstrap --arch=arm64 --variant=minbase \
         rm -rf "$1/var/lib/apt/lists/"*' \
     trixie "$OUTFILE" https://deb.debian.org/debian
 
-echo "$STAMP" > "$OUTFILE.stamp"
-chown "${HOST_UID:-0}:${HOST_GID:-0}" "$OUTFILE" "$OUTFILE.stamp"
+[ "$PASS_" = "$PASS_DEFAULT" ] && echo "$STAMP" > "$OUTFILE.stamp"
+chown "${HOST_UID:-0}:${HOST_GID:-0}" "$OUTFILE"
+[ "$PASS_" = "$PASS_DEFAULT" ] && chown "${HOST_UID:-0}:${HOST_GID:-0}" "$OUTFILE.stamp"
 ls -lh "$OUTFILE"
