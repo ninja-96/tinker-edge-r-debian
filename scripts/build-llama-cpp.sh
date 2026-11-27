@@ -5,7 +5,21 @@
 # Run as an ordinary user: ./scripts/build-llama-cpp.sh
 set -euo pipefail
 
-if [[ $(uname -m) != aarch64 ]]; then
+cross=()
+if [[ ${1:-} == --image ]]; then
+    # This mode runs inside the disposable Debian multiarch builder.
+    sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources
+    apt-get update
+    apt-get install -y --no-install-recommends ninja-build ocl-icd-opencl-dev:arm64 libopenblas-dev:arm64 libssl-dev:arm64
+    cross=(-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64
+           -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++
+           -DOpenCL_LIBRARY=/usr/lib/aarch64-linux-gnu/libOpenCL.so
+           -DOPENSSL_SSL_LIBRARY=/usr/lib/aarch64-linux-gnu/libssl.so
+           -DOPENSSL_CRYPTO_LIBRARY=/usr/lib/aarch64-linux-gnu/libcrypto.so
+           -DBLAS_LIBRARIES=/usr/lib/aarch64-linux-gnu/libopenblas.so)
+    export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig
+    export LLAMA_CPP_RELEASE=pinned
+elif [[ $(uname -m) != aarch64 ]]; then
     echo 'Run this script on the Tinker Edge R (arm64).' >&2
     exit 1
 fi
@@ -27,6 +41,7 @@ if [[ ! $release =~ ^[a-zA-Z0-9][a-zA-Z0-9._-]*$ ]]; then
 fi
 
 work="$PWD/out/llama-cpp/$release"
+[[ ${1:-} != --image ]] || work+=-image
 mkdir -p "$work"
 if [[ ! -d $work/source/.git ]]; then
     git clone --depth 1 --branch "$release" "$repo" "$work/source"
@@ -57,11 +72,21 @@ cmake -S "$work/source" -B "$work/build" -G Ninja \
     -DGGML_OPENCL_USE_ADRENO_KERNELS=OFF -DGGML_OPENCL_USE_ADRENO_BIN_KERNELS=OFF \
     -DGGML_VULKAN=OFF \
     -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_TOOLS=ON \
-    -DLLAMA_BUILD_SERVER=ON -DLLAMA_OPENSSL=ON
+    -DLLAMA_BUILD_SERVER=ON -DLLAMA_OPENSSL=ON "${cross[@]}"
 
 # Two jobs by default to keep compiler and LTO memory usage within 4 GB RAM.
 cmake --build "$work/build" --parallel "${JOBS:-2}" --target llama-cli llama-server llama-bench
 bin="$work/build/bin"
+if [[ ${1:-} == --image ]]; then
+    dest="$root/out/llama-package"
+    mkdir -p "$dest/usr/bin" "$dest/usr/share/doc/llama.cpp"
+    for tool in llama-cli llama-server llama-bench; do
+        aarch64-linux-gnu-strip -o "$dest/usr/bin/$tool" "$bin/$tool"
+    done
+    cp "$work/source/LICENSE" "$dest/usr/share/doc/llama.cpp/copyright"
+    echo "$release $revision" > "$dest/usr/share/doc/llama.cpp/version"
+    exit 0
+fi
 "$bin/llama-cli" --version
 echo "Binaries: $bin"
 echo "CPU: $bin/llama-cli -hf LiquidAI/LFM3-1.7B-GGUF:Q4_K_M -ngl 0 -t 6 -c 2048 --temp 0.1 --top-k 50 --repeat-penalty 1.1"

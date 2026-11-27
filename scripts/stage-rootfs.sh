@@ -17,6 +17,11 @@ TAR=$O/rootfs.tar
 rm -rf "$W"; mkdir -p "$W"
 tar -xpf "$TAR" -C "$W" --numeric-owner
 
+for tool in llama-cli llama-server llama-bench; do
+    install -m 0755 "$O/llama-package/usr/bin/$tool" "$W/usr/bin/$tool"
+done
+cp -a --no-preserve=ownership "$O/llama-package/usr/share/doc/llama.cpp" "$W/usr/share/doc/"
+
 # no SSH host keys in the image: ssh-hostkeys.service creates them on first boot
 rm -f "$W"/etc/ssh/ssh_host_*
 
@@ -72,6 +77,7 @@ install -D -m 0644 artwork/boot-logo/README.md "$W/usr/share/plymouth/themes/tin
 # Licences, the notice and the package manifest travel with the image (see NOTICE.md, section 4)
 DOC="$W/usr/share/doc/tinker-edge-r"
 mkdir -p "$DOC/licenses"
+cp "$W/usr/share/doc/llama.cpp/copyright" "$DOC/licenses/llama.cpp-LICENSE"
 cp NOTICE.md "$DOC/NOTICE.md"
 cp LICENSES/*.txt "$DOC/licenses/"
 cp blobs/rockchip/LICENSE "$DOC/licenses/Rockchip-rkbin-LICENSE"

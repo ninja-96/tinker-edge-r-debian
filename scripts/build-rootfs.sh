@@ -22,7 +22,7 @@ PACKAGES=(
     gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
     chromium weston
     plymouth
-    locales alsa-utils bluez libgl1-mesa-dri libegl-mesa0 libgbm1 mesa-utils libdrm-tests mesa-opencl-icd clinfo
+    locales alsa-utils bluez libgl1-mesa-dri libegl-mesa0 libgbm1 mesa-utils libdrm-tests mesa-opencl-icd clinfo libopenblas0-pthread
 )
 if [ "$FREE" = 1 ]; then
     COMPONENTS="main"

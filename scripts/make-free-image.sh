@@ -20,5 +20,6 @@ BL31=out/bl31-tfa.elf ./run.sh scripts/build-uboot.sh
 [ -f out/bl31-tfa.elf ] || { echo "free build: out/bl31-tfa.elf missing: TF-A did not build" >&2; exit 1; }
 [ -f out/u-boot-rockchip.bin ] || { echo "free build: out/u-boot-rockchip.bin missing: U-Boot did not build" >&2; exit 1; }
 FREE=1 ./run.sh scripts/build-rootfs.sh
+./run.sh scripts/build-llama-cpp.sh --image
 FREE=1 ./run.sh scripts/build-image-mainline-uboot.sh
 ./scripts/audit-free.sh out/tinker-edge-r-debian13-free.img

@@ -40,6 +40,7 @@ depend on any of these at build time except the open upstream sources listed und
 | TF-A v2.15.0 (only for the open BL31) | https://github.com/ARM-software/arm-trusted-firmware | `sources.lock` |
 | VA-API driver for rkvdec (GPL-3.0-or-later) | [omacom/libva-v4l2_request](https://github.com/omacom/libva-v4l2_request/tree/4f60c51f7841dd74bb61c94a4ad31e630bbdab01) | `sources.lock` and the RK3399 probe fix in `patches/omacom-v4l2-request/` |
 | Debian 13 "trixie" packages | https://deb.debian.org/debian | `scripts/build-rootfs.sh` |
+| llama.cpp | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | `LLAMA_CPP_PATCH_REV` in `sources.lock`, [MIT](https://github.com/ggml-org/llama.cpp/blob/v1.1.0/LICENSE) |
 | NPU stack: TIM-VX, tflite-vx-delegate (`main` branches), LiteRT 2.4.0, the TensorFlow tree it pins, and what its TensorFlow Lite builds with (abseil, Eigen, farmhash, fft2d, flatbuffers, gemmlowp, ml_dtypes, ruy, cpuinfo, FP16, protobuf, XNNPACK, pthreadpool, FXdiv) | the entries in `LITERT_DEPS`, `LITERT_URL`, `LITERT_TF_URL` | `sources.lock` (commits; tarballs with sha256), licences in [../README.md](../README.md) |
 
 ## Artwork
