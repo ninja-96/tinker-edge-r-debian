@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the image that boots on the Tinker Edge R, from a clean checkout:
 #   scripts/make-image.sh        -> out/tinker-edge-r-debian13.img
+#   SD=1 scripts/make-image.sh   -> out/tinker-edge-r-debian13-sd.img + out/tinker-edge-r-uboot-emmc.img
 # Needs Docker (user in the docker group). Takes about 40 minutes.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,4 +21,12 @@ cd "$(dirname "$0")/.."
 ./run.sh scripts/build-rkdeveloptool-arm64.sh      # rkdeveloptool for the board -> out/rkdeveloptool-arm64
 ./run.sh scripts/build-flash-tools.sh             # rkdeveloptool + loaders -> out/tools
 ./run.sh scripts/build-image-mainline-uboot.sh    # image       -> out/tinker-edge-r-debian13.img
-ls -lh out/tinker-edge-r-debian13.img
+IMG=out/tinker-edge-r-debian13
+[ "${FREE:-0}" = 1 ] && IMG+=-free
+[ "${SD:-0}" = 1 ] && IMG+=-sd
+ls -lh "$IMG.img"
+if [ "${SD:-0}" = 1 ]; then
+    LOADER_IMG=out/tinker-edge-r-uboot-emmc
+    [ "${FREE:-0}" = 1 ] && LOADER_IMG+=-free
+    ls -lh "$LOADER_IMG.img"
+fi

@@ -16,7 +16,7 @@ while [ $# -gt 0 ]; do
     esac
 done
 DEV=${1:?usage: $0 [-y] [--dry-run] /dev/sdX [image]}
-IMG=${2:-out/tinker-edge-r-debian13.img}
+IMG=${2:-out/tinker-edge-r-debian13-sd.img}
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -24,6 +24,7 @@ die() { echo "error: $*" >&2; exit 1; }
 [ -b "$DEV" ] || die "$DEV is not a block device"
 [ "$(lsblk -dno TYPE "$DEV")" = disk ] || die "$DEV is not a whole disk (use /dev/sdX, not a partition)"
 
+DEV=$(readlink -f "$DEV")
 name=$(basename "$DEV")
 
 # never touch the disk the running system lives on (checked before anything else)
@@ -36,7 +37,7 @@ img_size=$(stat -c %s "$IMG")
 [ "$size" -ge "$img_size" ] || die "$DEV ($size B) is smaller than the image ($img_size B)"
 
 # anything mounted from it?
-if lsblk -nlo MOUNTPOINTS "$DEV" | grep -q .; then
+if lsblk -nlo MOUNTPOINTS "$DEV" | grep -q '[^[:space:]]'; then
     die "$DEV has mounted partitions; unmount them first"
 fi
 

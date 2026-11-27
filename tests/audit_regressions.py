@@ -1,4 +1,5 @@
 """Offline acceptance tests for board administration scripts. Run with python3."""
+import json
 import os
 from pathlib import Path
 import shutil
@@ -215,6 +216,91 @@ esac''')
                 self.assertNotIn("RESULT:", output)
             else:
                 self.assertIn("RESULT: " + ("NOT free" if code else "free"), output)
+
+    def test_sd_image_identity(self):
+        scripts = self.work / "scripts"
+        scripts.mkdir()
+        shutil.copy(ROOT / "scripts/build-image-mainline-uboot.sh", scripts)
+        (self.work / "sources.lock").write_text("LINUX_VERSION=6.18\nKERNEL_LOCALVERSION=\n")
+        stage = scripts / "stage-rootfs.sh"
+        stage.write_text('#!/bin/sh\nmkdir -p "$1/etc"\n'
+                         'echo "LABEL=rootfs / ext4 defaults,noatime 0 1" > "$1/etc/fstab"\n')
+        stage.chmod(0o755)
+        out = self.work / "out"
+        out.mkdir()
+        for name in ("u-boot-rockchip-ddrblob.bin", "Image", "rootfs.tar", "rk3399pro-tinker-edge-r-browser.dtb"):
+            (out / name).write_bytes(b"fixture")
+        self.env.update(ROOTFS_MIB="4", FREE="0", DTB_VARIANT="browser")
+        ids = []
+        for sd, suffix, label in (("0", "", "rootfs"), ("1", "-sd", "rootfs-sd")):
+            self.env["SD"] = sd
+            self.execute(0, scripts / "build-image-mainline-uboot.sh")
+            image = out / f"tinker-edge-r-debian13{suffix}.img"
+            part = json.loads(self.execute(0, "sfdisk", "--json", image))["partitiontable"]["partitions"][0]
+            uid = part["uuid"].lower()
+            ids.append(uid)
+            with image.open("rb") as f:
+                f.seek(64*512)
+                self.assertEqual(f.read(7), b"fixture")
+            fs = out / f"rootfs{suffix}.ext4"
+            self.assertEqual(self.execute(0, "blkid", "-p", "-s", "LABEL", "-o", "value", fs).strip(), label)
+            self.assertIn(f"root=PARTUUID={uid} ", self.execute(0, "debugfs", "-R", "cat /boot/extlinux/extlinux.conf", fs))
+            self.assertIn(f"LABEL={label} / ", self.execute(0, "debugfs", "-R", "cat /etc/fstab", fs))
+            if sd == "1":
+                info = self.execute(0, "dumpe2fs", "-h", fs)
+                self.assertRegex(info, r"(?m)^Reserved block count:\s+0$")
+        self.assertNotEqual(*ids)
+        loader_only = out / "tinker-edge-r-uboot-emmc.img"
+        self.assertEqual(loader_only.stat().st_size, 16 * 1024 * 1024)
+        with loader_only.open("rb") as f:
+            self.assertEqual(f.read(64*512), bytes(64*512))
+            self.assertEqual(f.read(7), b"fixture")
+        # The first-boot helper grows the final partition on cards of any size.
+        for card_gb in (8, 32, 64):
+            with image.open("r+b") as f:
+                f.truncate(card_gb * 10**9)
+            result = subprocess.run(["sfdisk", "--no-reread", "-q", "-N", "1", image],
+                                    input=", +\n", env=self.env, text=True, capture_output=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            table = json.loads(self.execute(0, "sfdisk", "--json", image))["partitiontable"]
+            self.assertEqual(table["partitions"][0]["start"] + table["partitions"][0]["size"] - 1,
+                             table["lastlba"])
+
+    def test_loader_only_write_ranges(self):
+        scripts = self.work / "scripts"
+        scripts.mkdir()
+        shutil.copy(ROOT / "scripts/flash-emmc-loader.sh", scripts)
+        (scripts / "rockchip-usb.sh").write_text(
+            'check_usb() { :; }\nload_loader() { :; }\n'
+            'write_and_verify() { echo "$2 $(stat -c %s "$1")" >> calls; }\n')
+        tools = self.work / "out/tools"
+        tools.mkdir(parents=True)
+        rkdt = tools / "rkdeveloptool"
+        rkdt.write_text('#!/bin/sh\ncase "$1" in ld) echo DevNo=1;; rfi) echo "Flash Sectors: 65536";; esac\n')
+        rkdt.chmod(0o755)
+        (tools / "rk3399_loader.bin").touch()
+        self.command("sudo", 'exec "$@"')
+        loader = self.work / "loader.img"
+        size = 32768 * 512
+        with loader.open("wb") as f:
+            f.seek(16384 * 512)
+            f.write(bytes.fromhex("d00dfeed"))
+            f.truncate(size)
+        backup = self.work / "backup.img"
+        args = [str(scripts / "flash-emmc-loader.sh"), "--backup", str(backup), str(loader)]
+        for backup_size, confirmation, expected in ((512, "LOADER-ONLY\n", 1),
+                                                   (65536 * 512, "NO\n", 1),
+                                                   (65536 * 512, "LOADER-ONLY\n", 0)):
+            with backup.open("wb") as f:
+                f.truncate(backup_size)
+            (self.work / "backup.img.sha256").write_text(self.execute(0, "sha256sum", backup))
+            result = subprocess.run(args, cwd=self.work, env=self.env, input=confirmation,
+                                    text=True, capture_output=True)
+            self.assertEqual(result.returncode, expected, (result.stdout, result.stderr))
+            if expected:
+                self.assertFalse((self.work / "calls").exists())
+        self.assertEqual((self.work / "calls").read_text().splitlines(),
+                         [f"64 {size-64*512}", f"{65536-33} {33*512}", f"0 {64*512}"])
 
 
 

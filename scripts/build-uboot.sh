@@ -41,6 +41,10 @@ done
 cp dts/rk3399pro-tinker-edge-r.dts "$U/dts/upstream/src/arm64/rockchip/"
 make -C "$U" O="$B" tinker-edge-r-rk3399pro_defconfig
 make -C "$U" O="$B" -j"$(nproc)"
+# U-Boot's rk3399-u-boot.dtsi overrides Linux's MMC aliases: mmc1 is SD here.
+test "$(fdtget -t s "$B/u-boot.dtb" /aliases mmc1)" = /mmc@fe320000
+test "$(fdtget -t s "$B/u-boot.dtb" /aliases mmc0)" = /mmc@fe330000
+strings "$B/u-boot.bin" | grep -x 'boot_targets=mmc1 mmc0 nvme scsi usb pxe dhcp spi' >/dev/null
 cp "$B/u-boot-rockchip.bin" out/u-boot-rockchip.bin
 
 # Variant with the Rockchip DDR initialisation blob instead of U-Boot's open TPL

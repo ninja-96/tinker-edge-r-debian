@@ -313,8 +313,23 @@ if command -v stress-ng >/dev/null; then
     [ $rc = 0 ] && res "RAM" PASS "${D}s, verified" || res "RAM" FAIL "stress-ng exit $rc (see $W/vm.log)"
 else res "RAM" SKIP "stress-ng not available"; fi
 
-hdr "eMMC, write and read back 512 MiB"
-crc0=$(grep -E 'Data (CRC|Timeout)' /sys/kernel/debug/mmc1/err_stats 2>/dev/null | awk '{s+=$NF} END{print s+0}')
+root_disk=$(lsblk -no PKNAME "$(findmnt -n -o SOURCE /)" 2>/dev/null)
+storage=eMMC
+mmc_host=mmc1
+min_write=10; min_read=20
+if [ "$(cat "/sys/class/block/$root_disk/device/type" 2>/dev/null)" = SD ]; then
+    storage=SD
+    mmc_host=mmc0
+    # Card speeds vary; verify data and bus errors, report the measured rate.
+    min_write=0; min_read=0
+    if swapon --show=NAME --noheadings | grep -qx /swapfile; then
+        res "SD swap" PASS "swapfile active"
+    else
+        res "SD swap" FAIL "swapfile not active"
+    fi
+fi
+hdr "$storage, write and read back 512 MiB"
+crc0=$(grep -E 'Data (CRC|Timeout)' "/sys/kernel/debug/$mmc_host/err_stats" 2>/dev/null | awk '{s+=$NF} END{print s+0}')
 f=$W/io.bin
 dd if=/dev/urandom of="$f.src" bs=1M count=64 status=none
 for i in 1 2 3 4 5 6 7 8; do cat "$f.src"; done > "$f"
@@ -323,11 +338,11 @@ t0=$(date +%s.%N); sync; cp "$f" "$f.copy"; sync; t1=$(date +%s.%N)
 echo 3 > /proc/sys/vm/drop_caches
 t2=$(date +%s.%N); got=$(sha256sum "$f.copy" | cut -d' ' -f1); t3=$(date +%s.%N)
 wr=$(awk -v a="$t0" -v b="$t1" 'BEGIN{printf "%.0f", 512/(b-a)}'); rd=$(awk -v a="$t2" -v b="$t3" 'BEGIN{printf "%.0f", 512/(b-a)}')
-crc1=$(grep -E 'Data (CRC|Timeout)' /sys/kernel/debug/mmc1/err_stats 2>/dev/null | awk '{s+=$NF} END{print s+0}')
-if [ "$want" != "$got" ]; then res "eMMC" FAIL "checksum mismatch"
-elif [ "$wr" -lt 10 ] || [ "$rd" -lt 20 ]; then res "eMMC" FAIL "too slow: write ~${wr} MiB/s, read ~${rd} MiB/s (expected 40+ and 100+; bus timing / CRC errors?)"
-elif [ "${crc1:-0}" -gt "${crc0:-0}" ]; then res "eMMC" FAIL "$((crc1 - crc0)) new data CRC/timeout errors during the test"
-else res "eMMC" PASS "checksum ok, write ~${wr} MiB/s, read ~${rd} MiB/s, no bus errors"; fi
+crc1=$(grep -E 'Data (CRC|Timeout)' "/sys/kernel/debug/$mmc_host/err_stats" 2>/dev/null | awk '{s+=$NF} END{print s+0}')
+if [ "$want" != "$got" ]; then res "$storage" FAIL "checksum mismatch"
+elif [ "$wr" -lt "$min_write" ] || [ "$rd" -lt "$min_read" ]; then res "$storage" FAIL "too slow: write ~${wr} MiB/s, read ~${rd} MiB/s (bus timing / CRC errors?)"
+elif [ "${crc1:-0}" -gt "${crc0:-0}" ]; then res "$storage" FAIL "$((crc1 - crc0)) new data CRC/timeout errors during the test"
+else res "$storage" PASS "checksum ok, write ~${wr} MiB/s, read ~${rd} MiB/s, no bus errors"; fi
 rm -f "$f" "$f.src" "$f.copy"
 
 hdr "GPU (panfrost)"
