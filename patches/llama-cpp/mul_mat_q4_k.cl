@@ -18,13 +18,17 @@ __kernel void mul_mat_q4_k(__global const uint *weights, __global const float *i
         float d = vload_half(0, (__global const half *)p);
         float m = vload_half(1, (__global const half *)p);
         __global const uint *s = p + 1;
-        for (uint i = lane; i < 256; i += width) {
-            uint g = i / 32;
-            uint scale = g < 4 ? packed_byte(s, g) & 63 : (packed_byte(s, g+4) & 15) | ((packed_byte(s, g-4) >> 6) << 4);
-            uint minval = g < 4 ? packed_byte(s, g+4) & 63 : (packed_byte(s, g+4) >> 4) | ((packed_byte(s, g) >> 6) << 4);
-            uint q = packed_byte(p, 16 + (i / 64) * 32 + i % 32);
-            q = g & 1 ? q >> 4 : q & 15;
-            sum += (d * scale * q - m * minval) * input[(col * blocks + b) * 256 + i];
+        // Each lane decodes four packed bytes and consumes both nibbles.
+        const uint pair = lane / 8, word = lane % 8;
+        const uint g = pair * 2;
+        uint packed = p[4 + lane];
+        uint4 qs = ((uint4)(packed) >> (uint4)(0,8,16,24)) & 255u;
+        for (uint h=0; h<2; h++) {
+            uint j=g+h;
+            uint scale=j<4 ? packed_byte(s,j)&63 : (packed_byte(s,j+4)&15)|((packed_byte(s,j-4)>>6)<<4);
+            uint minval=j<4 ? packed_byte(s,j+4)&63 : (packed_byte(s,j+4)>>4)|((packed_byte(s,j)>>6)<<4);
+            float4 w = convert_float4((qs >> (4*h)) & 15u)*(d*scale) - m*minval;
+            sum += dot(w,vload4(0,input+(col*blocks+b)*256+j*32+4*word));
         }
     }
 

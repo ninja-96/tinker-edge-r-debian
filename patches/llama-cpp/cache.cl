@@ -37,30 +37,38 @@ __kernel void set_rows(TENSOR(src), TENSOR(dst), TENSOR(ids)) {
     copy_value(src + source,src_stride.x,dst + dst_off + address(c,dst_stride),dst_stride.x);
 }
 
+// Four adjacent Q6 values can start two bytes into a word.
+inline uint q6_word(__global const uint *p, uint offset) {
+    uint lo = p[offset / 4];
+    return (offset & 2) ? ((lo >> 16) | (p[offset / 4 + 1] << 16)) : lo;
+}
 // Q6_K and Q8_0 blocks can start at a half-word boundary.
 __kernel void mul_mat_packed(__global const uint *weights, __global const float *input,
                             __global float *output, uint blocks, __local float *partial,
                             uint weight_offset, uint input_offset, uint output_offset,
                             uint q6) {
     uint lane = get_local_id(0), row = get_group_id(0), col = get_global_id(1);
-    uint n = q6 ? 256 : 32, size = q6 ? 210 : 34;
+    uint size = q6 ? 210 : 34;
     float sum = 0;
     for (uint b = 0; b < blocks; ++b) {
         uint off = weight_offset * 4 + (row * blocks + b) * size;
         float d = vload_half((off + (q6 ? 208 : 0))/2, (__global const half *)weights);
-        for (uint i = lane; i < n; i += get_local_size(0)) {
-            int v;
-            if (q6) {
-                uint quarter = (i / 32) % 4;
-                uint lo = packed_byte(weights, off + i/128*64 + (quarter%2)*32 + i%32);
-                uint hi = packed_byte(weights, off + 128 + i/128*32 + i%32);
-                int q = ((lo >> ((quarter/2)*4) & 15) | ((hi >> (quarter*2) & 3) << 4));
+        if (q6) {
+            uint quarter = lane / 8, byte = (lane % 8) * 4;
+            const uint4 shifts = (uint4)(0, 8, 16, 24);
+            for (uint half_block = 0; half_block < 2; ++half_block) {
+                uint i = half_block*128 + quarter*32 + byte;
+                uint lo = q6_word(weights, off + half_block*64 + (quarter%2)*32 + byte);
+                uint hi = q6_word(weights, off + 128 + half_block*32 + byte);
+                uint packed = ((lo >> ((quarter/2)*4)) & 0x0f0f0f0fu)
+                            | (((hi >> (quarter*2)) & 0x03030303u) << 4);
+                float4 values = convert_float4(((uint4)(packed) >> shifts) & 255u) - 32.0f;
                 int scale = ((int)packed_byte(weights, off + 192 + i/16) ^ 128) - 128;
-                v = (q - 32) * scale;
-            } else {
-                v = ((int)packed_byte(weights, off + 2 + i) ^ 128) - 128;
+                sum += (d * scale) * dot(values, vload4(0,input + input_offset + (col*blocks+b)*256+i));
             }
-            sum += d * v * input[input_offset + (col*blocks+b)*n+i];
+        } else {
+            int v = ((int)packed_byte(weights, off + 2 + lane) ^ 128) - 128;
+            sum += d * v * input[input_offset + (col*blocks+b)*32 + lane];
         }
     }
     partial[lane] = sum;

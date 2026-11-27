@@ -9,7 +9,23 @@ A short `llama-bench` run on LFM3-1.7B used `-ngl 0,99 -b 16 -ub 16 -p 4 -n 2 -r
 with the development build. CPU placement reached 6.44 tokens/s for prompt
 processing and 4.58 tokens/s for generation. Requesting all layers on Mali
 reached 0.14 and 0.10 tokens/s respectively. These single-run figures measure
-the current implementation with CPU fallback.
+the initial implementation with CPU fallback.
+
+After vectorizing Q4_K and Q6_K decoding, the same short test on the board
+(`-ngl 0,1,99`) produced the following single-run results. The GPU was
+observed at 800 MHz under load. The 16 selected quantized matrix multiplication
+comparisons still passed against the CPU backend.
+
+| Requested GPU layers | Prompt, tokens/s | Generation, tokens/s |
+| ---: | ---: | ---: |
+| 0 | 6.45 | 4.63 |
+| 1 | 3.66 | 1.26 |
+| 99 | 0.26 | 0.17 |
+
+At `-ngl 99`, the local server also completed “The capital of France is”
+with “ Paris, and the” (four generated tokens at 0.166 tokens/s). Some graph
+operations still run on the CPU. CPU placement remains the fastest measured
+configuration on this board.
 
 | Model | Board result |
 | --- | --- |
