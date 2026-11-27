@@ -2,7 +2,14 @@
 
 Board: Tinker Edge R, Rusticl/Panfrost, llama.cpp v1.1.0 at
 `171527522610996f5f0acf12334e185156ca8f44`. Set `RUSTICL_ENABLE=panfrost`.
-All text models below use Q4_K_M.
+All text models below use Q4_K_M. The image build installed on the board
+reported the pinned upstream commit and listed both Mali-T860 and OpenBLAS.
+
+A short `llama-bench` run on LFM3-1.7B used `-ngl 0,99 -b 16 -ub 16 -p 4 -n 2 -r 1`
+with the development build. CPU placement reached 6.44 tokens/s for prompt
+processing and 4.58 tokens/s for generation. Requesting all layers on Mali
+reached 0.14 and 0.10 tokens/s respectively. These single-run figures measure
+the current implementation with CPU fallback.
 
 | Model | Board result |
 | --- | --- |
