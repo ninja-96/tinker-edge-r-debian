@@ -7,32 +7,41 @@
 +    MALI_T860,
      UNKNOWN,
  };
- 
+
 @@ -863,6 +864,7 @@
      cl_program program_mul_mm_f16_f32_l4_lm_n8;
      cl_program program_mul_mm_q8_0_f32_l4_lm;
- 
-+    cl_kernel mali_mul_mat = nullptr;
+
++    cl_kernel mali_mul_mat = nullptr, mali_copy = nullptr, mali_mul_packed = nullptr, mali_set_rows = nullptr;
      cl_kernel kernel_add, kernel_add_row, kernel_add_f16, kernel_add_row_f16;
      cl_kernel kernel_mul, kernel_mul_row, kernel_mul_f16, kernel_mul_row_f16;
      cl_kernel kernel_div, kernel_div_row, kernel_div_f16, kernel_div_row_f16;
-@@ -1544,6 +1546,7 @@
+@@ -1544,6 +1546,10 @@
  #endif // GGML_OPENCL_USE_ADRENO_KERNELS
- 
+
      ~ggml_backend_opencl_context() {
++        if (mali_mul_packed) clReleaseKernel(mali_mul_packed);
++        if (mali_copy) clReleaseKernel(mali_copy);
++        if (mali_set_rows) clReleaseKernel(mali_set_rows);
 +        if (mali_mul_mat) clReleaseKernel(mali_mul_mat);
  #ifdef GGML_OPENCL_USE_ADRENO_KERNELS
          for (cl_kernel kernel : {
                  kernel_gemm_coopk_q4_k_q8_1_dp4a_bin_c8,
-@@ -2470,6 +2473,17 @@
+@@ -2470,6 +2476,23 @@
      }
- 
+
      cl_int err;
 +    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
 +        const char *source =
 +#include "edge-mali.cl.inc"
 +        ;
 +        auto program = build_program_from_source(backend_ctx, source, "-cl-std=CL1.2");
++        backend_ctx->mali_mul_packed = clCreateKernel(program, "mul_mat_packed", &err);
++        CL_CHECK(err);
++        backend_ctx->mali_copy = clCreateKernel(program, "copy_tensor", &err);
++        CL_CHECK(err);
++        backend_ctx->mali_set_rows = clCreateKernel(program, "set_rows", &err);
++        CL_CHECK(err);
 +        backend_ctx->mali_mul_mat = clCreateKernel(program, "mul_mat_q4_k", &err);
 +        CL_CHECK(err);
 +        CL_CHECK(clReleaseProgram(program));
@@ -42,7 +51,7 @@
      const std::string & compile_opts = backend_ctx->kernel_compile_opts;
      const std::string opencl_c_std = "CL" + std::to_string(backend_ctx->opencl_c_version.major) +
                                     "." + std::to_string(backend_ctx->opencl_c_version.minor);
-@@ -9680,6 +9694,11 @@
+@@ -9680,6 +9703,11 @@
          if (dev_ctx->adreno_gen == ADRENO_GPU_GEN::ADRENO_UNKNOWN) {
              dev_ctx->adreno_gen = get_adreno_gpu_gen(dev_ctx->device_name.c_str());
          }
@@ -54,16 +63,16 @@
      } else if (strstr(dev_ctx->device_name.c_str(), "Intel")) {
          dev_ctx->gpu_family = GPU_FAMILY::INTEL;
      } else {
-@@ -9975,7 +9994,7 @@
+@@ -9975,7 +10003,7 @@
      backend_ctx->prealloc_act_trans.allocate(context, max_B_d_bytes);
  #endif // GGML_OPENCL_USE_ADRENO_KERNELS
- 
+
 -    backend_ctx->disable_fusion = getenv("GGML_OPENCL_DISABLE_FUSION") != nullptr;
 +    backend_ctx->disable_fusion = backend_ctx->gpu_family == GPU_FAMILY::MALI_T860 || getenv("GGML_OPENCL_DISABLE_FUSION") != nullptr;
      if (const char * env = getenv("GGML_OPENCL_FUSE_MM_GLU")) {
          backend_ctx->fuse_mm_glu = atoi(env) != 0;
      }
-@@ -12506,6 +12525,17 @@
+@@ -12506,6 +12534,29 @@
  static bool ggml_opencl_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
      ggml_backend_opencl_device_context * dev_ctx     = (ggml_backend_opencl_device_context *)dev->context;
      ggml_backend_opencl_context *        backend_ctx = dev_ctx->backend_ctx;
@@ -71,20 +80,32 @@
 +    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
 +        if (op->op == GGML_OP_NONE || op->op == GGML_OP_VIEW || op->op == GGML_OP_RESHAPE ||
 +            op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) return true;
++        if (op->op == GGML_OP_CPY || op->op == GGML_OP_CONT || op->op == GGML_OP_DUP ||
++            op->op == GGML_OP_SET_ROWS) {
++            auto copyable = [](const ggml_tensor *t) {
++                return (t->type == GGML_TYPE_F32 || t->type == GGML_TYPE_F16) &&
++                       t->nb[0] == ggml_type_size(t->type);
++            };
++            if (!copyable(op) || !copyable(op->src[0])) return false;
++            if (op->op != GGML_OP_SET_ROWS) return true;
++            return op->src[1]->type == GGML_TYPE_I32 || op->src[1]->type == GGML_TYPE_I64;
++        }
++        if (op->op == GGML_OP_FILL)
++            return ggml_is_contiguous(op) && (op->type == GGML_TYPE_F32 || op->type == GGML_TYPE_F16);
 +        if (op->op != GGML_OP_MUL_MAT) return false;
 +        auto *w = op->src[0], *x = op->src[1];
-+        return w->type == GGML_TYPE_Q4_K && x->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32 &&
++        return (w->type == GGML_TYPE_Q4_K || w->type == GGML_TYPE_Q6_K || w->type == GGML_TYPE_Q8_0) && x->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32 &&
 +               ggml_is_matrix(w) && ggml_is_matrix(x) && ggml_is_contiguous(w) &&
 +               ggml_is_contiguous(x) && ggml_is_contiguous(op) &&
 +               !(w->view_offs % 4 || x->view_offs % 4 || op->view_offs % 4);
 +    }
- 
+
      // reject ops that match the opfilter regex
      if (dev_ctx->opfilter && std::regex_match(std::string(ggml_op_desc(op)), *dev_ctx->opfilter)) {
-@@ -14006,6 +14036,13 @@
+@@ -14006,6 +14057,13 @@
      cl_context context = backend_ctx->context;
      cl_command_queue queue = backend_ctx->queue;
- 
+
 +    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
 +        auto *extra = static_cast<ggml_tensor_extra_cl *>(tensor->extra);
 +        CL_CHECK(clEnqueueWriteBuffer(queue, extra->data_device, CL_TRUE,
@@ -95,28 +116,95 @@
  #ifdef GGML_OPENCL_SOA_Q
      if (tensor->type == GGML_TYPE_Q2_K) {
          GGML_ASSERT(offset == 0 && size == ggml_nbytes(tensor));
-@@ -16546,6 +16583,13 @@
- 
+@@ -16547,6 +16605,13 @@
      // Make sure all previously submitted commands in other devices are finished.
      sync_with_other_backends(backend_ctx);
-+
+
 +    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
 +        auto *extra = static_cast<ggml_tensor_extra_cl *>(tensor->extra);
 +        CL_CHECK(clEnqueueReadBuffer(queue, extra->data_device, CL_TRUE,
 +            extra->offset + tensor->view_offs + offset, size, data, 0, nullptr, nullptr));
 +        return;
 +    }
- 
++
  #ifdef GGML_OPENCL_SOA_Q
      if (tensor->type == GGML_TYPE_Q2_K) {
-@@ -41270,6 +41314,25 @@
+         ggml_tensor_extra_cl_q2_K * extra = (ggml_tensor_extra_cl_q2_K *)tensor->extra;
+@@ -18403,17 +18468,11 @@
+ }
+
+ static size_t ggml_backend_opencl_buffer_type_get_alignment(ggml_backend_buffer_type_t buffer_type) {
+-    ggml_backend_opencl_device_context * dev_ctx = (ggml_backend_opencl_device_context *) buffer_type->device->context;
+-    return dev_ctx->backend_ctx->alignment;
++    return ggml_cl_init(buffer_type->device)->alignment;
+ }
+
+ static size_t ggml_backend_opencl_buffer_type_get_max_size(ggml_backend_buffer_type_t buffer_type) {
+-    static size_t max_size = -1;
+-    if (max_size == (size_t)-1) {
+-        ggml_backend_opencl_device_context * dev_ctx = (ggml_backend_opencl_device_context *) buffer_type->device->context;
+-        max_size = dev_ctx->backend_ctx->max_alloc_size;
+-    }
+-    return max_size;
++    return ggml_cl_init(buffer_type->device)->max_alloc_size;
+ }
+
+ static bool ggml_backend_opencl_buffer_type_supports_backend(ggml_backend_buffer_type_t buft, ggml_backend_t backend) {
+@@ -18434,7 +18493,8 @@
+     // carve slack: at most 5 components (q5_K), i.e. 4 aligned gaps.
+     if (ggml_is_quantized(tensor->type)) {
+         ggml_backend_opencl_device_context * dev_ctx = (ggml_backend_opencl_device_context *) buft->device->context;
+-        size += 4 * dev_ctx->backend_ctx->alignment;
++        if (dev_ctx->gpu_family != GPU_FAMILY::MALI_T860)
++            size += 4 * ggml_cl_init(buft->device)->alignment;
+     }
+ #endif // GGML_OPENCL_SOA_Q
+     return size;
+@@ -41270,6 +41330,62 @@
  typedef void (*ggml_cl_func_t)(ggml_backend_t backend, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst);
- 
+
  bool ggml_cl_compute_forward(ggml_backend_t backend, struct ggml_tensor * tensor) {
 +    auto *ctx = static_cast<ggml_backend_opencl_context *>(backend->context);
 +    if (ctx->gpu_family == GPU_FAMILY::MALI_T860) {
++        if (tensor->op == GGML_OP_CPY || tensor->op == GGML_OP_CONT || tensor->op == GGML_OP_DUP ||
++            tensor->op == GGML_OP_SET_ROWS) {
++            bool scatter = tensor->op == GGML_OP_SET_ROWS;
++            cl_kernel k = scatter ? ctx->mali_set_rows : ctx->mali_copy;
++            const ggml_tensor *args[] = {tensor->src[0], tensor, tensor->src[1]};
++            cl_uint arg = 0;
++            for (int i = 0; i < (scatter ? 3 : 2); i++) {
++                auto *t = args[i];
++                auto *extra = static_cast<ggml_tensor_extra_cl *>(t->extra);
++                cl_uint offset = extra->offset + t->view_offs, ne[4], nb[4];
++                for (int d = 0; d < 4; d++) { ne[d] = t->ne[d]; nb[d] = t->nb[d]; }
++                CL_CHECK(clSetKernelArg(k, arg++, sizeof(cl_mem), &extra->data_device));
++                CL_CHECK(clSetKernelArg(k, arg++, sizeof(offset), &offset));
++                CL_CHECK(clSetKernelArg(k, arg++, sizeof(ne), ne));
++                CL_CHECK(clSetKernelArg(k, arg++, sizeof(nb), nb));
++            }
++            size_t global = ggml_nelements(tensor->src[0]);
++            CL_CHECK(clEnqueueNDRangeKernel(ctx->queue, k, 1, nullptr, &global, nullptr, 0, nullptr, nullptr));
++            return true;
++        }
++        if (tensor->op == GGML_OP_FILL) {
++            auto *extra = static_cast<ggml_tensor_extra_cl *>(tensor->extra);
++            float value;
++            memcpy(&value, tensor->op_params, sizeof(value));
++            const auto half = ggml_fp32_to_fp16(value);
++            const bool f16 = tensor->type == GGML_TYPE_F16;
++            const void *pattern = f16 ? static_cast<const void *>(&half) : &value;
++            CL_CHECK(clEnqueueFillBuffer(ctx->queue, extra->data_device, pattern,
++                    f16 ? sizeof(half) : sizeof(value), extra->offset + tensor->view_offs,
++                    ggml_nbytes(tensor), 0, nullptr, nullptr));
++            return true;
++        }
 +        if (tensor->op != GGML_OP_MUL_MAT) return false;
-+        cl_kernel k = ctx->mali_mul_mat;
++        const auto type = tensor->src[0]->type;
++        cl_kernel k = type == GGML_TYPE_Q4_K ? ctx->mali_mul_mat : ctx->mali_mul_packed;
++        if (type != GGML_TYPE_Q4_K) {
++            cl_uint q6 = type == GGML_TYPE_Q6_K;
++            CL_CHECK(clSetKernelArg(k, 8, sizeof(q6), &q6));
++        }
 +        ggml_tensor *args[] = {tensor->src[0], tensor->src[1], tensor};
 +        for (cl_uint i = 0; i < 3; ++i) {
 +            auto *extra = static_cast<ggml_tensor_extra_cl *>(args[i]->extra);
@@ -124,7 +212,7 @@
 +            CL_CHECK(clSetKernelArg(k, i, sizeof(cl_mem), &extra->data_device));
 +            CL_CHECK(clSetKernelArg(k, 5+i, sizeof(words), &words));
 +        }
-+        cl_uint blocks = args[0]->ne[0] / 256;
++        cl_uint blocks = args[0]->ne[0] / ggml_blck_size(type);
 +        CL_CHECK(clSetKernelArg(k, 3, sizeof(blocks), &blocks));
 +        CL_CHECK(clSetKernelArg(k, 4, 32*sizeof(float), nullptr));
 +        size_t global[] = {size_t(tensor->ne[0])*32, size_t(tensor->ne[1])};
@@ -133,5 +221,5 @@
 +        return true;
 +    }
      ggml_cl_func_t func = nullptr;
- 
+
      ggml_tensor * src0 = tensor->src[0];

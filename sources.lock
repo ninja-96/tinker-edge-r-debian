@@ -82,3 +82,4 @@ FXdiv       https://github.com/Maratyszcza/FXdiv          b408327ac2a15ec3e43352
 # Upstream base for patches/llama-cpp/mali-t860.patch.
 LLAMA_CPP_PATCH_TAG=v1.1.0
 LLAMA_CPP_PATCH_REV=171527522610996f5f0acf12334e185156ca8f44
+LLAMA_CPP_ARCHIVE_SHA256=00fe7d900aac2906edb7fee0a11c7255709f72c022ac1ba54a58984562eaf60c

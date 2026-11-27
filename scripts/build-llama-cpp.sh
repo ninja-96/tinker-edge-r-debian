@@ -43,25 +43,40 @@ fi
 work="$PWD/out/llama-cpp/$release"
 [[ ${1:-} != --image ]] || work+=-image
 mkdir -p "$work"
-if [[ ! -d $work/source/.git ]]; then
-    git clone --depth 1 --branch "$release" "$repo" "$work/source"
-fi
-revision=$(git -C "$work/source" rev-parse HEAD)
-[[ $revision == "$(git -C "$work/source" rev-parse "refs/tags/$release^{commit}")" ]] || exit 1
-if [[ $release == "$LLAMA_CPP_PATCH_TAG" && $revision != "$LLAMA_CPP_PATCH_REV" ]]; then
-    echo "Patch base mismatch: $revision" >&2
-    exit 1
+if [[ ${1:-} == --image ]]; then
+    revision=$LLAMA_CPP_PATCH_REV
+    archive="$root/downloads/llama.cpp-$revision.tar.gz"
+    if [[ ! -f $archive ]]; then
+        curl -fL --retry 3 "https://codeload.github.com/ggml-org/llama.cpp/tar.gz/$revision" -o "$archive.part"
+        echo "$LLAMA_CPP_ARCHIVE_SHA256  $archive.part" | sha256sum -c -
+        mv "$archive.part" "$archive"
+    fi
+    echo "$LLAMA_CPP_ARCHIVE_SHA256  $archive" | sha256sum -c -
+    mkdir -p "$work/source"
+    tar -xf "$archive" --strip-components=1 -C "$work/source"
+else
+    if [[ ! -d $work/source/.git ]]; then
+        git clone --depth 1 --branch "$release" "$repo" "$work/source"
+    fi
+    revision=$(git -C "$work/source" rev-parse HEAD)
+    [[ $revision == "$(git -C "$work/source" rev-parse "refs/tags/$release^{commit}")" ]] || exit 1
+    if [[ $release == "$LLAMA_CPP_PATCH_TAG" && $revision != "$LLAMA_CPP_PATCH_REV" ]]; then
+        echo "Patch base mismatch: $revision" >&2
+        exit 1
+    fi
 fi
 echo "Building llama.cpp $release ($revision)"
 
 patch_dir="$root/patches/llama-cpp"
-if ! git -C "$work/source" apply --reverse --check "$patch_dir/mali-t860.patch" 2>/dev/null; then
+if [[ ${1:-} == --image ]]; then
+    patch -s -d "$work/source" -p1 < "$patch_dir/mali-t860.patch"
+elif ! git -C "$work/source" apply --reverse --check "$patch_dir/mali-t860.patch" 2>/dev/null; then
     git -C "$work/source" apply "$patch_dir/mali-t860.patch"
 fi
-{ echo 'R"CLC('; cat "$patch_dir/mul_mat_q4_k.cl"; echo ')CLC"'; } > "$work/source/ggml/src/ggml-opencl/edge-mali.cl.inc"
+{ echo 'R"CLC('; cat "$patch_dir/mul_mat_q4_k.cl" "$patch_dir/cache.cl"; echo ')CLC"'; } > "$work/source/ggml/src/ggml-opencl/edge-mali.cl.inc"
 
 cmake -S "$work/source" -B "$work/build" -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DLLAMA_BUILD_COMMIT="$revision" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
     -DCMAKE_C_FLAGS_RELEASE='-O3 -DNDEBUG -mcpu=cortex-a72.cortex-a53' \
     -DCMAKE_CXX_FLAGS_RELEASE='-O3 -DNDEBUG -mcpu=cortex-a72.cortex-a53' \
