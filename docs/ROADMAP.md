@@ -24,7 +24,6 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 |---|---|
 | HDMI audio by ear | the stream runs (2026-10-28); a monitor or TV with speakers is needed |
 | USB 3 over USB-C | USB-C works at USB 2.0 in both orientations (a flash drive, a JMicron NVMe enclosure, 2026-10-28); the USB 3 port of the controller stays in RxDetect: check with a cable known to carry USB 3, then pass the plug orientation from TCPM to the Type-C PHY (it has no extcon) |
-| Boot from an SD card, the 2 GiB swap file | `scripts/flash-sd.sh`, boot |
 | KDE Plasma desktop | works on Wayland (checked by the user); idle suspend of KDE puts the board to sleep, and a USB keyboard does not wake it (see Suspend below) |
 | Wi-Fi connection and Bluetooth audio with antennas | both work without antennas only at centimetres; connect the two antennas and repeat |
 | 40-pin electrical side | `GPIO_LOOPBACK` test with jumper wires, real I2C/SPI devices |
@@ -212,8 +211,18 @@ Only the driver and Rockchip's firmware stay closed. The memory controller work 
 ### Release 0.7: SD card boot (first priority), then NPU, LiteRT and quantized model variants
 
 **First priority (user decision, 2026-11-26): the transition to SD cards** — repeated eMMC flashing degrades the board, so
-0.7 has to move booting to an SD card first (the flash script and the boot check exist: `scripts/flash-sd.sh`, the
-"Boot from an SD card, the 2 GiB swap file" line above), before the NPU work below.
+0.7 has to move booting to an SD card first (`scripts/flash-sd.sh`), before the NPU work below.
+
+The dedicated SD image uses a separate root partition UUID and label. On 2026-11-27,
+physical SD boot, expansion to 29.7 GiB, 2 GiB swap and the full board test passed
+(54 PASS / 5 SKIP / 0 FAIL). Standalone SD also passed both warm reboot and cold
+power cycle with no eMMC loader or partition table. The dedicated loader-only
+eMMC MaskROM flashing script still needs a hardware installation check. Browser
+hardware encoding is deferred beyond 0.7.
+From v0.7 onward, publish only the complete SD OS image (including U-Boot).
+Keep both full and loader-only eMMC builds and flashing scripts functional for
+local builds and recovery, but do not publish either eMMC image. The SD filesystem grows to
+the entire card (no root-only percentage reserve) and retains a 2 GiB swapfile.
 
 Planned (2026-11-24): compare two fully quantized variants of the same model on the RK3399Pro NPU
 with LiteRT: one int8 and one uint8. Improve the NPU adapter and extend the set of LiteRT

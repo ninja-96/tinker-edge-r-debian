@@ -45,7 +45,7 @@ boots from the eMMC, network and SSH up, hardware video, the NPU, power profiles
 | 40-pin header: GPIO, I2C6/7, SPI1/5, PWM0/1/3 | ⚠️ software side | 🟡 partly | every plain GPIO pin driven and read; no loopback, no real devices ([GPIO.md](docs/GPIO.md)) |
 | USB-A ports | ✅ yes | ✅ yes | all three ports at 5 Gbit/s (USB 3), a flash drive reads 94-96 MB/s in each; a keyboard and a mouse |
 | USB-C port (devices plugged in: flash drive, hub) | ✅ yes, USB 2.0 | ✅ yes | flash drives and disks work at USB 2.0 speed (480 Mbit/s, 29-35 MB/s), in both plug orientations; the port gives 5 V to devices (FUSB302, TPS2553 switch, about 1.5 A); USB 3 over USB-C does not come up (to be looked at); board revision 1.02 ([HARDWARE.md](docs/HARDWARE.md#board-revision)) |
-| Boot from an SD card, swap file | ❔ not known | 🙋 needs you | `scripts/flash-sd.sh` |
+| Boot from an SD card, swap file | ✅ yes | ✅ checked on the board | SD root, expansion to 29.7 GiB, active 2 GiB swap, verified storage I/O; `scripts/flash-sd.sh` |
 | NPU: LiteRT / TensorFlow Lite models (`.tflite`) from Python 3.13 and C++ (open stack: LiteRT 2.4.0 + TIM-VX + TFLite VX delegate on the NPU die, no RKNN) | ✅ yes | ✅ yes | `rk3399pro_npu.Model("net.tflite")`: uint8 MobileNet V2 6-7 ms on the NPU, int8 ResNet18 19 ms (27 times its CPU time), ResNet50 70 ms; several models at once, shared by several programs (`npu-daemon`), float models on the CPU of the NPU die by default, `autotune()` picks NPU / CPU / mixed per model; built from source, only Rockchip's firmware and the Vivante driver are closed ([NPU.md](docs/NPU.md), [operators](npu-open/OPERATORS.md)); the NPU is on by default (`browser` device tree) |
 | Power profiles `tinker-power` (powersave / normal / performance) | ✅ yes | ✅ yes | applied at boot, survive a reboot; CPU and GPU clocks only, memory stays at 933 MHz ([POWER.md](docs/POWER.md)) |
 | Firewall (nftables), forced password change at the first login | ✅ yes | ✅ yes | only SSH, ping, IPv6 discovery, DHCP and mDNS come in; no measurable effect on throughput ([SECURITY.md](docs/SECURITY.md)) |
@@ -67,6 +67,7 @@ Details and plans: [docs/ROADMAP.md](docs/ROADMAP.md).
   Rockchip `mpp` sources, Debian packages).
 - The board with its **12-19 V DC power adapter**, a **USB-C cable with data**,
   a jumper or tweezers for header **J3 (Recovery)**, an **Ethernet** cable.
+- A microSD card (8 GB or larger recommended) and a card reader for the SD installation.
 - Recommended: a **3.3 V USB-UART** adapter for the serial console.
 
 ## 1. Build the image (about 1 hour the first time)
@@ -74,10 +75,12 @@ Details and plans: [docs/ROADMAP.md](docs/ROADMAP.md).
 ```sh
 git clone https://github.com/ninja-96/tinker-edge-r-debian.git
 cd tinker-edge-r-debian
-scripts/make-image.sh
+SD=1 scripts/make-image.sh
 ```
 
-Result: `out/tinker-edge-r-debian13.img` (about 2.6 GB) and the flashing tools in `out/tools/`.
+Result: `out/tinker-edge-r-debian13-sd.img` (about 2.6 GB),
+`out/tinker-edge-r-uboot-emmc.img` (16 MiB, loader only) and the flashing tools in `out/tools/`.
+The eMMC image can still be built with `scripts/make-image.sh` (without `SD=1`).
 The script downloads the Linux and U-Boot sources and Debian packages, and builds
 everything inside a Docker container. Nothing from ASUS is downloaded and no Rockchip
 binary is downloaded: the few Rockchip binaries needed are in [`blobs/`](blobs/README.md).
@@ -85,18 +88,37 @@ The Rockchip downloads are open-source code only: the `mpp` video library (Apach
 the GStreamer plugin (LGPL-2.1); the browser's video decode uses the open
 `libva-v4l2-request` VA-API driver (GPL-3.0-or-later), all pinned in `sources.lock`.
 
-A prebuilt image is attached to the [release](https://github.com/ninja-96/tinker-edge-r-debian/releases)
-as `tinker-edge-r-debian13.img.xz` with a `sha256` file. To use it instead of building:
+Starting with v0.7, the [releases](https://github.com/ninja-96/tinker-edge-r-debian/releases)
+publish only `tinker-edge-r-debian13-sd.img.xz` with SHA-256 files.
+Both eMMC variants remain available for local builds and recovery. To use the image instead of building:
 
 ```sh
-sha256sum -c tinker-edge-r-debian13.img.xz.sha256
-mkdir -p out && xz -dk tinker-edge-r-debian13.img.xz && mv tinker-edge-r-debian13.img out/
-./run.sh scripts/build-flash-tools.sh        # only the small USB flashing tools (a few minutes)
+sha256sum -c tinker-edge-r-debian13-sd.img.xz.sha256
+mkdir -p out && xz -dk tinker-edge-r-debian13-sd.img.xz && mv tinker-edge-r-debian13-sd.img out/
 ```
 
 then continue with step 2.
 
-## ⚡ 2. Flash the eMMC over USB
+## ⚡ 2. Install U-Boot and write the SD card
+
+If eMMC is empty, no eMMC write is needed: the SD image contains its own U-Boot
+and standalone cold boot was verified on the board. For a loader-only eMMC
+installation, follow [Flashing: loader-only eMMC](docs/FLASHING.md#loader-only-emmc-and-sd-operating-system) once.
+It removes the old eMMC partition table and leaves a bootloader that searches SD first.
+
+Connect a microSD card using a card reader. Identify the whole device with `lsblk`,
+unmount its partitions and write the image (this erases the card):
+
+```sh
+scripts/flash-sd.sh --dry-run /dev/sdX
+scripts/flash-sd.sh /dev/sdX
+```
+
+Power off, insert the card and power on. Future updates only require writing the SD card.
+If you prefer to keep a complete eMMC installation as a fallback, use the alternative full
+eMMC mode below and verify the boot order as described in [Flashing](docs/FLASHING.md).
+
+### Optional: flash the eMMC over USB
 
 The eMMC is written through the SoC's USB boot mode (maskrom). This **erases the
 system on the eMMC**, so a backup comes first.
@@ -126,7 +148,7 @@ Details and pitfalls: [docs/FLASHING.md](docs/FLASHING.md).
 ## 🏁 3. First boot
 
 Connect the Ethernet cable and wait **about two minutes** (the first boot grows the
-root filesystem to the whole eMMC and creates the SSH host keys). Then:
+root filesystem to the whole boot medium and creates the SSH host keys). Then:
 
 ```sh
 ssh debian@tinker-edge-r.local        # password: debian; the first login asks for a new one
@@ -143,7 +165,9 @@ The shell has Tab completion (`bash-completion`, case-insensitive, all matches o
 and `htop` is installed.
 
 Swap: none on the eMMC (it would wear the flash). On an SD card the first boot creates
-a 2 GiB swap file.
+a 2 GiB swap file and grows the root partition and ext4 filesystem to the full card capacity.
+The SD filesystem has no percentage of blocks reserved exclusively for root; remaining capacity
+is available to the user, minus filesystem metadata and the space used by software and swap.
 
 ## 🔌 Using the hardware
 

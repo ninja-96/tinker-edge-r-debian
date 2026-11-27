@@ -26,6 +26,19 @@ Kernel command line (in `extlinux.conf` and in the device tree `chosen`):
 `earlycon=uart8250,mmio32,0xff180000 console=tty1 console=ttyS0,115200n8
 root=PARTUUID=... rw rootfstype=ext4 rootwait`.
 
+## SD-first boot from v0.7
+
+The SD OS image uses the same partition layout and includes U-Boot, so it can
+also be used for standalone SD boot if BootROM selects the card. The optional
+locally built 16 MiB image installs U-Boot on eMMC without an OS. The SD root has
+its own partition UUID and `rootfs-sd` filesystem label. U-Boot searches SD
+(mmc1), then eMMC (mmc0); these
+aliases are the reverse of Linux's. Installations with a different saved order
+need the one-time environment migration in
+[FLASHING.md](FLASHING.md). Updating the SD image does not update the loader on
+eMMC. Automatic fallback is at U-Boot's boot-entry selection stage, not after a
+kernel panic or hang.
+
 ## Why this and not the ASUS bootloader
 
 The first attempts used the bootloader extracted from the stock TinkerOS image

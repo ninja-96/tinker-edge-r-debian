@@ -1,5 +1,7 @@
 How a release of this project is made (done for v0.5.0 on 2026-11-05; docs/RELEASING.md is the source of truth, this is the practical form).
 
+**Standing user decision from v0.7 onward:** publish only `tinker-edge-r-debian13-sd.img.xz` with raw/compressed SHA256 files and `packages.txt`. Neither full nor loader-only eMMC image is published; both remain local build/recovery options. `scripts/flash-emmc-loader.sh --backup <full-image>` writes the loader and clears both partition tables; old full eMMC install option is retained. Build `SD=1 scripts/make-image.sh`; test standalone physical SD boot/expansion/swap and full board tests. Keep the original default `scripts/make-image.sh` (eMMC) and all eMMC flash/backup/recovery tooling working; no new eMMC artifact in GitHub releases. Include one-time migration in docs/FLASHING.md. The historical release procedure below describes v0.6 and earlier; apply this SD rule to steps 5–8 for subsequent releases.
+
 Fixed order (RELEASING.md steps 1-8):
 1. `scripts/check-updates.sh --apply` -> newest 6.18.x in sources.lock (version + sha256 from kernel.org); `scripts/fetch-sources.sh`. Debian: always rebuild the rootfs (`./run.sh scripts/build-rootfs.sh`) - it comes from the live archive.
 2. Kernel: `./run.sh scripts/build-kernel.sh` must apply patches/linux, kernel-mods, config fragment and build. A new kernel series is a separate decision.
