@@ -203,6 +203,14 @@ every codec to `mpp_service` (no browser hardware decode); `base` uses the mainl
 decoders only (no encoder). `sudo tinker-boot-select <variant>` switches the boot
 ([docs/VIDEO.md](docs/VIDEO.md)).
 
+### LFM3 on the CPU
+
+The image includes `llama-cli`, `llama-server` and `llama-bench`. To download LFM3-1.7B Q4_K_M on first use and run it on all six cores:
+
+```sh
+llama-cli -hf LiquidAI/LFM3-1.7B-GGUF:Q4_K_M -ngl 0 -t 6 -tb 6 -b 128 -ub 128 -c 2048
+```
+
 ## 🖥️ Desktop (KDE Plasma)
 
 The image is a server system without a graphical interface. To install the KDE Plasma
@@ -293,7 +301,7 @@ sources of what ends up in the images are in [NOTICE.md](NOTICE.md) and inside t
 | [rockchip-linux/rkdeveloptool](https://github.com/rockchip-linux/rkdeveloptool) | USB flashing tool; `third_party/rkdeveloptool` is a byte-identical copy of commit `304f0737`, plus our `rs` patch | GPL-2.0+ ([license.txt](https://github.com/rockchip-linux/rkdeveloptool/blob/HEAD/license.txt)) |
 | [rockchip-linux/rkbin](https://github.com/rockchip-linux/rkbin) | DRAM initialisation blob and BL31, copied unmodified to `blobs/rockchip/` (commit `3e288fe8`) | Rockchip binary licence ([LICENSE](https://github.com/rockchip-linux/rkbin/blob/HEAD/LICENSE), also `blobs/rockchip/LICENSE`) |
 | [airockchip/RK3399Pro_npu](https://github.com/airockchip/RK3399Pro_npu) | firmware of the NPU die (Linux 4.4.185, the Vivante driver and libraries), binary only; we change its device tree and ramdisk | Apache-2.0 ([LICENSE](https://github.com/airockchip/RK3399Pro_npu/blob/8858114555f1700e41e185b14ec3d266342f8059/LICENSE)); inside: GPL software, Vivante's closed libraries |
-| [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | CPU inference and experimental Mali-T860 Q4_K matrix multiplication, image build pinned in `sources.lock` | MIT ([LICENSE](https://github.com/ggml-org/llama.cpp/blob/v1.1.0/LICENSE)) |
+| [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) | CPU inference on Cortex-A72/A53 by default, image build pinned in `sources.lock`. Set `LLAMA_OPENCL=ON` for experimental Mali-T860 support | MIT ([LICENSE](https://github.com/ggml-org/llama.cpp/blob/v1.1.0/LICENSE)) |
 | [VeriSilicon/TIM-VX](https://github.com/VeriSilicon/TIM-VX) | graph library on top of the Vivante driver, `main` (commit in `sources.lock`) built with the SDK headers of tag `v1.1.32`, for the NPU die | MIT ([LICENSE](https://github.com/VeriSilicon/TIM-VX/blob/main/LICENSE)) |
 | [VeriSilicon/tflite-vx-delegate](https://github.com/VeriSilicon/tflite-vx-delegate) | TensorFlow Lite delegate for TIM-VX, `main` (commit in `sources.lock`), with [our patch](npu-open/patches) | MIT ([LICENSE](https://github.com/VeriSilicon/tflite-vx-delegate/blob/main/LICENSE)) |
 | [google-ai-edge/LiteRT](https://github.com/google-ai-edge/LiteRT) | LiteRT 2.4.0 (TensorFlow Lite as its `tflite/`), linked into our server on the NPU die | Apache-2.0 ([LICENSE](https://github.com/google-ai-edge/LiteRT/blob/main/LICENSE)) |
