@@ -79,3 +79,6 @@ xnnpack     https://github.com/google/XNNPACK             8bf8d33a7285af155dd52b
 pthreadpool https://github.com/google/pthreadpool         15a6644ba1c45f1acc16ac1e883efc3e56c6bed2
 FXdiv       https://github.com/Maratyszcza/FXdiv          b408327ac2a15ec3e43352421954f5b1967701d1
 "
+# Upstream base for patches/llama-cpp/mali-t860.patch.
+LLAMA_CPP_PATCH_TAG=v1.1.0
+LLAMA_CPP_PATCH_REV=171527522610996f5f0acf12334e185156ca8f44

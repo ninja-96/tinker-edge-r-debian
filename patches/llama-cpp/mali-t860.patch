@@ -1,0 +1,137 @@
+--- a/ggml/src/ggml-opencl/ggml-opencl.cpp
++++ b/ggml/src/ggml-opencl/ggml-opencl.cpp
+@@ -119,6 +119,7 @@
+ enum GPU_FAMILY {
+     ADRENO,
+     INTEL,
++    MALI_T860,
+     UNKNOWN,
+ };
+ 
+@@ -863,6 +864,7 @@
+     cl_program program_mul_mm_f16_f32_l4_lm_n8;
+     cl_program program_mul_mm_q8_0_f32_l4_lm;
+ 
++    cl_kernel mali_mul_mat = nullptr;
+     cl_kernel kernel_add, kernel_add_row, kernel_add_f16, kernel_add_row_f16;
+     cl_kernel kernel_mul, kernel_mul_row, kernel_mul_f16, kernel_mul_row_f16;
+     cl_kernel kernel_div, kernel_div_row, kernel_div_f16, kernel_div_row_f16;
+@@ -1544,6 +1546,7 @@
+ #endif // GGML_OPENCL_USE_ADRENO_KERNELS
+ 
+     ~ggml_backend_opencl_context() {
++        if (mali_mul_mat) clReleaseKernel(mali_mul_mat);
+ #ifdef GGML_OPENCL_USE_ADRENO_KERNELS
+         for (cl_kernel kernel : {
+                 kernel_gemm_coopk_q4_k_q8_1_dp4a_bin_c8,
+@@ -2470,6 +2473,17 @@
+     }
+ 
+     cl_int err;
++    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
++        const char *source =
++#include "edge-mali.cl.inc"
++        ;
++        auto program = build_program_from_source(backend_ctx, source, "-cl-std=CL1.2");
++        backend_ctx->mali_mul_mat = clCreateKernel(program, "mul_mat_q4_k", &err);
++        CL_CHECK(err);
++        CL_CHECK(clReleaseProgram(program));
++        backend_ctx->kernels_loaded = true;
++        return;
++    }
+     const std::string & compile_opts = backend_ctx->kernel_compile_opts;
+     const std::string opencl_c_std = "CL" + std::to_string(backend_ctx->opencl_c_version.major) +
+                                    "." + std::to_string(backend_ctx->opencl_c_version.minor);
+@@ -9680,6 +9694,11 @@
+         if (dev_ctx->adreno_gen == ADRENO_GPU_GEN::ADRENO_UNKNOWN) {
+             dev_ctx->adreno_gen = get_adreno_gpu_gen(dev_ctx->device_name.c_str());
+         }
++    } else if (strstr(dev_ctx->device_name.c_str(), "Mali-T860")) {
++        dev_ctx->gpu_family = GPU_FAMILY::MALI_T860;
++        CL_CHECK(clGetDeviceInfo(dev_ctx->device, CL_DEVICE_GLOBAL_MEM_SIZE,
++                                 sizeof(dev_ctx->global_mem_size), &dev_ctx->global_mem_size, nullptr));
++        return true;
+     } else if (strstr(dev_ctx->device_name.c_str(), "Intel")) {
+         dev_ctx->gpu_family = GPU_FAMILY::INTEL;
+     } else {
+@@ -9975,7 +9994,7 @@
+     backend_ctx->prealloc_act_trans.allocate(context, max_B_d_bytes);
+ #endif // GGML_OPENCL_USE_ADRENO_KERNELS
+ 
+-    backend_ctx->disable_fusion = getenv("GGML_OPENCL_DISABLE_FUSION") != nullptr;
++    backend_ctx->disable_fusion = backend_ctx->gpu_family == GPU_FAMILY::MALI_T860 || getenv("GGML_OPENCL_DISABLE_FUSION") != nullptr;
+     if (const char * env = getenv("GGML_OPENCL_FUSE_MM_GLU")) {
+         backend_ctx->fuse_mm_glu = atoi(env) != 0;
+     }
+@@ -12506,6 +12525,17 @@
+ static bool ggml_opencl_supports_op(ggml_backend_dev_t dev, const struct ggml_tensor * op) {
+     ggml_backend_opencl_device_context * dev_ctx     = (ggml_backend_opencl_device_context *)dev->context;
+     ggml_backend_opencl_context *        backend_ctx = dev_ctx->backend_ctx;
++
++    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
++        if (op->op == GGML_OP_NONE || op->op == GGML_OP_VIEW || op->op == GGML_OP_RESHAPE ||
++            op->op == GGML_OP_PERMUTE || op->op == GGML_OP_TRANSPOSE) return true;
++        if (op->op != GGML_OP_MUL_MAT) return false;
++        auto *w = op->src[0], *x = op->src[1];
++        return w->type == GGML_TYPE_Q4_K && x->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32 &&
++               ggml_is_matrix(w) && ggml_is_matrix(x) && ggml_is_contiguous(w) &&
++               ggml_is_contiguous(x) && ggml_is_contiguous(op) &&
++               !(w->view_offs % 4 || x->view_offs % 4 || op->view_offs % 4);
++    }
+ 
+     // reject ops that match the opfilter regex
+     if (dev_ctx->opfilter && std::regex_match(std::string(ggml_op_desc(op)), *dev_ctx->opfilter)) {
+@@ -14006,6 +14036,13 @@
+     cl_context context = backend_ctx->context;
+     cl_command_queue queue = backend_ctx->queue;
+ 
++    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
++        auto *extra = static_cast<ggml_tensor_extra_cl *>(tensor->extra);
++        CL_CHECK(clEnqueueWriteBuffer(queue, extra->data_device, CL_TRUE,
++            extra->offset + tensor->view_offs + offset, size, data, 0, nullptr, nullptr));
++        return;
++    }
++
+ #ifdef GGML_OPENCL_SOA_Q
+     if (tensor->type == GGML_TYPE_Q2_K) {
+         GGML_ASSERT(offset == 0 && size == ggml_nbytes(tensor));
+@@ -16546,6 +16583,13 @@
+ 
+     // Make sure all previously submitted commands in other devices are finished.
+     sync_with_other_backends(backend_ctx);
++
++    if (backend_ctx->gpu_family == GPU_FAMILY::MALI_T860) {
++        auto *extra = static_cast<ggml_tensor_extra_cl *>(tensor->extra);
++        CL_CHECK(clEnqueueReadBuffer(queue, extra->data_device, CL_TRUE,
++            extra->offset + tensor->view_offs + offset, size, data, 0, nullptr, nullptr));
++        return;
++    }
+ 
+ #ifdef GGML_OPENCL_SOA_Q
+     if (tensor->type == GGML_TYPE_Q2_K) {
+@@ -41270,6 +41314,25 @@
+ typedef void (*ggml_cl_func_t)(ggml_backend_t backend, const ggml_tensor * src0, const ggml_tensor * src1, ggml_tensor * dst);
+ 
+ bool ggml_cl_compute_forward(ggml_backend_t backend, struct ggml_tensor * tensor) {
++    auto *ctx = static_cast<ggml_backend_opencl_context *>(backend->context);
++    if (ctx->gpu_family == GPU_FAMILY::MALI_T860) {
++        if (tensor->op != GGML_OP_MUL_MAT) return false;
++        cl_kernel k = ctx->mali_mul_mat;
++        ggml_tensor *args[] = {tensor->src[0], tensor->src[1], tensor};
++        for (cl_uint i = 0; i < 3; ++i) {
++            auto *extra = static_cast<ggml_tensor_extra_cl *>(args[i]->extra);
++            cl_uint words = (extra->offset + args[i]->view_offs) / 4;
++            CL_CHECK(clSetKernelArg(k, i, sizeof(cl_mem), &extra->data_device));
++            CL_CHECK(clSetKernelArg(k, 5+i, sizeof(words), &words));
++        }
++        cl_uint blocks = args[0]->ne[0] / 256;
++        CL_CHECK(clSetKernelArg(k, 3, sizeof(blocks), &blocks));
++        CL_CHECK(clSetKernelArg(k, 4, 32*sizeof(float), nullptr));
++        size_t global[] = {size_t(tensor->ne[0])*32, size_t(tensor->ne[1])};
++        size_t local[] = {32, 1};
++        CL_CHECK(clEnqueueNDRangeKernel(ctx->queue, k, 2, nullptr, global, local, 0, nullptr, nullptr));
++        return true;
++    }
+     ggml_cl_func_t func = nullptr;
+ 
+     ggml_tensor * src0 = tensor->src[0];
