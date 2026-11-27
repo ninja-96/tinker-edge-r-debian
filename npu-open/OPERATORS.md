@@ -1,5 +1,89 @@
 # TensorFlow Lite operators on the NPU
 
+## Quantized operators on LiteRT 2.4.0
+
+Measured on the RK3399Pro on 2026-11-27. Each fixture runs first with
+`device="cpu"` (LiteRT on the NPU die), then uncached with `device="npu"`.
+The test checks the placement of every operator and compares every output
+element on the same eight inputs. The 256-element unary fixtures exercise
+all input codes. These results apply to the specified quantization parameters.
+
+| Operator | INT8 and UINT8 result on the full NPU |
+|---|---|
+| `BROADCAST_TO` | Exact for static [1,8,1,4] → [1,8,8,4]. Stock 0.6 failed its first run when the broadcast was the graph output. The server materializes same-rank broadcasts with concatenations, up to 64 copies per expanded axis. |
+| `PADV2` | Exact with a constant fill equal to the quantized zero point. All 12 such nodes in GoogLeNet run as PAD. Dynamic and nonzero fills still require CPU. |
+| `DEQUANTIZE` | Exact for an input scale of 1/8. |
+| `RELU_N1_TO_1`, `HARD_SWISH` | Exact for input and output scales of 1/8. |
+| `QUANTIZE` | Exact for same-type requantization at input/output scale ratio 1/2, including saturation at extreme zero points. Previously 524 of 2048 results differed by one code per dtype. Other ratios need separate checks. |
+| `LOGISTIC`, `MUL` | All nodes delegated. Both types still differ from CPU by up to one output code on these fixtures. |
+
+Generate the cases on the build host and copy the generated models and the
+comparison script to the board:
+
+```sh
+python3 tests/npu/dev/make_quantized_ops.py \
+  downloads/npu-open/work-litert/build-flatc-LiteRT-2.4.0/flatbuffers-flatc/bin/flatc \
+  downloads/npu-open/work-litert/LiteRT-2.4.0/tflite/converter/schema/schema.fbs out/quantized-ops
+# On the board, with the fixtures in quantized-ops/
+python3 compare_quantized.py quantized-ops/*.tflite
+```
+
+A numerical mismatch makes the command exit with status 1. Use the same runner
+with a complete model; `--no-split` isolates the effect of per-channel weight
+regrouping. Timings are median warm end-to-end latency, including the host/USB
+round trip. Random inputs are diagnostic; task accuracy needs representative data.
+
+### Whole quantized models
+
+Eight identical diagnostic inputs per model, warm median in ms including USB.
+The CPU column uses LiteRT on the NPU die. Output differences are in integer
+codes. The MobileNet V2 files are separate model exports; compare each to its
+own CPU run.
+
+| Model | CPU ms | Full NPU ms | Largest output difference |
+|---|---:|---:|---:|
+| MobileNet V2 UINT8 | 115.29 | 10.22 | 5 |
+| MobileNet V2 INT8, grouped weights | 112.02 | 30.57 | 101 |
+| MobileNet V2 INT8, original per-channel weights | 111.94 | 137.31 | 18 |
+| MobileNet V3 large INT8 | 99.20 | 75.95 | 22 |
+| EfficientNet-B0 INT8 | 364.76 | 748.82 | 6 |
+
+On the project's dog photograph (224×224 RGB, normalized to [-1,1]), the CPU
+and full NPU both selected class 156 with both MobileNet V2 exports. For UINT8
+the top five contained the same classes in a different order. For INT8 the
+first three matched, and the last two classes differed. Maximum differences
+on this image were four codes (UINT8) and three (INT8).
+
+The small self-test INT8 network matched the CPU on all eight inputs with the
+original per-channel weights. With grouping enabled its maximum difference was
+two codes. On isolated layers from the same model, the first grouped convolution
+already differed by up to seven codes. The UINT8 self-test network differed by
+one code with either splitting policy.
+
+### Operator coverage of the model set
+
+Count each distinct builtin opcode once across the original FlatBuffer subgraphs,
+before server rewrites. The project catalogue contains 99 types: 97 in the
+historical survey below, plus BROADCAST_TO and PADV2. Of those, 93 have at least
+one board-tested NPU configuration (88 marked yes below, plus QUANTIZE,
+DEQUANTIZE, RELU_N1_TO_1, BROADCAST_TO and PADV2).
+
+| Quantized model files | Distinct original types | Share of catalogue | Share of board-supported types |
+|---|---:|---:|---:|
+| ResNet18, SqueezeNet 1.1 and GoogLeNet | 13 | 13/99 (13.1%) | 13/93 (14.0%) |
+| Above plus MobileNet V2 UINT8 and INT8, MobileNet V3 large and EfficientNet-B0 | 18 | 18/99 (18.2%) | 18/93 (19.4%) |
+| Above plus EfficientDet-Lite0 INT8 | 19 | 19/99 (19.2%) | 19/93 (20.4%) |
+
+EfficientDet ran fully on the NPU (290.43 ms, CPU 485.35 ms). Its two raw float outputs differed by up to 1.09013; detection mAP was not measured.
+EfficientDet adds RESIZE_NEAREST_NEIGHBOR. Across the eight original graphs,
+534 of 963 nodes (55.5%) are CONV_2D or DEPTHWISE_CONV_2D. Quantized classifiers alone exercise
+convolution, pooling, residual ADD, concatenation, and fully connected layers.
+GATHER, BATCH_MATMUL, TRANSPOSE_CONV, and RESIZE_BILINEAR are examples absent
+from all eight files. Standalone operator fixtures and ConvNeXt W8A16 are outside
+this model count. Fused activations are part of their parent operator.
+
+## Earlier operator survey
+
 Which operators of a TFLite model run on the NPU of the Tinker Edge R (LiteRT 2.3.2, TIM-VX and the TFLite VX delegate, with the rewrites of our server; main branch
 after release 0.4.1, measured on 2026-10-28), and, for comparison,
 which ones Rockchip's RKNN-Toolkit 1.7.5 accepted.

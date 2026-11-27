@@ -202,7 +202,7 @@ Only the driver and Rockchip's firmware stay closed. The memory controller work 
 | Server on the NPU die | done: model in a child process (a crashing model is answered with the reason, the USB function stays), memory check, one model at a time |
 | Build from source | done: `scripts/build-npu-open.sh` (Debian 11 container, sources pinned in `sources.lock`, `-O3 -mcpu=cortex-a35`), `scripts/build-npu-boot.sh` makes the firmware image of the NPU die (device tree + our files + two init scripts); part of `scripts/make-image.sh` |
 | Python module | done: `rk3399pro_npu.Model` (`exec`; `async_exec` is experimental), the cache of the compiled graph (13-60 s -> 0.1-0.3 s), `npu-info`, udev rule for the group `plugdev` |
-| Data types | done: uint8 (6-7 ms for MobileNet V2), int8 with per-channel weights (27 ms: layers split by scale, exact), float32 and float16 weights (480 ms, slow path). Not supported: dynamic-range models, an all-float16 graph |
+| Data types | done: uint8 (6-7 ms for MobileNet V2), int8 with per-channel weights (27 ms: layers grouped by scale, with requantization error), float32 and float16 weights (480 ms, slow path). Not supported: dynamic-range models, an all-float16 graph |
 | Tests | done: `npu-selftest` (two small models against TFLite on the CPU, speed, cache, a broken model, one model per NPU), the NPU phase of `scripts/test-board.sh`, run as the ordinary user |
 | Operators | compared with RKNN-Toolkit 1.7.5 in [OPERATORS.md](../npu-open/OPERATORS.md). Open: `GATHER_ND` and `RESIZE_NEAREST_NEIGHBOR` give wrong results, float `FULLY_CONNECTED` and `TRANSPOSE_CONV` crash TIM-VX, `SUM` / `TILE` / `UNPACK` / `SLICE` / `FLOOR` / `LOG_SOFTMAX` / `MIRROR_PAD` / comparisons / `LSTM` / `SVDF` are left to the CPU of the NPU die |
 | Known problems | `async_exec` can hang the USB bus (cause not found; a pause of 300 us avoids it; use `exec`); Keras MobileNet V1 (dynamic reshape) is refused by the delegate (fixed in 0.4.1) |
@@ -226,7 +226,7 @@ the entire card (no root-only percentage reserve) and retains a 2 GiB swapfile.
 
 Planned (2026-11-24): compare two fully quantized variants of the same model on the RK3399Pro NPU
 with LiteRT: one int8 and one uint8. Improve the NPU adapter and extend the set of LiteRT
-operators (model layers) that can run on the NPU.
+operators (model layers) that can run on the NPU. Track strict CPU parity and warm latency separately for each variant; current hardware results are in [the operator matrix](../npu-open/OPERATORS.md).
 
 ### Later
 

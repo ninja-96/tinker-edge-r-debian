@@ -2,7 +2,7 @@
  *
  * The NPU runs convolutions with per-tensor weights on its fast path (MobileNet V2: 7 ms) and per-channel weights on a slow one (134 ms), but one scale for a
  * whole layer destroys the accuracy of networks whose channel scales differ by tens of times (depthwise layers of MobileNet V2: cos 0.02).
- * A middle way that stays exact: the channels of a layer are sorted by scale and grouped so that the scales inside a group differ by at most `ratio`.
+ * To limit requantization error: the channels of a layer are sorted by scale and grouped so that the scales inside a group differ by at most `ratio`.
  * The layer becomes K convolutions of the same input, one per group, each with per-tensor weights (the scale of the group; the channels of other groups are
  * zero, their bias is zero) and the K outputs are summed with ADD. A channel outside the group gives exactly the zero point, so the sum loses nothing,
  * and the fused ReLU / ReLU6 stays valid because 0 is inside its range. MobileNet V2 needs 2.5 groups per layer on average at ratio 4.

@@ -200,7 +200,7 @@ every load). The power profile (`tinker-power`) changes the host, not the NPU.
 Two facts of this NPU found with the board: it runs convolutions with **per-tensor** weights on its fast integer path and with per-channel weights on a slow one (134 ms for MobileNet V2),
 and it returns wrong numbers for **signed** int8 tensors. The delegate hands int8 over as uint8 (the same values shifted by 128). A per-channel layer is rewritten by the server before the model is
 built (`npu-open/server/split_per_channel.h`): channels are grouped so that the scales of a group differ by at most 4 times, each group becomes a convolution with per-tensor weights, the outputs
-are added. That is exact; it costs 2-3 convolutions per layer (27 ms instead of 7 ms for MobileNet V2) and keeps the accuracy that one scale per layer destroys. `NPU_SPLIT=0` in the environment of the server switches it off.
+are added. Summing disjoint channels preserves their values, but requantizing weights and biases to a shared scale introduces rounding error. Grouping costs 2-3 convolutions per layer (27 ms instead of 7 ms for MobileNet V2). `NPU_SPLIT=0` in the environment of the server switches it off.
 
 ## ADB on the NPU die
 

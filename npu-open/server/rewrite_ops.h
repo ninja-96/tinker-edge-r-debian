@@ -24,7 +24,7 @@ namespace npu_rewrite {
 
 using namespace tflite;
 
-struct Stats { int slice = 0, tile = 0, log_softmax = 0, boolean = 0, trunc = 0, ceil = 0, cos = 0, round = 0, prelu = 0; };
+struct Stats { int slice = 0, tile = 0, broadcast = 0, requant = 0, padv2 = 0, log_softmax = 0, boolean = 0, trunc = 0, ceil = 0, cos = 0, round = 0, prelu = 0; };
 
 static inline BuiltinOperator code_of(const ModelT &m, const OperatorT &op)
 {
@@ -383,7 +383,8 @@ static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 
 	auto opcode = [&](BuiltinOperator c, int version) {
 		for (size_t i = 0; i < model->operator_codes.size(); i++)
-			if (std::max<int>(model->operator_codes[i]->builtin_code, model->operator_codes[i]->deprecated_builtin_code) == c) return (int)i;
+			if (std::max<int>(model->operator_codes[i]->builtin_code, model->operator_codes[i]->deprecated_builtin_code) == c &&
+			    model->operator_codes[i]->version >= version) return (int)i;
 		auto oc = std::make_unique<OperatorCodeT>();
 		oc->builtin_code = c; oc->deprecated_builtin_code = (int8_t)std::min<int>(c, 127); oc->version = version;
 		model->operator_codes.push_back(std::move(oc));
@@ -425,6 +426,55 @@ static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 	bool changed = false;
 	for (auto &op : sg.operators) {
 		BuiltinOperator c = code_of(*model, *op);
+		if (c == BuiltinOperator_PADV2 && op->inputs.size() == 3 && op->outputs.size() == 1 &&
+		    op->inputs[2] >= 0 && (size_t)op->inputs[2] < sg.tensors.size()) {
+			const auto &x = *sg.tensors[op->inputs[0]], &value = *sg.tensors[op->inputs[2]], &y = *sg.tensors[op->outputs[0]];
+			/* PAD fills with the output zero point, which can be a nonzero byte. */
+			if ((x.type == TensorType_INT8 || x.type == TensorType_UINT8) && x.type == y.type && value.type == x.type &&
+			    x.shape.size() <= 4 && x.quantization && y.quantization && y.quantization->zero_point.size() == 1 &&
+			    x.quantization->zero_point == y.quantization->zero_point && x.quantization->scale.size() == 1 &&
+			    x.quantization->scale == y.quantization->scale && value.quantization &&
+			    value.quantization->scale == y.quantization->scale && value.quantization->zero_point == y.quantization->zero_point &&
+			    std::all_of(value.shape.begin(), value.shape.end(), [](int d) { return d == 1; }) &&
+			    !value.is_variable && value.buffer && value.buffer < model->buffers.size() &&
+			    std::find(sg.inputs.begin(), sg.inputs.end(), op->inputs[2]) == sg.inputs.end()) {
+				const auto &data = model->buffers[value.buffer]->data;
+				if (data.size() == 1 && data[0] == static_cast<uint8_t>(y.quantization->zero_point[0])) {
+					op->opcode_index = opcode(BuiltinOperator_PAD, x.type == TensorType_INT8 ? 2 : 1);
+					op->inputs.pop_back();
+					op->builtin_options.Reset();
+					op->builtin_options.type = BuiltinOptions_PadOptions;
+					op->builtin_options.value = new PadOptionsT();
+					s.padv2++; changed = true;
+				}
+			}
+		}
+		if (c == BuiltinOperator_QUANTIZE && op->inputs.size() == 1 && op->outputs.size() == 1) {
+			const auto &x = *sg.tensors[op->inputs[0]], &y = *sg.tensors[op->outputs[0]];
+			if (known(x.shape) && x.shape == y.shape && (x.type == TensorType_INT8 || x.type == TensorType_UINT8) && x.type == y.type &&
+			    x.quantization && y.quantization && x.quantization->scale.size() == 1 && y.quantization->scale.size() == 1 &&
+			    x.quantization->zero_point.size() == 1 && y.quantization->zero_point.size() == 1 &&
+			    std::isnormal(x.quantization->scale[0] * 0.25f) && x.quantization->scale[0] > 0 &&
+			    std::isfinite(y.quantization->scale[0]) && y.quantization->scale[0] == 2 * x.quantization->scale[0]) {
+				/* LiteRT rounds n/2 ties upward. The VX converter rounds to even.
+				 * Adding 1/8 of an output step moves just the ties across the midpoint. */
+				auto b = std::make_unique<BufferT>();
+				b->data = {1};
+				model->buffers.push_back(std::move(b));
+				int bias = new_like(x, {1}, x.name + "_half_step_tie");
+				auto &t = *sg.tensors[bias];
+				t.buffer = model->buffers.size() - 1;
+				t.quantization->scale = {x.quantization->scale[0] * 0.25f};
+				t.quantization->zero_point = {0};
+				t.quantization->min.clear(); t.quantization->max.clear();
+				auto add = std::make_unique<OperatorT>();
+				add->opcode_index = opcode(BuiltinOperator_ADD, 2);
+				add->inputs = {op->inputs[0], bias}; add->outputs = op->outputs;
+				add->builtin_options.type = BuiltinOptions_AddOptions;
+				add->builtin_options.value = new AddOptionsT();
+				out.push_back(std::move(add)); s.requant++; changed = true; continue;
+			}
+		}
 		if (c == BuiltinOperator_SLICE && op->inputs.size() == 3 && op->outputs.size() == 1) {
 			const TensorT &x = *sg.tensors[op->inputs[0]];
 			std::vector<int32_t> begin, size;
@@ -444,11 +494,27 @@ static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 				out.push_back(std::move(n)); s.slice++; changed = true; continue;
 			}
 		}
-		if (c == BuiltinOperator_TILE && op->inputs.size() == 2 && op->outputs.size() == 1) {
+		if ((c == BuiltinOperator_TILE || c == BuiltinOperator_BROADCAST_TO) && op->inputs.size() == 2 && op->outputs.size() == 1) {
 			const TensorT &x = *sg.tensors[op->inputs[0]];
 			std::vector<int32_t> mult;
 			if (known(x.shape) && const_i32(*sg.tensors[op->inputs[1]], &mult) && mult.size() == x.shape.size()) {
 				bool ok = true;
+				if (c == BuiltinOperator_BROADCAST_TO) {
+					const TensorT &target = *sg.tensors[op->inputs[1]], &y = *sg.tensors[op->outputs[0]];
+					/* The delegate only aliases BroadcastTo's input. A graph output needs actual copies. */
+					ok = target.type == TensorType_INT32 && !target.is_variable &&
+					     std::find(sg.inputs.begin(), sg.inputs.end(), op->inputs[1]) == sg.inputs.end() &&
+					     target.shape == std::vector<int>{(int)x.shape.size()} && y.shape == mult &&
+					     x.type == y.type && (x.type == TensorType_INT8 || x.type == TensorType_UINT8) &&
+					     x.quantization && y.quantization && x.quantization->scale.size() == 1 &&
+					     x.quantization->scale == y.quantization->scale && x.quantization->zero_point == y.quantization->zero_point &&
+					     (x.shape_signature.empty() || x.shape_signature == x.shape) &&
+					     (y.shape_signature.empty() || y.shape_signature == y.shape);
+					for (size_t i = 0; ok && i < mult.size(); i++) {
+						if (mult[i] == x.shape[i]) mult[i] = 1;
+						else if (x.shape[i] != 1) ok = false;
+					}
+				}
 				for (int32_t m : mult) ok = ok && m >= 1 && m <= 64;
 				if (ok) {
 					int cur = op->inputs[0]; std::vector<int> shape = x.shape;
@@ -459,7 +525,7 @@ static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 						shape[a] *= mult[a];
 						int dst = (k + 1 == axes.size()) ? op->outputs[0] : new_like(x, shape, x.name + "_tile" + std::to_string(a));
 						auto n = std::make_unique<OperatorT>();
-						n->opcode_index = opcode(BuiltinOperator_CONCATENATION, 1);
+						n->opcode_index = opcode(BuiltinOperator_CONCATENATION, x.type == TensorType_INT8 ? 2 : 1);
 						n->inputs.assign(mult[a], cur);
 						n->outputs = { dst };
 						n->builtin_options.type = BuiltinOptions_ConcatenationOptions;
@@ -469,13 +535,14 @@ static inline std::string run(std::vector<uint8_t> &bytes, Stats *st)
 					}
 					if (axes.empty()) {   /* all multiples 1: a copy */
 						auto n = std::make_unique<OperatorT>();
-						n->opcode_index = opcode(BuiltinOperator_CONCATENATION, 1);
+						n->opcode_index = opcode(BuiltinOperator_CONCATENATION, x.type == TensorType_INT8 ? 2 : 1);
 						n->inputs = { op->inputs[0] }; n->outputs = op->outputs;
 						n->builtin_options.type = BuiltinOptions_ConcatenationOptions;
 						auto *o = new ConcatenationOptionsT(); o->axis = 0; n->builtin_options.value = o;
 						out.push_back(std::move(n));
 					}
-					s.tile++; changed = true; continue;
+					if (c == BuiltinOperator_TILE) s.tile++; else s.broadcast++;
+					changed = true; continue;
 				}
 			}
 		}

@@ -593,7 +593,7 @@ std::string Model::cache_key() const
 	std::string drv = hello_.driver;
 	for (auto &c : drv) if (c == '/') c = '_';
 	char chip[40]; snprintf(chip, sizeof chip, "%x_%x_%x", hello_.chip_model, hello_.chip_revision, hello_.chip_product);
-	return key_ + "." + drv + "." + chip;
+	return key_ + "." + drv + "." + chip + ".q8v2";  // Recompile graphs and retune plans after the quantized rewrites.
 }
 
 std::vector<uint8_t> Model::load(const std::vector<uint8_t> &data, const LoadOptions &opt)
