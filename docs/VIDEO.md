@@ -2,7 +2,7 @@
 
 | Function | Driver | State |
 |---|---|---|
-| Decode H.264/HEVC/VP9/AV1 (browser) | mainline `rkvdec` (V4L2 stateless) through the `v4l2_request` VA-API driver, `-browser` device tree | built into the image (release 0.6), to be checked on the board |
+| Decode H.264 (browser) | mainline `rkvdec` (V4L2 stateless) through the `v4l2_request` VA-API driver, `-browser` device tree | Debian Chromium on the board passed 720p H.264 with VaapiVideoDecoder |
 | Decode H.264/HEVC/VP9 (V4L2) | mainline `rkvdec` (V4L2 stateless) | in the kernel config (modules), not tested on the board |
 | Encode H.264/VP8/JPEG | Rockchip `mpp_service` (VEPU2), ported from the BSP 6.12 (default `-browser` device tree) | works: 720p H.264 at 52 frames/s with `mpi_enc_test`, about 60 with GStreamer |
 | Encode H.265 | not in the RK3399 hardware | software only (x265) |
@@ -52,18 +52,32 @@ the legacy Android boot image when one is used.
 
 ## Browser hardware decode
 
-Chromium decodes H.264/HEVC/AV1 (and VP8/VP9) in hardware through the mainline
-`rkvdec` V4L2 stateless decoder, using the `v4l2_request` VA-API driver
-(`out/v4l2-request/`, built by `scripts/build-v4l2-request.sh` from the pinned fork,
-the `rk3588-vp9` branch of `dongioia/libva-v4l2-request`; MIT). It needs the
-`-browser` device tree (the mainline `rkvdec` enabled, the `mpp` decoder off).
-`/etc/chromium.d/00-hwvideo.sh` sets `LIBVA_DRIVER_NAME=v4l2_request` for the
-browser. `/dev/video*` and `/dev/media*` belong to the `video` group.
+The 0.6 candidate uses the mainline `rkvdec` decoder on the `-browser` device tree.
+`scripts/build-v4l2-request.sh` builds the omacom VA-API driver pinned in `sources.lock`.
+`/etc/chromium.d/00-hwvideo.sh` selects it for Chromium. The `video` group has access
+to the codec device nodes. Chromium 156 on Wayland used VaapiVideoDecoder on this board on 2026-11-27.
 
-Check it on the board: `scripts/test-board.sh` plays a clip headless and verifies
-that the Chromium process opens a `/dev/video*` (or `dma_heap`) file descriptor;
-`vainfo` should list the `v4l2_request` driver with the H264 surface formats.
-This path is new in release 0.6 and has not been checked on the board yet.
+Connect an HDMI monitor and run `scripts/test-board.sh --browser-only` on the host.
+The check uses an existing Wayland session or starts Weston for the test.
+The Chromium phase serves a 720p H.264 clip over loopback HTTP. It checks the Mali GPU
+renderer, the platform video decoder reported by Chromium, and the expected red and blue
+frames sampled during playback. On 2026-11-27 all 48 frames of a 720p H.264 High clip
+also matched software decode byte for byte after download from VA-API. The full board
+test recorded 53 PASS, 5 SKIP and 0 FAIL. The browser reported Mali-T860/Panfrost
+and VaapiVideoDecoder.
+
+The RK3399 patch in `patches/omacom-v4l2-request/` saves the requested coded size before
+probing each codec. Otherwise the VP9 probe aligns a 720-line frame to 768 and rkvdec
+rejects the subsequent H.264 capture buffer. Userspace driver updates need no eMMC flash.
+
+Debian supplies the Chromium binary. On Weston, Chromium 156.0.8078.108 used hardware
+decode with `LIBVA_DRIVER_NAME=v4l2_request`. With automatic selection it searched for
+`panfrost_drv_video.so` and decoded in software. KDE Plasma 6.3.6 on HDMI gave the same result.
+KWin and Chromium both used Mali-T860/Panfrost. With the driver selected, Chromium
+displayed both expected frame colours using VaapiVideoDecoder. In an H.264 WebRTC
+loopback, Chromium reported OpenH264 and `powerEfficientEncoder=false` for all 63
+sent frames. The VA driver exposes decoding and video processing only. The hardware
+encoder is available to Rockchip MPP applications as described below.
 
 ## Using the hardware encoder
 

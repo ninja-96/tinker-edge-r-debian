@@ -5,6 +5,7 @@ PASS/FAIL table. Run it after every new image or kernel.
 
 ```sh
 sudo apt install iperf3          # on the PC, for the network phase
+scripts/test-board.sh --browser-only         # VA-API and Chromium on HDMI
 scripts/test-board.sh            # 60 s per load phase, about 10 minutes in total
 scripts/test-board.sh -d 300 192.168.1.53    # longer soak, board given by IP
 ```
@@ -30,6 +31,7 @@ USB-C port with an adapter), a monitor on HDMI, headphones or speakers on the 3.
 | eMMC | write 512 MiB, drop caches, read back, compare SHA-256; write must be 10 MiB/s or more, read 20 MiB/s or more, no new data CRC errors | checksum mismatch, slow bus, CRC errors |
 | GPU | `eglinfo` must show Panfrost, `glmark2-es2-drm --off-screen` | software rendering, crash |
 | Hardware video | with the `-mpp` device tree: H.264 encode and decode of a generated 720p clip with `mpi_enc_test` / `mpi_dec_test`, frame count checked with `ffprobe`; otherwise the V4L2 decoders are listed | no output, wrong frame count |
+| Browser video | H.264 on the browser device tree. Use the active Wayland session or run a temporary Weston DRM session on HDMI. Chromium must report a platform decoder and Mali renderer, and screenshots must contain both reference colors. | software fallback, stalled/green frames, or no usable display |
 | 40-pin header | every plain GPIO pin driven high/low and read, I2C6/I2C7 scan, `/dev/spidev1.0` and `spidev5.0`, three PWM channels; with `GPIO_LOOPBACK="7:29 31:37"` and jumper wires also the electrical loopback | line busy, device missing |
 | NPU | `npu-selftest` as the ordinary user (group `plugdev`, no root, through `npu-daemon`): the chip identity, two small TensorFlow Lite models (int8 per-channel, uint8) against the result of TFLite on the CPU, speed, the compiled-graph cache, two models at once, attaching to a loaded model (also from a second process), stopping one model, a stopped model refuses to run, a broken model is refused and the NPU stays usable (17 checks); needs the `-npu` or `-full` device tree | wrong result, NPU not found, a broken model takes the NPU down, the daemon does not answer |
 | NPU autotune (manual, about an hour) | `tests/npu/autotune-log.sh -d <models dir>` on the board: `autotune()` on the LiteRT community int8 models of [NPU.md](NPU.md) with tolerances just above their split-ratio-4 accuracy, so that every step runs; one log with every candidate (measured and predicted time, cosine) and the log of the NPU server per load (split / kept layers, weight error, CPU profile) | for the analysis of autotune, not pass / fail |

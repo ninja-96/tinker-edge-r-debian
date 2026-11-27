@@ -16,7 +16,7 @@ real board; the method is in the README status table and in [TESTING.md](TESTING
 | GStreamer with `mpph264enc`, `mppvideodec`, ... | plugin built from a pinned commit |
 | Wi-Fi (RTL8822CE, PCIe), Bluetooth (USB), RK809 audio, RTC | Wi-Fi and Bluetooth work (driver, firmware, scan, pairing through KDE, A2DP / HFP in PipeWire); **connect the two antennas** (U.FL on the module): without them the radio reaches only centimetres. Audio: see "hardware checks" below |
 | 40-pin header: GPIO, I2C6/7, SPI1/5, PWM0/1/3 | [GPIO.md](GPIO.md) |
-| NPU: LiteRT 2.3.2 (TensorFlow Lite) on an open stack (TIM-VX, TFLite VX delegate), several models and programs, C++ and Python, `device` plans and `autotune()` | only Rockchip's firmware of the NPU die and the Vivante driver are closed; power-up needs the reference clock at 24 MHz; [NPU.md](NPU.md) |
+| NPU: LiteRT 2.4.0 (TensorFlow Lite) on an open stack (TIM-VX, TFLite VX delegate), several models and programs, C++ and Python, `device` plans and `autotune()` | only Rockchip's firmware of the NPU die and the Vivante driver are closed; power-up needs the reference clock at 24 MHz; [NPU.md](NPU.md) |
 
 ## Not tested yet (needs a person or hardware)
 
@@ -92,20 +92,23 @@ Research (2026-11-05): Chromium's own V4L2 stateless decoder was removed upstrea
 `use_v4l2_codec` build flag no longer exists (checked on `main` and on the Debian 150 tag), so the original path A is dead;
 hardware decode in the browser goes through VA-API only (Debian's build has `use_vaapi=true`, the VA-API video decoder
 delegates for H.264/H.265/AV1/VP8/VP9 are in `media/gpu/vaapi`). For the mainline `rkvdec` the VA-API driver is
-`libva-v4l2-request`; the maintained fork (dongioia, active, H.265/VP9 on the mainline request API) is pinned in `sources.lock`.
+`libva-v4l2-request`; the omacom driver with frame-based H.264 is pinned in `sources.lock`.
 
 | Item | Status |
 |---|---|
 | `chromium` in the image, always current | done (2026-11-05): installed from the live Debian archive in `scripts/build-rootfs.sh` — the newest version at every build; `scripts/check-updates.sh` reports when the archive is ahead of `out/rootfs.tar`; updated at every release together with the kernel and LiteRT (docs/RELEASING.md, step 1) |
 | Device tree variant `-browser` (the new default) | done (2026-11-05): hybrid — the VDU decoder (mainline `rkvdec`, V4L2 stateless) goes to the browser, the VPU encoder and the mpp VPU decoder stay with `mpp_service`, so GStreamer keeps its H.264/VP8/JPEG encoding and H.264 decoding; mpp loses only the H.265/VP9 decode it used to provide; `-full` remains the fallback (`tinker-boot-select`) |
-| The `v4l2_request` VA-API driver | done (2026-11-05): the dongioia fork (MIT/LGPL-2.1) built by `scripts/build-v4l2-request.sh`; the driver lands in `/usr/lib/<multiarch>/dri/` |
+| The `v4l2_request` VA-API driver | omacom/libva-v4l2_request (GPL-3.0-or-later), built by `scripts/build-v4l2-request.sh`; the driver lands in `/usr/lib/<multiarch>/dri/` |
 | Chromium configuration | done (2026-11-05): `LIBVA_DRIVER_NAME=v4l2_request` in `overlay/etc/chromium.d/00-hwvideo.sh` (no feature flags needed: the VA-API VDA is picked automatically when the driver is present); udev rules give the regular user (group `video`) the `/dev/video*` / `/dev/media*` nodes; without the driver Chromium falls back to software decode |
-| Board test | done (2026-11-05): the "Browser hardware decode" phase of `scripts/test-board.sh` — `vainfo` must list the `v4l2_request` profiles, and while a 720p H.264 clip plays in headless Chromium some browser process must hold the codec device open (`/dev/video*` or `/dev/dma_heap*` in `/proc/*/fd`) |
+| Board test | An active Wayland session must present both expected H.264 frame colors with the platform decoder and the Mali GPU. |
 | Image size | +768 MiB: `ROOTFS_MIB` 1792 -> 2560 (`scripts/build-image-mainline-uboot.sh`) |
 
-**Board check remains** (2026-11-05): flash the image with the `-browser` variant and run `scripts/test-board.sh` — the phases
-"VA-API driver (v4l2_request)" and "Chromium hardware decode" must be PASS. If the fork does not work on the RK3399 (it is
-developed for the RK3588), the fallbacks are the original Bootlin `libva-v4l2-request` or a port of the fork.
+**0.6 browser gate passed on 2026-11-27.** The November 26 board run failed Chromium hardware decode. The original
+driver exported incomplete NV12 layer descriptions and its H.264 backend was a stub. The
+replacement with the local format-negotiation patch passed Chromium playback on the current board.
+All 48 H.264 frames matched software decode; the installed driver passed the full board test (53 PASS, 5 SKIP).
+See [Browser hardware decode](VIDEO.md#browser-hardware-decode) for the test and browser results.
+The 0.6 candidate targets LiteRT 2.4.0 on the NPU die.
 
 ### Release 0.4.1: TensorFlow Lite 2.21, several models, autotune
 
@@ -205,6 +208,16 @@ Only the driver and Rockchip's firmware stay closed. The memory controller work 
 | Operators | compared with RKNN-Toolkit 1.7.5 in [OPERATORS.md](../npu-open/OPERATORS.md). Open: `GATHER_ND` and `RESIZE_NEAREST_NEIGHBOR` give wrong results, float `FULLY_CONNECTED` and `TRANSPOSE_CONV` crash TIM-VX, `SUM` / `TILE` / `UNPACK` / `SLICE` / `FLOOR` / `LOG_SOFTMAX` / `MIRROR_PAD` / comparisons / `LSTM` / `SVDF` are left to the CPU of the NPU die |
 | Known problems | `async_exec` can hang the USB bus (cause not found; a pause of 300 us avoids it; use `exec`); Keras MobileNet V1 (dynamic reshape) is refused by the delegate (fixed in 0.4.1) |
 | Not in 0.4 | a converter in Docker for ONNX/PyTorch to TFLite (the documentation says how to make an integer model); newer TIM-VX (v1.1.57 crashes on this driver: done in 0.4.1); an own kernel for the NPU die |
+
+### Release 0.7: SD card boot (first priority), then NPU, LiteRT and quantized model variants
+
+**First priority (user decision, 2026-11-26): the transition to SD cards** — repeated eMMC flashing degrades the board, so
+0.7 has to move booting to an SD card first (the flash script and the boot check exist: `scripts/flash-sd.sh`, the
+"Boot from an SD card, the 2 GiB swap file" line above), before the NPU work below.
+
+Planned (2026-11-24): compare two fully quantized variants of the same model on the RK3399Pro NPU
+with LiteRT: one int8 and one uint8. Improve the NPU adapter and extend the set of LiteRT
+operators (model layers) that can run on the NPU.
 
 ### Later
 

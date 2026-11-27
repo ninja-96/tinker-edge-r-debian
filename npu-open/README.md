@@ -4,7 +4,7 @@ Since release 0.4 this is how the NPU of the RK3399Pro is used: TensorFlow Lite 
 what runs on the NPU die, the board side (daemon, C++ library, Python binding) and how it is built. Measured operator coverage: [OPERATORS.md](OPERATORS.md).
 
 The NPU die of the RK3399Pro is VeriSilicon (Vivante) IP. Rockchip's firmware for it contains Vivante's driver and libraries (SDK **6.4.6**). VeriSilicon publishes open (MIT) software
-on top of them: **TIM-VX** and the **TFLite VX delegate**. Release 0.5 uses their `main` branches with **LiteRT 2.3.2** (TensorFlow Lite as LiteRT's `tflite/`; 0.4.1: TensorFlow Lite 2.21.0). TIM-VX is built with the SDK headers of its tag
+on top of them: **TIM-VX** and the **TFLite VX delegate**. The 0.6 candidate uses their pinned `main` revisions with **LiteRT 2.4.0** (TensorFlow Lite as LiteRT's `tflite/`; 0.4.1: TensorFlow Lite 2.21.0). TIM-VX is built with the SDK headers of its tag
 v1.1.32 (6.4.6, the driver's version): the headers of newer SDKs enlarge `vx_hardware_caps_params_ext_t`, which the 6.4.6 driver refuses with -10 (that, not the driver, made
 TIM-VX v1.1.57 crash in 0.4); other `VX_*_SUPPORT` macros of the headers switch off what the driver cannot do. All TIM-VX unit tests that exist in v1.1.32 pass; the failing new ones
 are operators newer than the driver (Conv3d, reflect padding, RoiPool, HashtableLookup).
@@ -12,7 +12,7 @@ are operators newer than the driver (Conv3d, reflect padding, RoiPool, Hashtable
 ```
 board (Debian 13, Python 3.13)                                                     NPU die (2 x A35, Rockchip's Linux 4.4 in RAM)
  programs: rk3399pro_npu (Python) / librk3399pro_npu (C++)                          npu_server (server/): one child "engine" per model:
-   --unix socket /run/npu/npu.sock--> npu-daemon --USB bulk channel ("ntb")-->        LiteRT 2.3.2 + XNNPACK + VX delegate -> TIM-VX -> Vivante driver
+   --unix socket /run/npu/npu.sock--> npu-daemon --USB bulk channel ("ntb")-->        LiteRT 2.4.0 + XNNPACK + VX delegate -> TIM-VX -> Vivante driver
  models: .tflite, kept on the board; compiled graphs in ~/.cache/npu-models          several models at once, loaded until stopped
 ```
 
