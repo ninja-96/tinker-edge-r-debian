@@ -20,7 +20,7 @@ PACKAGES=(
     htop bash-completion fdisk util-linux-extra e2fsprogs python3 python3-numpy python3-libgpiod python3-smbus2 python3-spidev gpiod i2c-tools libusb-1.0-0
     systemd-timesyncd wireless-regdb rfkill
     gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-libav
-    chromium
+    chromium weston
     plymouth
     locales alsa-utils bluez libgl1-mesa-dri libegl-mesa0 libgbm1 mesa-utils libdrm-tests mesa-opencl-icd clinfo
 )
@@ -40,7 +40,7 @@ fi
 # password and must not be served to a later default build.
 PASS_DEFAULT=debian
 PWC=${FORCE_PW_CHANGE:-1}
-STAMP="rootfs $(sha256sum scripts/build-rootfs.sh | cut -c1-16) FREE=$FREE HOST=$HOSTNAME_ USER=$USER_ PWC=$PWC"
+STAMP="rootfs $(cat scripts/build-rootfs.sh scripts/build-chroot.sh | sha256sum | cut -c1-16) FREE=$FREE HOST=$HOSTNAME_ USER=$USER_ PWC=$PWC"
 if [ "$PASS_" != "$PASS_DEFAULT" ]; then
     echo "rootfs: non-default password: building without the cache (and invalidating it)"
     rm -f "$OUTFILE.stamp"
@@ -50,12 +50,14 @@ elif [ "${FORCE:-0}" != 1 ] && [ -f "$OUTFILE" ] && [ -f "$OUTFILE.stamp" ] && [
 fi
 rm -f "$OUTFILE.stamp"   # published again only after the build succeeds
 
+. scripts/build-chroot.sh
+ensure_binfmt   # mmdebstrap chroots into the arm64 target (useradd/locale-gen/...) and needs qemu user-mode
+
 mmdebstrap --arch=arm64 --variant=minbase \
     --components="$COMPONENTS" \
     --include="$(IFS=,; echo "${PACKAGES[*]}")" \
     --customize-hook='
         set -e
-        printf "deb https://deb.debian.org/debian-security trixie-security '"$COMPONENTS"'\ndeb https://deb.debian.org/debian trixie-updates '"$COMPONENTS"'\n" >> "$1/etc/apt/sources.list"
         echo "'"$HOSTNAME_"'" > "$1/etc/hostname"
         printf "127.0.0.1 localhost\n127.0.1.1 '"$HOSTNAME_"'\n" > "$1/etc/hosts"
         printf "LABEL=rootfs / ext4 defaults,noatime 0 1\n" > "$1/etc/fstab"
@@ -72,7 +74,10 @@ mmdebstrap --arch=arm64 --variant=minbase \
         rm -f "$1"/etc/ssh/ssh_host_*
         chroot "$1" apt-get clean
         rm -rf "$1/var/lib/apt/lists/"*' \
-    trixie "$OUTFILE" https://deb.debian.org/debian
+    trixie "$OUTFILE" \
+    "deb https://deb.debian.org/debian trixie $COMPONENTS" \
+    "deb https://deb.debian.org/debian-security trixie-security $COMPONENTS" \
+    "deb https://deb.debian.org/debian trixie-updates $COMPONENTS"
 
 [ "$PASS_" = "$PASS_DEFAULT" ] && echo "$STAMP" > "$OUTFILE.stamp"
 chown "${HOST_UID:-0}:${HOST_GID:-0}" "$OUTFILE"

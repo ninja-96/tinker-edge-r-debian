@@ -14,7 +14,7 @@ cd "$(dirname "$0")/.."
 ./run.sh scripts/build-v4l2-request.sh             # v4l2_request VA-API driver (browser decode) -> out/v4l2-request
 ./run.sh scripts/build-uboot.sh                   # U-Boot      -> out/u-boot-rockchip-ddrblob.bin
 ./scripts/fetch-npu.sh                              # firmware of the NPU die (Rockchip, pinned, sha256 checked)
-./scripts/build-npu-open.sh                        # TIM-VX, TFLite VX delegate, LiteRT 2.3.2, npu_server for the NPU die -> out/npu-open (Docker)
+./scripts/build-npu-open.sh                        # TIM-VX, TFLite VX delegate, LiteRT 2.4.0, npu_server for the NPU die -> out/npu-open (Docker)
 ./run.sh scripts/build-npu-boot.sh                 # firmware image of the NPU die with our server -> out/npu_fw
 ./run.sh scripts/build-npu-host.sh                 # npu-daemon, librk3399pro_npu, the Python module rk3399pro_npu._core -> out/npu-host
 ./run.sh scripts/build-rkdeveloptool-arm64.sh      # rkdeveloptool for the board -> out/rkdeveloptool-arm64

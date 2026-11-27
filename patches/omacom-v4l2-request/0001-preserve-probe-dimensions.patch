@@ -1,0 +1,31 @@
+--- a/src/surface.c
++++ b/src/surface.c
+@@ -506,6 +506,8 @@
+ 			out.fmt.pix.pixelformat = coded;
+ 		}
+ 
++		/* S_FMT writes codec-aligned dimensions back into out. */
++		const struct v4l2_format requested_out = out;
+ 		if (coded && ioctl(fd, VIDIOC_S_FMT, &out) < 0)
+ 			goto next;
+ 		probe_set_bit_depth(fd, coded, pixelformat, width, height);
+@@ -553,6 +555,7 @@
+ 		struct v4l2_format allocation = format;
+ 		for (unsigned int c = 1; c < drv->decoders[n].nb_pixelformats; c++) {
+ 			struct v4l2_format candidate = format;
++			out = requested_out;
+ 			if (mplane)
+ 				out.fmt.pix_mp.pixelformat = drv->decoders[n].pixelformats[c];
+ 			else
+@@ -580,10 +583,7 @@
+ 				allocation.fmt.pix.sizeimage = candidate.fmt.pix.sizeimage;
+ 			}
+ 		}
+-		if (mplane)
+-			out.fmt.pix_mp.pixelformat = coded;
+-		else
+-			out.fmt.pix.pixelformat = coded;
++		out = requested_out;
+ 		if (ioctl(fd, VIDIOC_S_FMT, &out) < 0)
+ 			goto next;
+ 		probe_set_bit_depth(fd, coded, pixelformat, width, height);

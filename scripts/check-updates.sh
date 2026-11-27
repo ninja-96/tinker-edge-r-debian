@@ -54,8 +54,17 @@ fi
 
 if [ -f out/rootfs.tar ]; then
     # no early exit in the awk: it would SIGPIPE curl/tar and pipefail would kill the script
-    arch_chromium=$(curl -fsS -m 90 https://deb.debian.org/debian/dists/trixie/main/binary-arm64/Packages.xz \
-        | xz -dc | awk '/^Package: /{f = ($0 == "Package: chromium")} f && /^Version:/{print $2}')
+    candidates=()
+    for index in debian/dists/trixie debian-security/dists/trixie-security debian/dists/trixie-updates; do
+        version=$(curl -fsS -m 90 "https://deb.debian.org/$index/main/binary-arm64/Packages.xz" \
+            | xz -dc | awk '/^Package: /{f = ($0 == "Package: chromium")} f && /^Version:/{print $2}')
+        [ -z "$version" ] || candidates+=("$version")
+    done
+    arch_chromium=
+    for version in "${candidates[@]}"; do
+        if dpkg --compare-versions "$version" gt "$arch_chromium"; then arch_chromium=$version; fi
+    done
+    [ -n "$arch_chromium" ] || { echo "chromium: no arm64 package in the configured archives" >&2; exit 2; }
     have_chromium=$(tar -xOf out/rootfs.tar ./var/lib/dpkg/status 2>/dev/null \
         | awk '/^Package: /{f = ($0 == "Package: chromium")} f && /^Version:/{print $2}')
     echo "chromium: $arch_chromium in the archive; out/rootfs.tar has ${have_chromium:-none} (installed from the archive at the root file system build)"

@@ -9,8 +9,12 @@ set -u
 D=${DURATION:-60}
 SRV=${IPERF_SERVER:-}
 MAX_TEMP=${MAX_TEMP:-85}
-W=/var/tmp/selftest
-rm -rf "$W"; mkdir -p "$W"
+if [ "${1:-}" = --browser-only ]; then
+    W=$(mktemp -d /tmp/browser-selftest.XXXXXX) || exit 1
+else
+    W=/var/tmp/selftest
+    rm -rf "$W"; mkdir -p "$W"
+fi
 export PATH=$PATH:/usr/sbin:/sbin
 
 RES=()
@@ -23,6 +27,67 @@ need() {   # need <command> <package>
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$2" >/dev/null 2>&1
     command -v "$1" >/dev/null 2>&1
 }
+
+# On the server image, start Weston only for this check. Leave existing desktops alone.
+browser_playback() (
+    local socket owner runtime weston_pid session_user had_session=0
+    for socket in /run/user/*/wayland-*; do
+        [ -S "$socket" ] || continue
+        had_session=1
+        runtime=${socket%/*}
+        owner=$(stat -c %U "$runtime") || return 1
+        runuser -u "$owner" -- env XDG_RUNTIME_DIR="$runtime" WAYLAND_DISPLAY="${socket##*/}" \
+            LIBVA_DRIVER_NAME=v4l2_request python3 "$(dirname "$0")/check-browser-decode.py" && return 0
+    done
+    # An existing compositor may own DRM even when its browser probe failed.
+    [ "$had_session" = 0 ] || return 1
+    session_user=${SUDO_USER:-$(getent passwd 1000 | cut -d: -f1)}
+    [ -n "$session_user" ] && [ "$session_user" != root ] || return 1
+    runtime=$(mktemp -d /run/tinker-browser.XXXXXX) || return 1
+    socket="$runtime/wayland-test"
+    XDG_RUNTIME_DIR="$runtime" weston --no-config --backend=drm --socket="$socket" > "$W/weston.log" 2>&1 &
+    weston_pid=$!
+    trap 'kill "$weston_pid" 2>/dev/null; wait "$weston_pid" 2>/dev/null; rmdir "$runtime"' EXIT
+    for _ in {1..15}; do
+        [ -S "$socket" ] && break
+        kill -0 "$weston_pid" 2>/dev/null || { tail "$W/weston.log"; return 1; }
+        sleep 1
+    done
+    [ -S "$socket" ] || return 1
+    chgrp "$(id -gn "$session_user")" "$runtime" "$socket" && chmod 0710 "$runtime" && chmod 0660 "$socket" || return 1
+    runuser -u "$session_user" -- env XDG_RUNTIME_DIR="/run/user/$(id -u "$session_user")" \
+        WAYLAND_DISPLAY="$socket" LIBVA_DRIVER_NAME=v4l2_request python3 "$(dirname "$0")/check-browser-decode.py"
+)
+
+browser_decode() {
+    local vi
+    # Browser hardware decode: the mainline rkvdec (V4L2 stateless) through the
+    # v4l2_request VA-API driver, as the browser (-browser device tree variant) uses it.
+    need v4l2-ctl v4l-utils
+    if v4l2-ctl --list-devices 2>/dev/null | grep -qi 'rkvdec'; then
+        need vainfo vainfo
+        vi=$(LIBVA_DRIVER_NAME=v4l2_request vainfo --display drm 2>&1)
+        if echo "$vi" | grep -Eq 'Driver version:.*v4l2[-_]request' && echo "$vi" | grep -Eq 'VAProfileH264.*VAEntrypointVLD'; then
+            res "VA-API driver (v4l2_request)" PASS "driver up, H.264 in the profile list: $(echo "$vi" | grep -c 'Profile') profile(s)"
+        else
+            res "VA-API driver (v4l2_request)" FAIL "$(echo "$vi" | tail -2 | tr '\n' ' ')"
+        fi
+        need ffmpeg ffmpeg
+        if browser_playback > "$W/chromium.log" 2>&1; then
+            res "Chromium hardware decode" PASS "$(tail -1 "$W/chromium.log")"
+        else
+            res "Chromium hardware decode" FAIL "$(tail -1 "$W/chromium.log") (see $W/chromium.log)"
+        fi
+    else
+        res "Browser hardware decode" SKIP "no mainline rkvdec device (boot the -browser variant: sudo tinker-boot-select browser, reboot)"
+    fi
+}
+
+if [ "${1:-}" = --browser-only ]; then
+    browser_decode
+    [[ ${RES[0]} == *'|PASS|'* && ${RES[1]:-} == *'|PASS|'* ]]
+    exit $?
+fi
 
 temp_max() {   # highest thermal zone, degrees C
     cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | sort -n | tail -1 | awk '{printf "%d", $1/1000}'
@@ -150,48 +215,7 @@ else
     res "H.264 encode (mpp)" SKIP "needs the -mpp device tree: sudo tinker-boot-select mpp, reboot"
 fi
 
-# Browser hardware decode: the mainline rkvdec (V4L2 stateless) through the
-# v4l2_request VA-API driver, as the browser (-browser device tree variant) uses it.
-need v4l2-ctl v4l-utils
-if v4l2-ctl --list-devices 2>/dev/null | grep -qi 'rkvdec'; then
-    need vainfo libva-utils
-    vi=$(LIBVA_DRIVER_NAME=v4l2_request vainfo 2>&1)
-    if echo "$vi" | grep -q 'v4l2_request' && echo "$vi" | grep -qi 'H264'; then
-        res "VA-API driver (v4l2_request)" PASS "driver up, H.264 in the profile list: $(echo "$vi" | grep -c 'Profile') profile(s)"
-    else
-        res "VA-API driver (v4l2_request)" FAIL "$(echo "$vi" | tail -2 | tr '\n' ' ')"
-    fi
-    need ffmpeg ffmpeg
-    if command -v chromium >/dev/null && command -v ffmpeg >/dev/null; then
-        clip=$W/clip.mp4
-        ffmpeg -v error -y -f lavfi -i testsrc2=size=1280x720:rate=30 -frames:v 90 -c:v libx264 -pix_fmt yuv420p "$clip"
-        printf '<video src="file://%s" loop autoplay muted></video>\n' "$clip" > "$W/clip.html"
-        timeout 45 chromium --headless --no-sandbox --disable-gpu-sandbox \
-            --autoplay-policy=no-user-gesture-required "file://$W/clip.html" > "$W/chromium.log" 2>&1 &
-        crpid=$!
-        sleep 10
-        hit=""
-        for i in $(seq 1 25); do
-            for p in $(pgrep -f 'chromium' 2>/dev/null); do
-                f=$(ls -l /proc/$p/task/*/fd 2>/dev/null | grep -o '/dev/\(video\|dma_heap\)[0-9]*' | sort -u | tr '\n' ' ')
-                [ -n "$f" ] && hit="pid $p: $f"
-            done
-            [ -n "$hit" ] && break
-            sleep 1
-        done
-        kill "$crpid" 2>/dev/null; wait "$crpid" 2>/dev/null
-        if [ -n "$hit" ]; then
-            res "Chromium hardware decode" PASS "playing 720p H.264, the codec device was opened: $hit"
-        else
-            res "Chromium hardware decode" FAIL "no /dev/video* or /dev/dma_heap* fd in any chromium process (software decode?): $(tail -3 "$W/chromium.log" | tr '\n' ' ')"
-        fi
-        rm -f "$clip"
-    else
-        res "Chromium hardware decode" SKIP "chromium or ffmpeg missing"
-    fi
-else
-    res "Browser hardware decode" SKIP "no mainline rkvdec device (boot the -browser variant: sudo tinker-boot-select browser, reboot)"
-fi
+browser_decode
 
 hdr "40-pin header"
 # pin:gpiochip:line:name  (plain GPIO pins; docs/GPIO.md)

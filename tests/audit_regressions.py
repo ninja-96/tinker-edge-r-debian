@@ -29,6 +29,35 @@ class Audit(unittest.TestCase):
         self.assertEqual(run.returncode, expected, (run.stdout, run.stderr))
         return run.stdout
 
+    def test_chroot_binfmt(self):
+        registry = self.work / "binfmt"
+        registry.mkdir()
+        spec = self.work / "qemu.conf"
+        spec.write_text(":qemu-aarch64:fixture")
+        helper = self.work / "chroot.sh"
+        helper.write_text((ROOT / "scripts/build-chroot.sh").read_text()
+                          .replace("/proc/sys/fs/binfmt_misc", str(registry))
+                          .replace("/usr/lib/binfmt.d/qemu-aarch64.conf", str(spec)))
+        self.command("uname", 'echo "$MACHINE"')
+        self.command("mountpoint", "exit 0")
+        self.env["MACHINE"] = "aarch64"
+        args = ["bash", "-ec", '. "$1"; ensure_binfmt', "_", helper]
+        self.execute(0, *args)
+        self.assertEqual(list(registry.iterdir()), [])
+        self.env["MACHINE"] = "x86_64"
+        (registry / "status").write_text("enabled")
+        self.execute(0, *args)
+        self.assertEqual((registry / "register").read_text(), spec.read_text())
+        entry = registry / "qemu-aarch64"
+        entry.write_text("enabled")
+        self.execute(0, *args)
+        self.assertEqual(entry.read_text(), "enabled")
+        entry.write_text("disabled")
+        (registry / "status").write_text("disabled")
+        self.execute(0, *args)
+        self.assertEqual(entry.read_text().strip(), "1")
+        self.assertEqual((registry / "status").read_text().strip(), "1")
+
     def test_ssh_and_log_status(self):
         scripts = self.work / "scripts"
         scripts.mkdir()

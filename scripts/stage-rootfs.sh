@@ -78,9 +78,6 @@ cp blobs/rockchip/LICENSE "$DOC/licenses/Rockchip-rkbin-LICENSE"
 cp blobs/README.md "$DOC/blobs-README.md"
 [ -d downloads/mpp/LICENSES ] && cp -a --no-preserve=ownership downloads/mpp/LICENSES "$DOC/licenses/mpp"
 [ -f downloads/gst-rockchip/COPYING ] && cp downloads/gst-rockchip/COPYING "$DOC/licenses/gst-rockchip-COPYING"
-for f in COPYING COPYING.MIT COPYING.LGPL; do
-    [ -f "downloads/libva-v4l2-request/$f" ] && cp "downloads/libva-v4l2-request/$f" "$DOC/licenses/v4l2-request-$f"
-done
 dpkg-query --admindir="$W/var/lib/dpkg" -W -f='${Package}\t${Version}\t${Architecture}\t${Source}\n' | sort > "$DOC/packages.txt"
 cp "$DOC/packages.txt" "$O/packages.txt"
 mkdir -p "$W/etc/systemd/system/multi-user.target.wants"

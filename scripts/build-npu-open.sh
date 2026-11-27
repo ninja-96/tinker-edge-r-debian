@@ -84,18 +84,18 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT "-static-libstdc++ -static-libgcc -Wl,--allow
 set(CMAKE_CXX_STANDARD_LIBRARIES "-ldl")
 T
 # flatc for the build machine (the cross build generates headers with it)
-mkdir -p build-flatc && cd build-flatc
+mkdir -p "build-flatc-$LR" && cd "build-flatc-$LR"
 cmake ../$LR/tflite/tools/cmake/native_tools/flatbuffers -DCMAKE_BUILD_TYPE=Release \
   -DFETCHCONTENT_FULLY_DISCONNECTED=ON -DFETCHCONTENT_SOURCE_DIR_FLATBUFFERS=/w/deps/flatbuffers >/dev/null
 make -j"$(nproc)" >/dev/null
 cd .. && mkdir -p build-timvx && cd build-timvx
 cmake ../TIM-VX -DCMAKE_TOOLCHAIN_FILE=/w/toolchain.cmake -DEXTERNAL_VIV_SDK=/w/sdk -DCMAKE_BUILD_TYPE=Release -DTIM_VX_ENABLE_TEST=OFF -DCMAKE_INSTALL_PREFIX=$PWD/install >/dev/null
 make -j"$(nproc)" install >/dev/null
-cd .. && mkdir -p build-delegate && cd build-delegate
+cd .. && mkdir -p "build-delegate-$LR" && cd "build-delegate-$LR"
 D=/w/deps
 cmake ../tflite-vx-delegate -DCMAKE_TOOLCHAIN_FILE=/w/toolchain.cmake -DCMAKE_BUILD_TYPE=Release \
-  -DLITERT_SOURCE_DIR=/w/$LR -DTENSORFLOW_SOURCE_DIR=/w/$TFT \
-  -DTIM_VX_INSTALL=/w/build-timvx/install -DTFLITE_HOST_TOOLS_DIR=/w/build-flatc \
+  -DLITERT_SOURCE_DIR=/w/$LR -DTENSORFLOW_SOURCE_DIR=/w/$TFT "-DTENSORFLOW_HEADERS_INCLUDE_DIR=/w/$TFT;/w/$TFT/third_party/xla" \
+  -DTIM_VX_INSTALL=/w/build-timvx/install -DTFLITE_HOST_TOOLS_DIR=/w/build-flatc-$LR \
   -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
   -DFETCHCONTENT_SOURCE_DIR_ABSEIL-CPP=$D/abseil-cpp -DFETCHCONTENT_SOURCE_DIR_EIGEN=$D/eigen -DFETCHCONTENT_SOURCE_DIR_FARMHASH=$D/farmhash \
   -DFETCHCONTENT_SOURCE_DIR_FFT2D=$D/fft2d -DFETCHCONTENT_SOURCE_DIR_FLATBUFFERS=$D/flatbuffers -DFETCHCONTENT_SOURCE_DIR_GEMMLOWP=$D/gemmlowp \

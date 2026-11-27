@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the stress and health test on a board over SSH (CPU, RAM, eMMC, GPU, network,
 # Wi-Fi/Bluetooth, then everything at once). Details: docs/TESTING.md
-#   scripts/test-board.sh [-d SECONDS] [HOST]
+#   scripts/test-board.sh [--browser-only] [-d SECONDS] [HOST]
 #   -d  seconds per load phase (default 60; the whole run takes about 8 x that)
 #   HOST defaults to tinker-edge-r.local. SSH_USER (debian) and BOARD_PASS (debian,
 #   used for sudo on the board) can be set in the environment. The image forces a password change
@@ -11,6 +11,8 @@
 # stopped by this script. The PC should be on wired Ethernet for a meaningful result.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+BROWSER=
+[ "${1:-}" = --browser-only ] && { BROWSER=--browser-only; shift; }
 D=60
 [ "${1:-}" = -d ] && { D=${2:?seconds}; shift 2; }
 HOST=${1:-tinker-edge-r.local}
@@ -33,19 +35,19 @@ echo "Connecting to $U@$HOST (enter the SSH password once)..."
 ssh -o ControlMaster=yes -o ControlPath="$CTL" -o ControlPersist=yes -o StrictHostKeyChecking=accept-new -fN "$U@$HOST"
 
 SRV=
-if command -v iperf3 >/dev/null; then
+if [ -z "$BROWSER" ] && command -v iperf3 >/dev/null; then
     iperf3 -s >/dev/null 2>&1 & IPERF_PID=$!
     ip=$(getent ahostsv4 "$HOST" | awk 'NR==1{print $1}')
     SRV=$(ip -4 route get "$ip" | grep -o 'src [0-9.]*' | cut -d' ' -f2)
     echo "iperf3 server on this PC: $SRV"
-else
+elif [ -z "$BROWSER" ]; then
     echo "iperf3 not installed on this PC: the network phase will be skipped"
 fi
 
-scp -q -o ControlPath="$CTL" scripts/board-selftest.sh "$U@$HOST:/tmp/board-selftest.sh"
+scp -q -o ControlPath="$CTL" scripts/{board-selftest.sh,check-browser-decode.py} "$U@$HOST:/tmp/"
 echo "Test running, log: $LOG"
 set +e
-printf '%s\n' "$PASS" | "${SSH[@]}" "sudo -S -p '' env DURATION=$D IPERF_SERVER=$SRV bash /tmp/board-selftest.sh" 2>&1 | tee "$LOG"
+printf '%s\n' "$PASS" | "${SSH[@]}" "sudo -S -p '' env DURATION=$D IPERF_SERVER=$SRV bash /tmp/board-selftest.sh $BROWSER" 2>&1 | tee "$LOG"
 result=("${PIPESTATUS[@]}")
 rc=${result[1]}
 if [ "$rc" = 0 ]; then rc=${result[2]}; fi
